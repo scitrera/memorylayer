@@ -1,0 +1,47 @@
+{
+  "name": "@scitrera/memorylayer-mcp-server",
+  "version": "0.0.3",
+  "description": "MCP (Model Context Protocol) server for MemoryLayer.ai",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "memorylayer-mcp": "dist/bin/memorylayer-mcp.js",
+    "memorylayer-hook": "dist/bin/memorylayer-hook.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/bin/memorylayer-mcp.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "memory",
+    "ai",
+    "llm",
+    "agent"
+  ],
+  "author": "Scitrera LLC <> (https://scitrera.ai)",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@scitrera/memorylayer-sdk": "file:../memorylayer-sdk-typescript"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scitrera/memorylayer"
+  }
+}

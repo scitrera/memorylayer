@@ -1,0 +1,31 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "memorylayer.ai",
+  "description": "Persistent memory System - never lose context to compaction again",
+  "owner": {
+    "name": "scitrera.ai",
+    "email": "open-source-team@scitrera.com"
+  },
+  "plugins": [
+    {
+      "name": "memorylayer",
+      "description": "Persistent memory system designed to work seamlessly with Claude agents. MemoryLayer proactively preserves important context before compaction and allows agents to recall relevant information on demand, ensuring critical knowledge is never lost.",
+      "version": "0.0.3",
+      "author": {
+        "name": "scitrera.ai",
+        "email": "open-source-team@scitrera.com"
+      },
+      "source": "/memorylayer-cc-plugin",
+      "category": "productivity",
+      "homepage": "https://memorylayer.ai",
+      "tags": [
+        "memory",
+        "context",
+        "persistence",
+        "knowledge-graph",
+        "recall",
+        "compaction"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "memorylayer",
+  "version": "0.0.3",
+  "description": "Persistent memory for Claude Code - never lose context to compaction again",
+  "author": {
+    "name": "scitrera.ai",
+    "email": "open-source-team@scitrera.com"
+  },
+  "homepage": "https://memorylayer.ai",
+  "repository": "https://github.com/scitrera/memorylayer",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "context",
+    "persistence",
+    "knowledge-graph",
+    "recall",
+    "compaction"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "name": "@scitrera/memorylayer-sdk",
+  "version": "0.0.3",
+  "description": "TypeScript SDK for MemoryLayer.ai - memory infrastructure for AI agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "memorylayer",
+    "ai",
+    "memory",
+    "agents",
+    "llm",
+    "rag",
+    "semantic-memory",
+    "episodic-memory"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scitrera/memorylayer.git"
+  },
+  "author": "Scitrera",
+  "license": "Apache-2.0"
+}

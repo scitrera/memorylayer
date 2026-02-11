@@ -1,0 +1,65 @@
+/* MemoryLayer brand customizations */
+:root {
+  /* Slate-based gray scale from web/tailwind.config.mjs */
+  --sl-color-accent-low: #1e3a8a; /* brand-900 */
+  --sl-color-accent: #3b82f6;     /* brand-500 */
+  --sl-color-accent-high: #dbeafe; /* brand-100 */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #f1f5f9;      /* slate-100 */
+  --sl-color-gray-2: #cbd5e1;      /* slate-300 */
+  --sl-color-gray-3: #94a3b8;      /* slate-400 */
+  --sl-color-gray-4: #475569;      /* slate-600 */
+  --sl-color-gray-5: #1e293b;      /* slate-800 */
+  --sl-color-gray-6: #0f172a;      /* slate-900 */
+  --sl-color-black: #020617;       /* slate-950 */
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #dbeafe;  /* brand-100 */
+  --sl-color-accent: #2563eb;      /* brand-600 */
+  --sl-color-accent-high: #1e3a8a; /* brand-900 */
+  --sl-color-gray-1: #0f172a;      /* slate-900 */
+  --sl-color-gray-2: #1e293b;      /* slate-800 */
+  --sl-color-gray-3: #475569;      /* slate-600 */
+  --sl-color-gray-4: #94a3b8;      /* slate-400 */
+  --sl-color-gray-5: #cbd5e1;      /* slate-300 */
+  --sl-color-gray-6: #f1f5f9;      /* slate-100 */
+  --sl-color-gray-7: #f8fafc;      /* slate-50 */
+}
+
+/* Make the footer full-width by breaking out of the main container */
+.sl-footer {
+    width: 100%;
+    margin-bottom: -5rem; /* Offset any container padding/margin below */
+}
+
+@media (min-width: 50rem) {
+    /* On large screens, we need to handle the sidebar.
+       Starlight's content container usually has a margin-inline-start when the sidebar is present.
+       However, the footer component is INSIDE the main content area's container.
+       To make it look like a full-width footer of the CONTENT area (excluding sidebar),
+       we can just let it be 100% width of its parent.
+    */
+    .sl-footer {
+        width: calc(100% + 2 * var(--sl-content-pad-x));
+        margin-left: calc(-1 * var(--sl-content-pad-x));
+    }
+}
+
+/* On extra large screens where the TOC is also fixed, we might need to adjust, 
+   but usually var(--sl-content-pad-x) covers the immediate container padding. */
+
+/* For splash templates (like the index page) there is no sidebar, but Starlight might still apply similar constraints. */
+[data-template="splash"] .sl-footer {
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    right: 50%;
+    margin-left: -50vw;
+    margin-right: -50vw;
+}
+
+/* Ensure the footer background stays consistent and full-bleed where intended */
+[data-template="splash"] .sl-footer {
+    background-color: var(--sl-color-gray-6);
+}

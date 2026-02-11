@@ -1,0 +1,18 @@
+# Source files (only ship dist/)
+src/
+bin/
+tsconfig.json
+
+# Development files
+*.log
+.env*
+.vscode/
+.idea/
+
+# Testing
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db

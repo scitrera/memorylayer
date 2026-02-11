@@ -1,0 +1,10 @@
+.astro/
+.omc/
+dist/
+node_modules/
+node-modules/
+.venv/
+__pycache__/
+*.pyc
+uv.lock
+package-lock.json

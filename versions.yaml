@@ -1,0 +1,10 @@
+# Authoritative Versions for all MemoryLayer packages
+# scripts/update-versions.py can check all versions against this file and update all package to be in sync
+
+memorylayer-cc-plugin: 0.0.3
+memorylayer-core-python: 0.0.3
+memorylayer-mcp-typescript: 0.0.3
+memorylayer-sdk-langchain-python: 0.0.3
+memorylayer-sdk-llamaindex-python: 0.0.3
+memorylayer-sdk-python: 0.0.3
+memorylayer-sdk-typescript: 0.0.3

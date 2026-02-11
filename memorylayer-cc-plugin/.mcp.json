@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "memorylayer": {
+      "command": "memorylayer-mcp",
+      "env": {
+        "MEMORYLAYER_URL": "${MEMORYLAYER_URL:-http://localhost:61001}"
+      }
+    }
+  }
+}

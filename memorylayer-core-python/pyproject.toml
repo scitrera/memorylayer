@@ -1,0 +1,127 @@
+[project]
+name = "memorylayer-server"
+version = "0.0.3"
+description = "MemoryLayer.ai - API-first memory infrastructure for LLM-powered agents (open source core)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache 2.0" }
+authors = [
+    { name = "Scitrera", email = "open-source-team@scitrera.com" }
+]
+keywords = ["ai", "memory", "agents", "llm", "vector-search", "rag"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "scitrera-app-framework>=0.0.67",
+    "scitrera-rt-data>=0.0.7",
+    "fastapi>=0.128.7",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "sqlalchemy[asyncio]>=2.0.46",
+    "aiosqlite>=0.22.1",
+    "sqlite-vec>=0.1.7a2", # NOTE: prerelease version required for proper arm64 support without custom rerelease
+    "numpy>2.0.0",
+    "httpx>=0.28.1",
+    "python-multipart>=0.0.22",
+    "click>=8.3.1",
+]
+
+[project.optional-dependencies]
+# OpenAI API embeddings and LLM (bring your own key)
+openai = [
+    "openai>=2.18.0",
+    "tiktoken>=0.12.0",
+]
+
+# Anthropic Claude LLM provider
+anthropic = [
+    "anthropic>=0.79.0",
+]
+
+# Google GenAI (Gemini) LLM provider
+google = [
+    "google-genai>=1.62.0",
+]
+
+# Local embedding providers (sentence-transformers)
+local = [
+    "sentence-transformers>=5.2.2",
+]
+
+# Context environment sandbox executor
+context = [
+    "smolagents>=1.0,<2.0",
+]
+
+# All embedding providers
+embeddings = [
+    "memorylayer-server[openai,local,google]",
+]
+
+# Development dependencies
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "respx>=0.22.0",
+    "ruff>=0.15.0",
+    "mypy>=1.19.1",
+]
+
+# LLM providers (bring your own key)
+llm = [
+    "memorylayer-server[openai,anthropic,google]",
+]
+
+# Full installation with all features
+all = [
+    "memorylayer-server[embeddings,llm,context,dev]",
+]
+
+[project.scripts]
+memorylayer = "memorylayer_server.cli:cli"
+
+[project.urls]
+Homepage = "https://memorylayer.ai"
+Documentation = "https://docs.memorylayer.ai"
+Repository = "https://github.com/scitrera/memorylayer"
+Issues = "https://github.com/scitrera/memorylayer/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memorylayer_server"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/memorylayer_server"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_return_any = true
+warn_unused_configs = true

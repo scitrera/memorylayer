@@ -1,0 +1,201 @@
+# Release workflow: build and publish all packages on version tags
+#
+# Trigger: push a tag matching 'v*' (e.g., v0.0.3) to main
+#
+# Required setup:
+#   PyPI  - Configure trusted publishing for each Python package at
+#           https://pypi.org/manage/project/<name>/settings/publishing/
+#           Set: Owner=scitrera, Repo=memorylayer, Workflow=release.yml, Environment=pypi
+#   npm   - Create an automation token at https://www.npmjs.com/settings/<user>/tokens
+#           Add as repository secret: NPM_TOKEN
+#   Docker Hub - Create an access token at https://hub.docker.com/settings/security
+#                Add as repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Cancel any in-progress release for a previous tag
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Python packages → PyPI (trusted publishing, no token needed)
+  # ──────────────────────────────────────────────────────────────────
+  publish-python:
+    name: "PyPI: ${{ matrix.package.name }}"
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC for PyPI trusted publishing
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - { dir: memorylayer-sdk-python, name: memorylayer-client }
+          - { dir: memorylayer-core-python, name: memorylayer-server }
+          - { dir: memorylayer-sdk-langchain-python, name: memorylayer-langchain }
+          - { dir: memorylayer-sdk-llamaindex-python, name: memorylayer-llamaindex }
+    environment:
+      name: pypi
+      url: https://pypi.org/project/${{ matrix.package.name }}/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install --upgrade build
+
+      - name: Build package
+        working-directory: ${{ matrix.package.dir }}
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ matrix.package.dir }}/dist/
+
+  # ──────────────────────────────────────────────────────────────────
+  # TypeScript SDK → npm
+  # ──────────────────────────────────────────────────────────────────
+  publish-npm-sdk:
+    name: "npm: @scitrera/memorylayer-sdk"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        working-directory: memorylayer-sdk-typescript
+        run: npm install
+
+      - name: Build
+        working-directory: memorylayer-sdk-typescript
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: memorylayer-sdk-typescript
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────────────
+  # TypeScript MCP server → npm (after SDK is published)
+  # ──────────────────────────────────────────────────────────────────
+  publish-npm-mcp:
+    name: "npm: @scitrera/memorylayer-mcp-server"
+    needs: publish-npm-sdk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Replace local SDK reference with registry version
+        working-directory: memorylayer-mcp-typescript
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i 's|"file:../memorylayer-sdk-typescript"|"^'"${VERSION}"'"|' package.json
+
+      - name: Wait for SDK availability on npm
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            if npm view "@scitrera/memorylayer-sdk@${VERSION}" version 2>/dev/null; then
+              echo "SDK v${VERSION} is available on npm"
+              exit 0
+            fi
+            echo "Waiting for @scitrera/memorylayer-sdk@${VERSION} (attempt ${i}/30)..."
+            sleep 10
+          done
+          echo "::error::SDK not available on npm after 5 minutes"
+          exit 1
+
+      - name: Install dependencies
+        working-directory: memorylayer-mcp-typescript
+        run: npm install
+
+      - name: Build
+        working-directory: memorylayer-mcp-typescript
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: memorylayer-mcp-typescript
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────────────
+  # Docker image → Docker Hub (after memorylayer-server is on PyPI)
+  # ──────────────────────────────────────────────────────────────────
+  publish-docker:
+    name: "Docker: scitrera/memorylayer-server"
+    needs: publish-python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for memorylayer-server on PyPI
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://pypi.org/pypi/memorylayer-server/${VERSION}/json")
+            if [ "${STATUS}" = "200" ]; then
+              echo "memorylayer-server ${VERSION} is available on PyPI"
+              exit 0
+            fi
+            echo "Waiting for memorylayer-server ${VERSION} on PyPI (attempt ${i}/30)..."
+            sleep 10
+          done
+          echo "::error::memorylayer-server not available on PyPI after 5 minutes"
+          exit 1
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: scitrera/memorylayer-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

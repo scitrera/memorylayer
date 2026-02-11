@@ -1,0 +1,138 @@
+{
+  "description": "MemoryLayer hooks for proactive memory storage. Uses command hooks to inject recalled context.",
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "CRITICAL: Context compaction is about to occur. You MUST preserve important information to MemoryLayer before context is lost.\n\nHook input: $ARGUMENTS\n\nSTEP 1: Read the conversation transcript from the transcript_path in the hook input above. The file is JSONL format with conversation messages.\n\nSTEP 2: Analyze the transcript to identify important information worth preserving:\n\nCRITICAL (importance 0.9):\n- User directives and instructions — \"always do X\", \"never do Y\", \"prefer X over Y\" (type: \"semantic\", subtype: \"directive\")\n\nHIGH (importance 0.7-0.8):\n- Decisions made with rationale (type: \"semantic\", subtype: \"decision\")\n- Problems solved — problem + solution pairs (type: \"semantic\", subtype: \"fix\")\n- Current task state and progress (type: \"working\")\n\nNORMAL (importance 0.5-0.6):\n- Patterns discovered (type: \"procedural\", subtype: \"code_pattern\")\n- Files actively being worked on (type: \"working\", tags: [\"active-file\"])\n\nSTEP 3: Use `memory_remember` to store each important piece of context with appropriate type, subtype, importance, and tags.\n\nSTEP 4: Call `memory_session_commit` to checkpoint working memory to long-term storage.\n\nSTEP 5: If a context environment session is active, call `memory_context_checkpoint` to persist sandbox state before compaction. The SessionStart hook will automatically detect and inject sandbox state when the session resumes.\n\nBriefly report what was preserved.",
+            "model": "claude-sonnet-4-5",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook SessionStart",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook PreToolUse",
+            "timeout": 8000
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook PreToolUse",
+            "timeout": 8000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook PostToolUse",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook PostToolUse",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook PostToolUse",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook Stop",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*\\b(remember|recall|what did we|how did we|remind me|what was the|what were the|what do you (know|remember))\\b.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook UserPromptSubmit",
+            "timeout": 8000
+          }
+        ]
+      },
+      {
+        "matcher": ".*\\b(review|assess|analyze|evaluate|audit|investigate|explore|research|compare|status|state of|readiness|gap analysis)\\b.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook UserPromptSubmit",
+            "timeout": 8000
+          }
+        ]
+      },
+      {
+        "matcher": ".*\\b(implement|build|create|add|fix|refactor|update|change|modify)\\b.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook UserPromptSubmit",
+            "timeout": 8000
+          }
+        ]
+      },
+      {
+        "matcher": ".*\\b(error|bug|issue|broken|failing|crash|exception|doesn't work|not working)\\b.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook UserPromptSubmit",
+            "timeout": 8000
+          }
+        ]
+      }
+    ]
+  }
+}
