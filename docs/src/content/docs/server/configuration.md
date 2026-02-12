@@ -13,7 +13,8 @@ The MemoryLayer server can be configured via environment variables:
 |----------|-------------|---------|
 | `MEMORYLAYER_SERVER_HOST` | Server bind address | `127.0.0.1` |
 | `MEMORYLAYER_SERVER_PORT` | Server port | `61001` |
-| `MEMORYLAYER_SQLITE_STORAGE_PATH` | SQLite database path | `memorylayer.db` |
+| `MEMORYLAYER_DATA_DIR` | Server data directory | `~/.config/memorylayer-server` |
+| `MEMORYLAYER_SQLITE_STORAGE_PATH` | SQLite database path (relative to data dir) | `memorylayer.db` |
 | `MEMORYLAYER_EMBEDDING_PROVIDER` | Embedding provider to use | `local` |
 | `MEMORYLAYER_EMBEDDING_OPENAI_API_KEY` | OpenAI API key (for OpenAI embeddings) | — |
 | `MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY` | Google API key (for Google GenAI embeddings) | — |
@@ -154,8 +155,12 @@ The SQLite database is a single file that contains all memories, embeddings, ass
 
 ### Database Location
 
-By default, the database is created in the current working directory as `memorylayer.db`. For production deployments, specify an explicit path:
+The default storage path is `memorylayer.db` (relative to the data directory). The data directory defaults to `~/.config/memorylayer-server/` and can be overridden with `MEMORYLAYER_DATA_DIR`, so the database is typically created at `~/.config/memorylayer-server/memorylayer.db`.
 
 ```bash
+# Override the data directory
+export MEMORYLAYER_DATA_DIR="/var/lib/memorylayer"
+
+# Or specify an explicit database path
 export MEMORYLAYER_SQLITE_STORAGE_PATH="/var/lib/memorylayer/data.db"
 ```
