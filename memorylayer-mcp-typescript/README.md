@@ -2,7 +2,7 @@
 
 TypeScript MCP (Model Context Protocol) server for [MemoryLayer.ai](https://memorylayer.ai).
 
-Provides 16 memory tools for LLM agents to store, recall, synthesize, and manage information across sessions.
+Provides 21 memory tools for LLM agents to store, recall, synthesize, and manage information across sessions.
 
 ## Installation
 
@@ -121,7 +121,7 @@ Store a new memory for later recall.
   type: "semantic",        // episodic, semantic, procedural, working
   importance: 0.8,         // 0.0 - 1.0
   tags: ["preference", "typescript"],
-  subtype: "Preference"    // Optional domain classification
+  subtype: "preference"    // Optional domain classification
 }
 ```
 
@@ -144,9 +144,9 @@ Synthesize insights across multiple memories.
 ```typescript
 {
   query: "What patterns have we seen with database performance?",
-  max_tokens: 500,
+  detail_level: "overview",  // "abstract", "overview", or "full"
   include_sources: true,
-  depth: 2                // Association traversal depth
+  depth: 2                   // Association traversal depth
 }
 ```
 
@@ -217,7 +217,7 @@ Find contradictions and inconsistencies.
 }
 ```
 
-### Session Management Tools (3)
+### Session Management Tools (4)
 
 These tools enable working memory that persists across tool calls within a session.
 
@@ -240,8 +240,111 @@ End the current session and optionally commit working memory.
 }
 ```
 
-#### 12. `memory_session_status`
+#### 12. `memory_session_commit`
+Checkpoint working memory mid-session without ending it.
+
+```typescript
+{
+  importance_threshold: 0.5,  // Min importance for extracted memories
+  clear_after_commit: false   // Clear working memory after commit
+}
+```
+
+#### 13. `memory_session_status`
 Get current session status including working memory summary.
+
+```typescript
+{}  // No parameters required
+```
+
+### Context Environment Tools (8)
+
+Server-side Python sandbox for code execution, memory analysis, and LLM-powered queries over loaded data.
+
+#### 14. `memory_context_exec`
+Execute Python code in the server-side sandbox. Variables persist between calls.
+
+```typescript
+{
+  code: "import pandas as pd\ndf = pd.DataFrame(memories)",
+  result_var: "df",           // Optional: store result in variable
+  return_result: true,        // Return output to caller
+  max_return_chars: 10000     // Truncate large outputs
+}
+```
+
+#### 15. `memory_context_inspect`
+Inspect sandbox variables (overview or detailed view of specific variable).
+
+```typescript
+{
+  variable: "df",             // Optional: specific variable to inspect
+  preview_chars: 200          // Characters in value previews
+}
+```
+
+#### 16. `memory_context_load`
+Load memories into sandbox via semantic search.
+
+```typescript
+{
+  var: "relevant_memories",
+  query: "authentication bugs",
+  limit: 50,
+  types: ["semantic", "episodic"],
+  tags: ["bug-fix"],
+  min_relevance: 0.6,
+  include_embeddings: false
+}
+```
+
+#### 17. `memory_context_inject`
+Inject data directly into sandbox as a variable.
+
+```typescript
+{
+  key: "config",
+  value: '{"api_url": "https://api.example.com"}',
+  parse_json: true            // Parse as JSON before storing
+}
+```
+
+#### 18. `memory_context_query`
+Ask server-side LLM a question using sandbox variables as context.
+
+```typescript
+{
+  prompt: "Summarize the key patterns in these memories",
+  variables: ["relevant_memories", "df"],
+  max_context_chars: 50000,   // Optional limit
+  result_var: "summary"       // Optional: store response
+}
+```
+
+#### 19. `memory_context_rlm`
+Run Recursive Language Model loop for iterative reasoning.
+
+```typescript
+{
+  goal: "Identify root causes of authentication failures",
+  memory_query: "authentication errors",  // Optional: pre-load memories
+  memory_limit: 100,
+  max_iterations: 10,
+  variables: ["error_logs"],
+  result_var: "analysis",
+  detail_level: "detailed"    // "brief", "standard", or "detailed"
+}
+```
+
+#### 20. `memory_context_status`
+Get sandbox environment status and resource usage.
+
+```typescript
+{}  // No parameters required
+```
+
+#### 21. `memory_context_checkpoint`
+Checkpoint sandbox state for persistence (enterprise deployments).
 
 ```typescript
 {}  // No parameters required
@@ -287,7 +390,7 @@ The MCP server wraps the `@scitrera/memorylayer-sdk` TypeScript SDK, providing a
 memorylayer-mcp-typescript/
 ├── src/
 │   ├── types.ts       # TypeScript types for MCP tools
-│   ├── tools.ts       # MCP tool definitions (12 tools)
+│   ├── tools.ts       # MCP tool definitions (21 tools)
 │   ├── client.ts      # Wrapper around @scitrera/memorylayer-sdk
 │   ├── session.ts     # Local session state management
 │   ├── handlers.ts    # Tool handler implementations

@@ -1,11 +1,11 @@
-# MemoryLayer Python SDK
+# MemoryLayer.ai Python SDK
 
 Python SDK for [MemoryLayer.ai](https://memorylayer.ai) - Memory infrastructure for AI agents.
 
 ## Installation
 
 ```bash
-pip install memorylayer-client
+pip install memorylayer
 ```
 
 ## Quick Start
@@ -75,11 +75,15 @@ from memorylayer import RecallMode, SearchTolerance
 results = await client.recall(
     query="what frameworks does the user prefer?",
     types=[MemoryType.SEMANTIC],
-    mode=RecallMode.RAG,  # or RecallMode.LLM, RecallMode.HYBRID
+    mode=RecallMode.RAG,  # Active mode: vector similarity + graph traversal
     limit=10,
     min_relevance=0.7,
-    tolerance=SearchTolerance.MODERATE
+    tolerance=SearchTolerance.MODERATE,
+    include_associations=True  # Include related memories via graph traversal
 )
+
+# Note: LLM and Hybrid modes are deprecated. Use Context Environment's
+# context_rlm() for LLM-powered analysis instead.
 ```
 
 ### Reflect (Synthesize Memories)
@@ -87,7 +91,7 @@ results = await client.recall(
 ```python
 reflection = await client.reflect(
     query="summarize everything about the user's development workflow",
-    max_tokens=500,
+    detail_level="standard",  # "brief", "standard", or "detailed"
     include_sources=True
 )
 
@@ -174,7 +178,92 @@ await client.delete_session(session.id)
 
 ```python
 briefing = await client.get_briefing(lookback_hours=24)
-print(briefing.recent_activity_summary)
+print(briefing.recent_activity)
+```
+
+## Context Environment
+
+The Context Environment provides server-side Python execution for advanced memory analysis. Execute code, load memories into variables, and use LLM-powered reasoning.
+
+**Note:** Context Environment operations require an active session. Call `set_session()` first.
+
+### Execute Python Code
+
+```python
+# Set active session
+client.set_session(session.id)
+
+# Execute code in sandbox
+await client.context_exec("import pandas as pd")
+await client.context_exec("data = [1, 2, 3, 4, 5]")
+
+# Execute and get result
+result = await client.context_exec("sum(data)")
+print(result["result"])  # 15
+```
+
+### Load Memories into Sandbox
+
+```python
+# Load memories as a variable
+await client.context_load(
+    var="preferences",
+    query="user preferences",
+    limit=20,
+    min_relevance=0.7
+)
+
+# Inspect loaded data
+state = await client.context_inspect("preferences")
+print(state["type"], state["preview"])
+```
+
+### Query with LLM
+
+```python
+# Ask LLM to analyze sandbox variables
+result = await client.context_query(
+    prompt="Summarize the user's preferences and find patterns",
+    variables=["preferences"]
+)
+print(result["response"])
+```
+
+### Recursive Language Model (RLM)
+
+```python
+# Run autonomous reasoning loop
+result = await client.context_rlm(
+    goal="Analyze coding preferences and identify contradictions",
+    memory_query="coding preferences",
+    max_iterations=10,
+    detail_level="detailed"
+)
+print(result["result"])
+```
+
+### Inject Values
+
+```python
+# Inject data into sandbox
+await client.context_inject(
+    key="config",
+    value={"debug": True, "max_retries": 3}
+)
+```
+
+### Status and Cleanup
+
+```python
+# Check sandbox status
+status = await client.context_status()
+print(f"Variables: {status['variable_count']}")
+
+# Checkpoint state (for enterprise persistence)
+await client.context_checkpoint()
+
+# Clean up sandbox
+await client.context_cleanup()
 ```
 
 ## Workspace Management
@@ -211,37 +300,62 @@ print(schema["relationship_types"])
 
 - **Solution** - Working fixes to problems
 - **Problem** - Issues encountered
-- **CodePattern** - Reusable patterns
+- **Code Pattern** - Reusable patterns
 - **Fix** - Bug fixes with context
 - **Error** - Error patterns and resolutions
 - **Workflow** - Process knowledge
 - **Preference** - User/project preferences
 - **Decision** - Architectural decisions
+- **Directive** - User instructions/constraints
 
 ## Relationship Types
 
-Link memories with typed relationships:
+Link memories with typed relationships organized into 11 categories. The SDK supports 60+ relationship types:
 
 ```python
 from memorylayer import RelationshipType
 
-# Causal
+# Causal (4 types)
 RelationshipType.CAUSES
 RelationshipType.TRIGGERS
 RelationshipType.LEADS_TO
 RelationshipType.PREVENTS
 
-# Solution
+# Solution (4 types)
 RelationshipType.SOLVES
 RelationshipType.ADDRESSES
+RelationshipType.ALTERNATIVE_TO
 RelationshipType.IMPROVES
 
-# Learning
+# Learning (4 types)
 RelationshipType.BUILDS_ON
 RelationshipType.CONTRADICTS
+RelationshipType.CONFIRMS
 RelationshipType.SUPERSEDES
 
-# ... and more (26 total)
+# Similarity (3 types)
+RelationshipType.SIMILAR_TO
+RelationshipType.VARIANT_OF
+RelationshipType.RELATED_TO
+
+# Workflow (4 types)
+RelationshipType.FOLLOWS
+RelationshipType.DEPENDS_ON
+RelationshipType.ENABLES
+RelationshipType.BLOCKS
+
+# Quality (3 types)
+RelationshipType.EFFECTIVE_FOR
+RelationshipType.PREFERRED_OVER
+RelationshipType.DEPRECATED_BY
+
+# Context (4 types)
+RelationshipType.OCCURS_IN
+RelationshipType.APPLIES_TO
+RelationshipType.WORKS_WITH
+RelationshipType.REQUIRES
+
+# ... and more categories (11 total)
 ```
 
 ## Error Handling
@@ -250,7 +364,6 @@ RelationshipType.SUPERSEDES
 from memorylayer import (
     MemoryLayerError,
     AuthenticationError,
-    AuthorizationError,
     NotFoundError,
     ValidationError,
     RateLimitError,
@@ -263,12 +376,14 @@ except NotFoundError:
     print("Memory not found")
 except AuthenticationError:
     print("Invalid API key")
-except AuthorizationError:
-    print("Access denied")
+except ValidationError as e:
+    print(f"Validation error: {e}")
 except RateLimitError:
     print("Rate limit exceeded")
 except ServerError as e:
     print(f"Server error: {e.status_code}")
+except MemoryLayerError as e:
+    print(f"MemoryLayer error: {e}")
 ```
 
 ## Configuration
@@ -312,7 +427,7 @@ ruff format src/memorylayer
 
 ## License
 
-Apache 2.0 License - see LICENSE file for details.
+Apache 2.0 License
 
 ## Links
 

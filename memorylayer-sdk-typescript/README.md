@@ -39,8 +39,9 @@ console.log(result.memories);
 
 - **Full TypeScript Support** - Complete type definitions included
 - **Memory Operations** - Remember, recall, reflect, forget, decay
-- **Relationship Graph** - Link memories with 60+ typed relationships
+- **Relationship Graph** - Link memories with 60+ relationship types organized into 11 categories
 - **Session Management** - Working memory with TTL and commit
+- **Context Environment** - Server-side Python sandbox for data operations
 - **Batch Operations** - Bulk create, update, delete
 - **Graph Traversal** - Multi-hop relationship queries
 - **Error Handling** - Typed exception hierarchy
@@ -80,7 +81,7 @@ const result = await client.recall("authentication patterns", {
   minRelevance: 0.6,
   includeAssociations: true,
   createdAfter: new Date("2024-01-01"),
-  mode: RecallMode.RAG,        // or LLM, HYBRID
+  mode: RecallMode.RAG,        // RAG is the active mode (vector + graph)
   detailLevel: DetailLevel.FULL, // or ABSTRACT, OVERVIEW
 });
 ```
@@ -91,7 +92,7 @@ const result = await client.recall("authentication patterns", {
 const reflection = await client.reflect(
   "What patterns have we learned about error handling?",
   {
-    maxTokens: 1000,
+    detailLevel: "full",  // "abstract", "overview", or "full"
     depth: 3,
     types: [MemoryType.PROCEDURAL],
     includeSources: true,
@@ -142,13 +143,13 @@ console.log(`Successful: ${result.successful}, Failed: ${result.failed}`);
 ## Associations
 
 ```typescript
-import { RelationshipType } from "@scitrera/memorylayer-sdk";
+import { RELATIONSHIP_TYPES } from "@scitrera/memorylayer-sdk";
 
 // Create relationships between memories
 const association = await client.associate(
   "mem-problem-123",
   "mem-solution-456",
-  RelationshipType.SOLVES,
+  RELATIONSHIP_TYPES.SOLVES,
   0.9
 );
 
@@ -156,7 +157,7 @@ const association = await client.associate(
 const association = await client.createAssociation({
   sourceId: "mem-problem-123",
   targetId: "mem-solution-456",
-  relationship: RelationshipType.SOLVES,
+  relationship: RELATIONSHIP_TYPES.SOLVES,
   strength: 0.9,
   metadata: { verified: true },
 });
@@ -166,7 +167,7 @@ const associations = await client.getAssociations("mem-123", "both");
 
 // Traverse the knowledge graph
 const result = await client.traverseGraph("mem-123", {
-  relationshipTypes: [RelationshipType.CAUSES, RelationshipType.LEADS_TO],
+  relationshipTypes: [RELATIONSHIP_TYPES.CAUSES, RELATIONSHIP_TYPES.LEADS_TO],
   maxDepth: 3,
   direction: "both",
   minStrength: 0.5,
@@ -269,6 +270,7 @@ enum MemorySubtype {
   WORKFLOW = "workflow",
   PREFERENCE = "preference",
   DECISION = "decision",
+  DIRECTIVE = "directive",
   PROFILE = "profile",
   ENTITY = "entity",
   EVENT = "event",
@@ -279,15 +281,15 @@ enum MemorySubtype {
 
 ```typescript
 enum RecallMode {
-  RAG = "rag",       // Vector similarity search
-  LLM = "llm",       // LLM-powered semantic search
-  HYBRID = "hybrid", // Combination of both
+  RAG = "rag",       // Active: Vector similarity + graph traversal
+  LLM = "llm",       // Deprecated: LLM-powered semantic search
+  HYBRID = "hybrid", // Deprecated: Combination of both
 }
 ```
 
 ### RelationshipType
 
-60+ relationship types across 11 categories. Most commonly used:
+The SDK exports `RELATIONSHIP_TYPES` as a constants object (not an enum). RelationshipType is defined as `type string`. The server supports 60+ relationship types organized into 11 categories. Most commonly used:
 
 - **Hierarchical**: `parent_of`, `child_of`, `part_of`, `contains`, `instance_of`, `subtype_of`
 - **Causal**: `causes`, `triggers`, `leads_to`, `prevents`
@@ -300,6 +302,11 @@ enum RecallMode {
 - **Temporal**: `precedes`, `concurrent_with`, `follows_temporally`
 - **Refinement**: `refines`, `abstracts`, `specializes`, `generalizes`
 - **Reference**: `references`, `referenced_by`
+
+Import with:
+```typescript
+import { RELATIONSHIP_TYPES } from "@scitrera/memorylayer-sdk";
+```
 
 Use `getWorkspaceSchema()` to list all available types.
 
@@ -334,6 +341,43 @@ try {
 }
 ```
 
+## Context Environment
+
+The TypeScript SDK provides access to the server-side Python sandbox for data operations:
+
+```typescript
+// Execute Python code
+const result = await client.contextExec("import pandas as pd; df = pd.DataFrame({'a': [1,2,3]})");
+
+// Inspect sandbox variables
+const vars = await client.contextInspect({ variable: "df" });
+
+// Load memories into sandbox
+await client.contextLoad("memories_var", "error handling patterns", { limit: 50 });
+
+// Inject data into sandbox
+await client.contextInject("config", JSON.stringify({ key: "value" }), { parseJson: true });
+
+// Query data using LLM
+const answer = await client.contextQuery("What is the average value?", ["df"]);
+
+// Run Reason-Learn-Memory loop
+const synthesis = await client.contextRlm("Analyze error patterns", {
+  memoryQuery: "errors and fixes",
+  maxIterations: 10,
+  detailLevel: "detailed"
+});
+
+// Check sandbox status
+const status = await client.contextStatus();
+
+// Checkpoint sandbox state
+await client.contextCheckpoint();
+
+// Clean up sandbox
+await client.contextCleanup();
+```
+
 ## Configuration
 
 ```typescript
@@ -365,7 +409,7 @@ This SDK is written in TypeScript and provides full type definitions out of the 
 
 ## License
 
-Apache 2.0 License - see LICENSE file for details.
+Apache 2.0 License
 
 ## Links
 
