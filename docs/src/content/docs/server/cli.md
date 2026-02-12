@@ -57,19 +57,27 @@ Show version information.
 memorylayer version
 ```
 
-### memorylayer info
+[//]: # (### memorylayer info)
 
-Show system information and configuration.
+[//]: # ()
+[//]: # (Show system information and configuration.)
 
-```bash
-memorylayer info [OPTIONS]
-```
+[//]: # ()
+[//]: # (```bash)
 
-**Options:**
+[//]: # (memorylayer info [OPTIONS])
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--format` | Output format (`text` or `json`) | `text` |
+[//]: # (```)
+
+[//]: # ()
+[//]: # (**Options:**)
+
+[//]: # ()
+[//]: # (| Option | Description | Default |)
+
+[//]: # (|--------|-------------|---------|)
+
+[//]: # (| `--format` | Output format &#40;`text` or `json`&#41; | `text` |)
 
 ### memorylayer --help
 
