@@ -1,18 +1,18 @@
 ---
-import type { Props } from '@astrojs/starlight/props';
-import { Icon } from '@astrojs/starlight/components';
+import type {Props} from '@astrojs/starlight/props';
+import {Icon} from '@astrojs/starlight/components';
 
 const links = {
     product: [
-        { name: 'Features', href: 'https://memorylayer.ai#features' },
-        { name: 'Use Cases', href: 'https://memorylayer.ai#use-cases' },
-        { name: 'Pricing', href: 'https://memorylayer.ai#pricing' },
+        {name: 'Features', href: 'https://memorylayer.ai#features'},
+        {name: 'Use Cases', href: 'https://memorylayer.ai#use-cases'},
+        {name: 'Pricing', href: 'https://memorylayer.ai#pricing'},
     ],
     developers: [
-        { name: 'Documentation', href: '/' },
-        { name: 'Python SDK', href: 'https://github.com/scitrera/memorylayer/tree/main/oss/memorylayer-sdk-python' },
-        { name: 'TypeScript SDK', href: 'https://github.com/scitrera/memorylayer/tree/main/oss/memorylayer-sdk-typescript' },
-        { name: 'MCP Server', href: 'https://github.com/scitrera/memorylayer/tree/main/oss/memorylayer-mcp-typescript' },
+        {name: 'Documentation', href: '/'},
+        {name: 'Python SDK', href: 'https://github.com/scitrera/memorylayer/tree/main/memorylayer-sdk-python'},
+        {name: 'TypeScript SDK', href: 'https://github.com/scitrera/memorylayer/tree/main/memorylayer-sdk-typescript'},
+        {name: 'MCP Server', href: 'https://github.com/scitrera/memorylayer/tree/main/memorylayer-mcp-typescript'},
     ],
 };
 ---
@@ -36,14 +36,15 @@ const links = {
                     Memory infrastructure for AI agents. Give your AI a brain that remembers.
                 </p>
                 <div class="social-links">
-                    <a href="https://github.com/scitrera/memorylayer" target="_blank" rel="noopener noreferrer" aria-label="GitHub" class="social-link">
-                        <Icon name="github" size="1.25rem" />
+                    <a href="https://github.com/scitrera/memorylayer" target="_blank" rel="noopener noreferrer"
+                       aria-label="GitHub" class="social-link">
+                        <Icon name="github" size="1.25rem"/>
                     </a>
                     <a href="/" aria-label="Documentation" class="social-link">
-                        <Icon name="open-book" size="1.25rem" />
+                        <Icon name="open-book" size="1.25rem"/>
                     </a>
                     <a href="mailto:sales@scitrera.com" aria-label="Email" class="social-link">
-                        <Icon name="email" size="1.25rem" />
+                        <Icon name="email" size="1.25rem"/>
                     </a>
                 </div>
             </div>
@@ -53,11 +54,11 @@ const links = {
                 <h3 class="column-title">Product</h3>
                 <ul class="link-list">
                     {links.product.map((link) => (
-                        <li>
-                            <a href={link.href} class="footer-link" target="_blank" rel="noopener noreferrer">
-                                {link.name}
-                            </a>
-                        </li>
+                            <li>
+                                <a href={link.href} class="footer-link" target="_blank" rel="noopener noreferrer">
+                                    {link.name}
+                                </a>
+                            </li>
                     ))}
                 </ul>
             </div>
@@ -67,11 +68,13 @@ const links = {
                 <h3 class="column-title">Developers</h3>
                 <ul class="link-list">
                     {links.developers.map((link) => (
-                        <li>
-                            <a href={link.href} class="footer-link" target={link.href === '/' ? undefined : "_blank"} rel={link.href === '/' ? undefined : "noopener noreferrer"}>
-                                {link.name}
-                            </a>
-                        </li>
+                            <li>
+                                <a href={link.href} class="footer-link"
+                                   target={link.href === '/' ? undefined : "_blank"}
+                                   rel={link.href === '/' ? undefined : "noopener noreferrer"}>
+                                    {link.name}
+                                </a>
+                            </li>
                     ))}
                 </ul>
             </div>
@@ -112,8 +115,9 @@ const links = {
 
     @media (min-width: 50rem) {
         .footer-container {
-             max-width: calc(var(--sl-content-width) + 2 * var(--sl-content-pad-x));
+            max-width: calc(var(--sl-content-width) + 2 * var(--sl-content-pad-x));
         }
+
         [data-template="splash"] .footer-container {
             max-width: 72rem;
         }
