@@ -232,4 +232,4 @@ export MEMORYLAYER_WORKSPACE_ID="my-custom-workspace"
 
 ## License
 
-MIT
+Apache 2.0
