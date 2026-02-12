@@ -13,10 +13,14 @@ This plugin integrates [MemoryLayer](https://memorylayer.ai) with Claude Code to
 
 ## Installation
 
-### From Claude Code
+### From the Marketplace
 
 ```bash
-claude plugin add memorylayer
+# Add the marketplace (one-time setup)
+claude plugin marketplace add https://github.com/scitrera/memorylayer.git
+
+# Install the plugin
+claude plugin install memorylayer@memorylayer.ai
 ```
 
 ### Manual Installation
