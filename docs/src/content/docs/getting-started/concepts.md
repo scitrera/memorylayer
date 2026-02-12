@@ -156,11 +156,13 @@ See the [Context Environment Guide](/guides/context-environment/) for detailed u
 
 When searching memories, you can choose a retrieval strategy:
 
-| Mode | Description | Best For |
-|------|-------------|----------|
-| **RAG** | Vector similarity search | Fast, precise recall |
-| **LLM** | LLM-powered semantic search | Understanding intent |
-| **Hybrid** | Combination of both | Best overall quality |
+| Mode | Description | Status |
+|------|-------------|--------|
+| **RAG** | Vector similarity with graph traversal | **Active** |
+| **LLM** | LLM-powered semantic search | Deprecated |
+| **Hybrid** | Combination of both | Deprecated |
+
+> **Note:** `LLM` and `Hybrid` modes are being phased out. Use `RAG` mode for recall and the [Context Environment](/guides/context-environment/) with RLM for LLM-powered analysis over memories.
 
 ## Core Operations
 

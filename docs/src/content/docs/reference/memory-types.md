@@ -94,11 +94,13 @@ MemorySubtype.EVENT          // "event"
 
 ## Recall Modes
 
-| Mode | Enum Value | Description |
-|------|-----------|-------------|
-| RAG | `rag` | Vector similarity search |
-| LLM | `llm` | LLM-powered semantic search |
-| Hybrid | `hybrid` | Combination of RAG and LLM |
+| Mode | Enum Value | Description | Status |
+|------|-----------|-------------|--------|
+| RAG | `rag` | Vector similarity search with graph traversal | **Active** |
+| LLM | `llm` | LLM-powered semantic search | Deprecated |
+| Hybrid | `hybrid` | Combination of RAG and LLM | Deprecated |
+
+> **Note:** `LLM` and `Hybrid` modes are being phased out. Use `RAG` mode for recall and the [Context Environment](/guides/context-environment/) with RLM for LLM-powered analysis over memories.
 
 ## Importance Scoring Guide
 
