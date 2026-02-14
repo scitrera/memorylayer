@@ -269,6 +269,13 @@ class WorkingMemorySetRequest(BaseModel):
     ttl_seconds: Optional[int] = Field(None, description="Optional TTL override")
 
 
+class SessionListResponse(BaseModel):
+    """Response schema for session list."""
+
+    sessions: list[Session]
+    total_count: int
+
+
 class SessionResponse(BaseModel):
     """Response schema for single session."""
 

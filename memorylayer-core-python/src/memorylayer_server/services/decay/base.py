@@ -7,9 +7,7 @@ from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_DECAY_PROVIDER, DEFAULT_MEMORYLAYER_DECAY_PROVIDER
 from ...models import Memory
-from ..storage import EXT_STORAGE_BACKEND
-
-EXT_DECAY_SERVICE = 'memorylayer-decay-service'
+from .._constants import EXT_STORAGE_BACKEND, EXT_DECAY_SERVICE
 
 
 @dataclass

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from memorylayer_server.models.memory import Memory, MemoryType
 from memorylayer_server.services.semantic_tiering.default import DefaultSemanticTieringService
 from memorylayer_server.services.semantic_tiering.base import SemanticTieringService
-from memorylayer_server.services.semantic_tiering.semantic_tiering_task_handler import TierGenerationTaskHandler
+from memorylayer_server.tasks.semantic_tiering_task_handler import TierGenerationTaskHandler
 
 
 # ---------------------------------------------------------------------------
@@ -229,13 +229,11 @@ class TestTierGenerationTaskHandler:
         """handle() should call tier_service.generate_tiers with payload."""
         handler = TierGenerationTaskHandler()
 
-        # Mock the framework's get_extension
         mock_tier_service = AsyncMock()
         mock_v = MagicMock()
-        handler._v = mock_v
 
         with patch.object(handler, 'get_extension', return_value=mock_tier_service):
-            await handler.handle({
+            await handler.handle(mock_v, {
                 'memory_id': 'mem_abc',
                 'workspace_id': 'ws_xyz',
             })
@@ -243,7 +241,7 @@ class TestTierGenerationTaskHandler:
         mock_tier_service.generate_tiers.assert_called_once_with('mem_abc', 'ws_xyz')
 
     def test_initialize_returns_self(self):
-        """initialize() should return self and store v."""
+        """initialize() should return handler instance."""
         handler = TierGenerationTaskHandler()
         mock_v = MagicMock()
         mock_logger = MagicMock()
@@ -251,7 +249,6 @@ class TestTierGenerationTaskHandler:
         result = handler.initialize(mock_v, mock_logger)
 
         assert result is handler
-        assert handler._v is mock_v
 
 
 # ---------------------------------------------------------------------------

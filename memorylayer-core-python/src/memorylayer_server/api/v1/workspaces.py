@@ -12,10 +12,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from fastapi.responses import StreamingResponse
-from scitrera_app_framework import Plugin, Variables, get_extension
+from scitrera_app_framework import Plugin, Variables
 
 from .. import EXT_MULTI_API_ROUTERS
-from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
+from memorylayer_server.lifecycle.fastapi import get_logger
 
 from .schemas import (
     WorkspaceCreateRequest,
@@ -29,39 +29,14 @@ from .schemas import (
     WorkspaceImportRequest,
     WorkspaceImportResult,
 )
-from ...services.workspace import get_workspace_service as _get_workspace_service, WorkspaceService
+from ...services.workspace import WorkspaceService
 from ...services.ontology import get_ontology_service as _get_ontology_service
-from ...services.memory import get_memory_service as _get_memory_service, MemoryService
-from ...services.authentication import (
-    AuthenticationService,
-    EXT_AUTHENTICATION_SERVICE,
-)
-from ...services.authorization import (
-    AuthorizationService,
-    EXT_AUTHORIZATION_SERVICE,
-)
+from ...services.memory import MemoryService
+from ...services.authentication import AuthenticationService
+from ...services.authorization import AuthorizationService
+from .deps import get_auth_service, get_authz_service, get_workspace_service, get_memory_service
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
-
-
-async def get_auth_service(v: Variables = Depends(get_variables_dep)) -> AuthenticationService:
-    """Get authentication service instance."""
-    return get_extension(EXT_AUTHENTICATION_SERVICE, v)
-
-
-async def get_authz_service(v: Variables = Depends(get_variables_dep)) -> AuthorizationService:
-    """Get authorization service instance."""
-    return get_extension(EXT_AUTHORIZATION_SERVICE, v)
-
-
-def get_workspace_service(v: Variables = Depends(get_variables_dep)) -> WorkspaceService:
-    """FastAPI dependency wrapper for workspace service."""
-    return _get_workspace_service(v)
-
-
-def get_memory_service(v: Variables = Depends(get_variables_dep)) -> MemoryService:
-    """FastAPI dependency wrapper for memory service."""
-    return _get_memory_service(v)
 
 
 @router.post(

@@ -28,8 +28,7 @@ from ...models import Session, WorkingMemory
 if TYPE_CHECKING:
     from ...models.session import SessionBriefing
 
-# Extension point constant
-EXT_SESSION_SERVICE = 'memorylayer-session-service'
+from .._constants import EXT_SESSION_SERVICE
 
 
 class CommitResult:

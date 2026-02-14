@@ -6,55 +6,32 @@ import { Clock, Trash2, RefreshCw, GitCommitHorizontal, Key } from 'lucide-react
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import { TimeAgo } from '@/components/shared/time-ago';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import {
-  useSession,
   useDeleteSession,
   useTouchSession,
-  useRemoveSessionId,
 } from '@/hooks/use-sessions';
 import { CommitDialog } from './commit-dialog';
 import { parseISO, differenceInMinutes, isPast } from 'date-fns';
+import type { Session } from '@/types';
 
 interface SessionCardProps {
-  sessionId: string;
+  session: Session;
 }
 
-export function SessionCard({ sessionId }: SessionCardProps) {
+export function SessionCard({ session }: SessionCardProps) {
   const router = useRouter();
-  const { data: session, isLoading, isError } = useSession(sessionId);
   const deleteSession = useDeleteSession();
   const touchSession = useTouchSession();
-  const removeSessionId = useRemoveSessionId();
   const [showDelete, setShowDelete] = useState(false);
   const [showCommit, setShowCommit] = useState(false);
 
-  // Auto-cleanup: if query returns 404, remove from localStorage
-  if (isError) {
-    removeSessionId(sessionId);
-    return null;
-  }
-
-  if (isLoading) {
-    return (
-      <Card className="p-6">
-        <div className="space-y-3">
-          <Skeleton className="h-5 w-48" />
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-4 w-24" />
-        </div>
-      </Card>
-    );
-  }
-
-  if (!session) return null;
-
+  const sessionId = session.id;
   const expiresAt = parseISO(session.expires_at);
   const expired = isPast(expiresAt);
   const minutesLeft = differenceInMinutes(expiresAt, new Date());
-  const memoryKeyCount = Object.keys(session.working_memory).length;
+  const memoryKeyCount = Object.keys(session.working_memory ?? {}).length;
 
   return (
     <>

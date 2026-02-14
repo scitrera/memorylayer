@@ -6,10 +6,7 @@ from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
 
-# Extension point names
-EXT_LLM_PROVIDER = 'memorylayer-llm-provider'
-EXT_LLM_SERVICE = 'memorylayer-llm-service'
-EXT_LLM_REGISTRY = 'memorylayer-llm-registry'
+from .._constants import EXT_LLM_PROVIDER, EXT_LLM_SERVICE, EXT_LLM_REGISTRY
 
 # Registry config constants
 MEMORYLAYER_LLM_REGISTRY = 'MEMORYLAYER_LLM_REGISTRY'

@@ -15,7 +15,7 @@ from ...models.workspace import Workspace, Context
 if TYPE_CHECKING:
     from ...models import Session, WorkingMemory
 
-EXT_STORAGE_BACKEND = 'memorylayer-primary-storage'
+from .._constants import EXT_STORAGE_BACKEND
 
 
 class StorageBackend(ABC):
@@ -288,6 +288,24 @@ class StorageBackend(ABC):
         """
         # Default implementation: no-op (subclasses should override)
         return None
+
+    async def list_sessions(
+            self,
+            workspace_id: str,
+            context_id: str | None = None,
+            include_expired: bool = False,
+    ) -> list['Session']:
+        """List sessions for a workspace.
+
+        Args:
+            workspace_id: Workspace boundary
+            context_id: Optional context filter
+            include_expired: Whether to include expired sessions
+
+        Returns:
+            List of sessions
+        """
+        return []
 
     # Decay service support methods (non-abstract with default no-op implementations)
 

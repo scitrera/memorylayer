@@ -24,8 +24,7 @@ from ...models.auth import AuthIdentity, RequestContext
 if TYPE_CHECKING:
     from ...models.session import Session
 
-# Extension point name for authentication service plugin
-EXT_AUTHENTICATION_SERVICE = "memorylayer-authentication-service"
+from .._constants import EXT_AUTHENTICATION_SERVICE
 
 # Header names
 HEADER_AUTHORIZATION = "Authorization"
@@ -110,6 +109,32 @@ class AuthenticationService(ABC):
         """
         pass
 
+    async def ensure_session(
+        self,
+        session_id: str,
+        workspace_id: str,
+        tenant_id: str,
+    ) -> Optional["Session"]:
+        """
+        Ensure a session exists, creating it if necessary.
+
+        Called when a request provides X-Session-ID but the session
+        doesn't exist (expired or never created). Only called when
+        the client explicitly provides a workspace context.
+
+        Default implementation: no implicit creation (returns None).
+        Override in subclass to enable.
+
+        Args:
+            session_id: Session ID from request
+            workspace_id: Resolved workspace ID
+            tenant_id: Authenticated tenant ID
+
+        Returns:
+            Newly created session, or None if implicit creation disabled
+        """
+        return None
+
     async def build_context(
         self,
         request: Request,
@@ -151,6 +176,13 @@ class AuthenticationService(ABC):
             session=session,
             tenant_id=identity.tenant_id,
         )
+
+        # Implicit session creation: if session_id was provided but session
+        # not found, and client explicitly provided a workspace, auto-create
+        if session_id and session is None and request_workspace_id:
+            session = await self.ensure_session(
+                session_id, workspace_id, identity.tenant_id
+            )
 
         self.logger.debug(
             "Built context: tenant=%s, workspace=%s, session=%s",

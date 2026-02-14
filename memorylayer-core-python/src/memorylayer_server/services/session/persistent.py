@@ -111,6 +111,8 @@ class PersistentSessionService(SessionService):
         if session is None:
             raise ValueError(f"Session {session_id} not found or expired")
 
+        # TODO: consider if setting a working memory should go direct to storage or otherwise
+        #       use the standard memory pipeline with default parameters for working memory attached
         return await self.storage.set_working_memory(
             workspace_id, session_id, key, value, ttl_seconds
         )
@@ -432,71 +434,71 @@ class PersistentSessionService(SessionService):
             self,
             workspace_id: str,
             session_id: str,
-            extend_seconds: Optional[int] = None
-    ) -> Session:
-        """
-        Extend session TTL.
+            extend_seconds: int | None = None,
+    ) -> 'Session':
+        """Extend session TTL.
+
+        If the session is expired but still in storage (not yet cleaned up),
+        extends from now. Otherwise extends from current expires_at.
 
         Args:
             workspace_id: Workspace boundary
             session_id: Session to extend
-            extend_seconds: Additional seconds to add (uses 3600 if None)
+            extend_seconds: Seconds to extend by (default: 3600)
 
         Returns:
-            Updated session with new expiration time
+            Updated session with new expires_at
 
         Raises:
-            ValueError: If session not found or already expired
+            ValueError: If session not found in storage
         """
         session = await self.get_session(workspace_id, session_id)
         if session is None:
-            raise ValueError(f"Session {session_id} not found or expired")
+            raise ValueError(f"Session {session_id} not found in workspace {workspace_id}")
 
-        # Extend TTL
         extend_by = extend_seconds or 3600
-        session.expires_at = session.expires_at + timedelta(seconds=extend_by)
+        # If session is expired but not yet cleaned up, extend from now
+        if session.is_expired:
+            new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=extend_by)
+        else:
+            new_expires_at = session.expires_at + timedelta(seconds=extend_by)
 
-        # TODO: THIS IS UNFINISHED!!
-        # Note: storage.update_session() not yet implemented
-        # For now, just return the modified session object
-        self.logger.warning(
-            "Session TTL extension not persisted - storage.update_session() not implemented"
+        updated = await self.storage.update_session(
+            workspace_id, session_id, expires_at=new_expires_at
         )
+        if updated is None:
+            raise ValueError(f"Failed to update session {session_id} in storage")
 
         self.logger.info(
-            "Extended session %s TTL by %d seconds, new expiration: %s",
-            session_id,
-            extend_by,
-            session.expires_at.isoformat()
+            "Extended session %s TTL by %d seconds (was_expired=%s), new expiration: %s",
+            session_id, extend_by, session.is_expired, updated.expires_at.isoformat()
         )
-
-        return session
+        return updated
 
     async def list_sessions(
             self,
             workspace_id: str,
-            context_id: Optional[str] = None,
+            context_id: str | None = None,
             include_expired: bool = False
-    ) -> List[Session]:
-        """
-        List sessions in a workspace.
+    ) -> list['Session']:
+        """List sessions for a workspace.
 
         Args:
-            workspace_id: Workspace to list sessions for
-            context_id: Optional filter by context
+            workspace_id: Workspace boundary
+            context_id: Optional context filter
             include_expired: Whether to include expired sessions
 
         Returns:
-            List of sessions matching criteria
+            List of sessions
         """
-        # Note: storage.list_sessions() not yet implemented
-        self.logger.warning("list_sessions not implemented in storage backend")
-        return []
+        return await self.storage.list_sessions(
+            workspace_id, context_id=context_id, include_expired=include_expired
+        )
 
 
 class PersistentSessionServicePlugin(SessionServicePluginBase):
     """Plugin for persistent session service."""
-    PROVIDER_NAME = 'default'
+    PROVIDER_NAME = 'persistent'
 
     def get_dependencies(self, v: Variables):
         return (EXT_STORAGE_BACKEND, EXT_EXTRACTION_SERVICE, EXT_DEDUPLICATION_SERVICE, EXT_MEMORY_SERVICE, EXT_CONTRADICTION_SERVICE)

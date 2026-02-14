@@ -1109,6 +1109,37 @@ class MemoryLayerClient:
 
     # Session extension operations
 
+    async def list_sessions(
+        self,
+        workspace_id: Optional[str] = None,
+        context_id: Optional[str] = None,
+        include_expired: bool = False,
+    ) -> list[dict[str, Any]]:
+        """
+        List sessions in a workspace.
+
+        Args:
+            workspace_id: Workspace ID (defaults to client workspace)
+            context_id: Optional filter by context
+            include_expired: Whether to include expired sessions
+
+        Returns:
+            List of session dicts
+
+        Example:
+            sessions = await client.list_sessions()
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self._workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+        if context_id:
+            params["context_id"] = context_id
+        if include_expired:
+            params["include_expired"] = "true"
+        data = await self._request("GET", "/sessions", params=params)
+        return data.get("sessions", [])
+
     async def delete_session(self, session_id: str) -> bool:
         """
         Delete a session and all its context data.

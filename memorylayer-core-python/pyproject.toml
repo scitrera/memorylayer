@@ -1,6 +1,6 @@
 [project]
 name = "memorylayer-server"
-version = "0.0.3"
+version = "0.0.4"
 description = "MemoryLayer.ai - API-first memory infrastructure for LLM-powered agents (open source core)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -118,6 +118,8 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "llm: marks tests requiring a live LLM provider (deselect with '-m \"not llm\"')",
+    "llm_quality: marks LLM output quality tests (deselect with '-m \"not llm_quality\"')",
 ]
 
 [tool.mypy]

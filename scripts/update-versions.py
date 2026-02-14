@@ -91,6 +91,9 @@ PROJECT_RULES: dict[str, list[UpdateRule]] = {
     "memorylayer-sdk-typescript": [
         ("package", Path("memorylayer-sdk-typescript/package.json")),
     ],
+    "memorylayer-explorer": [
+        ("package", Path("memorylayer-explorer/package.json")),
+    ],
 }
 
 # ---------------------------------------------------------------------------

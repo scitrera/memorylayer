@@ -15,7 +15,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Header, status
-from scitrera_app_framework import Plugin, Variables, get_extension
+from scitrera_app_framework import Plugin, Variables
 
 from .. import EXT_MULTI_API_ROUTERS
 from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
@@ -38,31 +38,17 @@ from ...services.context_environment import (
     get_context_environment_service as _get_ctx_env_service,
     ContextEnvironmentService,
 )
-from ...services.session import get_session_service as _get_session_service, SessionService
-from ...services.authentication import AuthenticationService, EXT_AUTHENTICATION_SERVICE
-from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SERVICE
+from ...services.session import SessionService
+from ...services.authentication import AuthenticationService
+from ...services.authorization import AuthorizationService
+from .deps import get_auth_service, get_authz_service, get_session_service
 
 router = APIRouter(prefix="/v1/context", tags=["context-environment"])
-
-
-async def get_auth_service(v: Variables = Depends(get_variables_dep)) -> AuthenticationService:
-    """Get authentication service instance."""
-    return get_extension(EXT_AUTHENTICATION_SERVICE, v)
-
-
-async def get_authz_service(v: Variables = Depends(get_variables_dep)) -> AuthorizationService:
-    """Get authorization service instance."""
-    return get_extension(EXT_AUTHORIZATION_SERVICE, v)
 
 
 def get_context_env_service(v: Variables = Depends(get_variables_dep)) -> ContextEnvironmentService:
     """FastAPI dependency wrapper for context environment service."""
     return _get_ctx_env_service(v)
-
-
-def get_session_service(v: Variables = Depends(get_variables_dep)) -> SessionService:
-    """FastAPI dependency wrapper for session service."""
-    return _get_session_service(v)
 
 
 async def _resolve_session_id(

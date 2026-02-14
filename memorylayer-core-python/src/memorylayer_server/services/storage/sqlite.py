@@ -1419,11 +1419,6 @@ class SQLiteStorageBackend(StorageBackend):
         # FIX: do not delete expired sessions on get/check BECAUSE we have background task
         #       for deleting expired sessions (that may trigger auto-commit but commit will fail
         #       if we deleted the session while looking it up here!)
-        # Check expiration
-        if session.is_expired:
-            self.logger.info("Session expired: %s, cleaning up", session_id)
-            await self.delete_session(session.workspace_id, session_id)
-            return None
 
         return session
 
@@ -1612,6 +1607,29 @@ class SQLiteStorageBackend(StorageBackend):
             return None
 
         return await self.get_session(workspace_id, session_id)
+
+    async def list_sessions(
+            self,
+            workspace_id: str,
+            context_id: str | None = None,
+            include_expired: bool = False,
+    ) -> list[Session]:
+        """List sessions for a workspace."""
+        conditions = ["workspace_id = ?"]
+        values: list = [workspace_id]
+
+        if context_id is not None:
+            conditions.append("context_id = ?")
+            values.append(context_id)
+
+        if not include_expired:
+            conditions.append("expires_at >= ?")
+            values.append(utc_now_iso())
+
+        query = f"SELECT * FROM sessions WHERE {' AND '.join(conditions)} ORDER BY created_at DESC"
+        cursor = await self._connection.execute(query, values)
+        rows = await cursor.fetchall()
+        return [self._row_to_session(row) for row in rows]
 
     # Contradiction operations
     async def create_contradiction(self, contradiction: ContradictionRecord) -> ContradictionRecord:

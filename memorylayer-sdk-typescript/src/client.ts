@@ -256,6 +256,24 @@ export class MemoryLayerClient {
     return response;
   }
 
+  async listSessions(options?: {
+    workspaceId?: string;
+    contextId?: string;
+    includeExpired?: boolean;
+  }): Promise<Session[]> {
+    const params = new URLSearchParams();
+    const wsId = options?.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    if (options?.contextId) params.set("context_id", options.contextId);
+    if (options?.includeExpired) params.set("include_expired", "true");
+    const query = params.toString();
+    const response = await this.request<{ sessions: Session[]; total_count: number }>(
+      "GET",
+      `/v1/sessions${query ? `?${query}` : ""}`
+    );
+    return response.sessions;
+  }
+
   async getSession(sessionId: string): Promise<Session> {
     const response = await this.request<{ session: Session }>("GET", `/v1/sessions/${sessionId}`);
     return response.session;

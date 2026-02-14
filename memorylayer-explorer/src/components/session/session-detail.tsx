@@ -156,7 +156,7 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
               <div>
                 <p className="text-xs text-muted-foreground">Working Memory</p>
                 <p className="text-sm font-medium">
-                  {Object.keys(session.working_memory).length} keys
+                  {Object.keys(session.working_memory ?? {}).length} keys
                 </p>
               </div>
               <div>

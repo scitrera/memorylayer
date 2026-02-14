@@ -1,6 +1,6 @@
 {
   "name": "memorylayer",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Persistent memory for Claude Code - never lose context to compaction again",
   "author": {
     "name": "scitrera.ai",

@@ -11,11 +11,7 @@ from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 from ...config import MEMORYLAYER_SEMANTIC_TIERING_SERVICE, DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_SERVICE
 from ...models.memory import Memory
 
-from ..storage import EXT_STORAGE_BACKEND
-from ..llm import EXT_LLM_SERVICE
-
-# Extension point constant
-EXT_SEMANTIC_TIERING_SERVICE = 'memorylayer-tier-generation-service'
+from .._constants import EXT_LLM_SERVICE, EXT_SEMANTIC_TIERING_SERVICE, EXT_STORAGE_BACKEND
 
 
 class SemanticTieringService(ABC):

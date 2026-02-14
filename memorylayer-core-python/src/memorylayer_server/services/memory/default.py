@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging import Logger, DEBUG
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING
 
 from scitrera_app_framework import get_logger, get_extension, Variables
 
@@ -32,7 +32,10 @@ from ..storage import StorageBackend, EXT_STORAGE_BACKEND
 from ..embedding import EmbeddingService, EXT_EMBEDDING_SERVICE
 from ..semantic_tiering import SemanticTieringService, EXT_SEMANTIC_TIERING_SERVICE
 from ..reranker import RerankerService, EXT_RERANKER_SERVICE
-from ..tasks import TaskService, EXT_TASK_SERVICE
+from .._constants import EXT_TASK_SERVICE
+
+if TYPE_CHECKING:
+    from ..tasks import TaskService
 
 from ..association import (
     AssociationService, EXT_ASSOCIATION_SERVICE,
@@ -98,7 +101,7 @@ class MemoryService:
             reranker_service: Optional[RerankerService] = None,
             decay_service: Optional[DecayService] = None,
             contradiction_service: Optional[ContradictionService] = None,
-            task_service: Optional[TaskService] = None,
+            task_service: Optional["TaskService"] = None,
             extraction_service: Optional[ExtractionService] = None,
     ):
         self.storage = storage
@@ -1787,7 +1790,7 @@ class DefaultMemoryServicePlugin(MemoryServicePluginBase):
         extraction_service: ExtractionService = self.get_extension(EXT_EXTRACTION_SERVICE, v)
 
         # TaskService is optional -- auto-association works inline without it
-        task_service: Optional[TaskService] = None
+        task_service: Optional["TaskService"] = None
         try:
             task_service = self.get_extension(EXT_TASK_SERVICE, v)
         except Exception:

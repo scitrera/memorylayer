@@ -8,15 +8,11 @@ Endpoints:
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from scitrera_app_framework import Plugin, Variables, get_extension
+from scitrera_app_framework import Plugin, Variables
 
 from .. import EXT_MULTI_API_ROUTERS
-from ...services.authentication import (
-    AuthenticationError,
-    AuthenticationService,
-    EXT_AUTHENTICATION_SERVICE,
-)
-from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SERVICE
+from ...services.authentication import AuthenticationError, AuthenticationService
+from ...services.authorization import AuthorizationService
 from ...services.contradiction import ContradictionService, get_contradiction_service
 from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
 from .schemas import (
@@ -25,21 +21,12 @@ from .schemas import (
     ContradictionResponse,
     ErrorResponse,
 )
+from .deps import get_auth_service, get_authz_service
 
 router = APIRouter(prefix='/v1', tags=["contradictions"])
 
 
 # Dependencies for services
-async def get_auth_service(v: Variables = Depends(get_variables_dep)) -> AuthenticationService:
-    """Get authentication service instance."""
-    return get_extension(EXT_AUTHENTICATION_SERVICE, v)
-
-
-async def get_authz_service(v: Variables = Depends(get_variables_dep)) -> AuthorizationService:
-    """Get authorization service instance."""
-    return get_extension(EXT_AUTHORIZATION_SERVICE, v)
-
-
 async def get_contradiction_svc(v: Variables = Depends(get_variables_dep)) -> ContradictionService:
     """Get contradiction service instance from dependency injection."""
     return get_contradiction_service(v)

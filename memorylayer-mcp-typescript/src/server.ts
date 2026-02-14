@@ -9,9 +9,16 @@ import {
     ListToolsRequestSchema,
     Tool
 } from "@modelcontextprotocol/sdk/types.js";
-import {writeFileSync, mkdirSync, existsSync, renameSync} from "fs";
-import {join} from "path";
+import {readFileSync, writeFileSync, mkdirSync, existsSync, renameSync} from "fs";
+import {join, dirname} from "path";
+import {fileURLToPath} from "node:url";
 import {tmpdir} from "os";
+
+// ESM-compatible version reading (require() is not available in ESM)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_VERSION: string = JSON.parse(
+    readFileSync(join(__dirname, "..", "..", "package.json"), "utf-8")
+).version;
 
 import {MemoryLayerClient} from "./client.js";
 import {MCPToolHandlers} from "./handlers.js";
@@ -149,7 +156,7 @@ export class MCPServer {
         this.server = new Server(
             {
                 name: "memorylayer",
-                version: require("../package.json").version,
+                version: PACKAGE_VERSION,
             },
             {
                 capabilities: {
@@ -312,7 +319,7 @@ export class MCPServer {
         const profileTools = getToolsForProfile(this.toolProfile);
         return {
             name: "memorylayer",
-            version: require("../package.json").version,
+            version: PACKAGE_VERSION,
             description: "MemoryLayer.ai - Memory infrastructure for LLM-powered agents",
             homepage: "https://memorylayer.ai",
             toolProfile: this.toolProfile,

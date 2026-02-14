@@ -12,13 +12,13 @@ from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_TASK_PROVIDER, DEFAULT_MEMORYLAYER_TASK_PROVIDER
 
-from ..storage import EXT_STORAGE_BACKEND
-from ..memory import EXT_MEMORY_SERVICE
-from ..session import EXT_SESSION_SERVICE
-
-# Extension point constants
-EXT_TASK_SERVICE = 'memorylayer-task-service'
-EXT_MULTI_TASK_HANDLERS = 'memorylayer-multi-task-handlers'
+from .._constants import (
+    EXT_MEMORY_SERVICE,
+    EXT_MULTI_TASK_HANDLERS,
+    EXT_SESSION_SERVICE,
+    EXT_STORAGE_BACKEND,
+    EXT_TASK_SERVICE,
+)
 
 
 class TaskStatus(str, Enum):

@@ -1,11 +1,7 @@
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_ASSOCIATION_SERVICE, DEFAULT_MEMORYLAYER_ASSOCIATION_SERVICE
-from ..storage import EXT_STORAGE_BACKEND
-from ..ontology import EXT_ONTOLOGY_SERVICE
-
-# Extension point constant
-EXT_ASSOCIATION_SERVICE = 'memorylayer-association-service'
+from .._constants import EXT_ASSOCIATION_SERVICE, EXT_ONTOLOGY_SERVICE, EXT_STORAGE_BACKEND
 
 # ============================================
 # Association Configuration

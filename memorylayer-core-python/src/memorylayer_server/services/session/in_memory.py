@@ -1,7 +1,7 @@
 """Default session service implementation."""
 from datetime import datetime, timezone, timedelta
 from logging import Logger
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
@@ -9,6 +9,13 @@ from scitrera_app_framework.api import Variables
 from .base import SessionServicePluginBase, SessionService
 from ...models import Session, WorkingMemory
 from ...models.session import SessionBriefing
+
+if TYPE_CHECKING:
+    from ..storage import StorageBackend
+    from ..extraction import ExtractionService
+    from ..deduplication import DeduplicationService
+    from ..memory import MemoryService
+    from ..contradiction import ContradictionService
 
 
 class InMemorySessionService(SessionService):
@@ -19,12 +26,37 @@ class InMemorySessionService(SessionService):
     All data is stored in memory and lost on service restart.
     """
 
-    def __init__(self, v: Variables = None):
-        """Initialize in-memory session storage."""
+    def __init__(
+        self,
+        v: Variables = None,
+        storage: Optional['StorageBackend'] = None,
+        extraction_service: Optional['ExtractionService'] = None,
+        deduplication_service: Optional['DeduplicationService'] = None,
+        memory_service: Optional['MemoryService'] = None,
+        contradiction_service: Optional['ContradictionService'] = None,
+    ):
+        """Initialize in-memory session storage.
+
+        Args:
+            v: Variables for dependency injection
+            storage: Optional storage backend for briefing/commit operations
+            extraction_service: Optional extraction service for commit operations
+            deduplication_service: Optional deduplication service
+            memory_service: Optional memory service for commit operations
+            contradiction_service: Optional contradiction service for briefing
+        """
         # Store sessions: {workspace_id:session_id -> Session}
         self._sessions: dict[str, Session] = {}
         # Store working memory: {workspace_id:session_id -> {key -> WorkingMemory}}
         self._working_memory: dict[str, dict[str, WorkingMemory]] = {}
+
+        # Optional service dependencies
+        self.storage = storage
+        self.extraction_service = extraction_service
+        self.deduplication_service = deduplication_service
+        self._memory_service = memory_service
+        self.contradiction_service = contradiction_service
+
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info("Initialized SessionService with in-memory storage")
 
@@ -127,12 +159,26 @@ class InMemorySessionService(SessionService):
         # Get session to check auto_commit flag
         session = self._sessions.get(key)
 
-        # In-memory: auto_commit is logged but doesn't persist to long-term storage
+        # Auto-commit if enabled and services are available
         if session and not skip_auto_commit and session.auto_commit and session.committed_at is None:
-            self.logger.debug(
-                "Session %s has auto_commit=True but in-memory service doesn't persist commits",
-                session_id
-            )
+            if self.extraction_service and self._memory_service:
+                try:
+                    self.logger.info(
+                        "Auto-committing session %s before deletion (auto_commit=True)",
+                        session_id
+                    )
+                    await self.commit_session(workspace_id, session_id)
+                except Exception as e:
+                    self.logger.warning(
+                        "Auto-commit failed for session %s, proceeding with deletion: %s",
+                        session_id,
+                        e
+                    )
+            else:
+                self.logger.debug(
+                    "Session %s has auto_commit=True but no extraction/memory services configured",
+                    session_id
+                )
 
         # Remove session
         session_existed = key in self._sessions
@@ -291,8 +337,8 @@ class InMemorySessionService(SessionService):
         """
         Generate a session briefing with workspace summary and recent activity.
 
-        For in-memory sessions, this provides basic stats without storage backend access.
-        Advanced features like contradictions and LLM-enhanced summaries require custom implementations.
+        Uses storage backend when available for comprehensive statistics.
+        Falls back to basic in-memory session counting when storage is not available.
 
         Args:
             workspace_id: Workspace identifier
@@ -303,8 +349,78 @@ class InMemorySessionService(SessionService):
             include_contradictions: Whether to detect contradictions
 
         Returns:
-            SessionBriefing with basic workspace summary
+            SessionBriefing with workspace summary and activity
         """
+        # If storage backend is available, use it for comprehensive stats
+        if self.storage is not None:
+            # Get workspace statistics from storage
+            stats = await self.storage.get_workspace_stats(workspace_id)
+
+            # Build workspace summary with real data from storage
+            workspace_summary = {
+                "total_memories": stats.get("total_memories", 0),
+                "recent_memories": 0,  # Will calculate below
+                "active_topics": [],
+                "total_categories": stats.get("total_categories", 0),
+                "total_associations": stats.get("total_associations", 0),
+                "memory_types": stats.get("memory_types", {}),
+            }
+
+            # Get recent memories if requested
+            memories = []
+            if include_memories:
+                now = datetime.now(timezone.utc)
+                created_after = now - timedelta(minutes=lookback_minutes)
+                memories = await self.storage.get_recent_memories(
+                    workspace_id, created_after=created_after,
+                    limit=limit, detail_level=detail_level
+                )
+
+                # Update workspace summary with recent count
+                workspace_summary["recent_memories"] = len(memories)
+
+            # Build recent activity list
+            recent_activity = []
+            recent_activity.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "summary": f"Workspace stats: {workspace_summary['total_memories']} total memories",
+                "memories_created": 0,
+                "key_decisions": [],
+            })
+
+            self.logger.debug(
+                "Generated briefing for workspace %s: %d memories, %d associations, %d recent memories",
+                workspace_id,
+                workspace_summary["total_memories"],
+                workspace_summary["total_associations"],
+                workspace_summary["recent_memories"]
+            )
+
+            # Get unresolved contradictions
+            contradictions_detected = []
+            if include_contradictions and self.contradiction_service:
+                try:
+                    records = await self.contradiction_service.get_unresolved(workspace_id, limit=3)
+                    for record in records:
+                        contradictions_detected.append({
+                            "id": record.id,
+                            "memory_a_id": record.memory_a_id,
+                            "memory_b_id": record.memory_b_id,
+                            "type": record.contradiction_type,
+                            "confidence": record.confidence,
+                        })
+                except Exception as e:
+                    self.logger.warning("Failed to get contradictions for briefing: %s", e)
+
+            return SessionBriefing(
+                workspace_summary=workspace_summary,
+                recent_activity=recent_activity,
+                open_threads=[],  # Advanced feature - empty for OSS
+                contradictions_detected=contradictions_detected,
+                memories=memories,
+            )
+
+        # Fall back to basic in-memory stats when storage is not available
         # Count active (non-expired) sessions in this workspace
         active_sessions = []
         for key, session in self._sessions.items():
@@ -361,8 +477,8 @@ class InMemorySessionService(SessionService):
         """
         Commit session working memory to long-term storage.
 
-        For in-memory sessions, this is a placeholder that returns a basic result.
-        Full implementation requires storage backend integration.
+        Uses extraction and memory services when available to extract and store memories.
+        Falls back to placeholder behavior when services are not configured.
 
         Args:
             workspace_id: Workspace boundary
@@ -370,7 +486,7 @@ class InMemorySessionService(SessionService):
             options: Optional commit configuration
 
         Returns:
-            CommitResult with basic statistics
+            CommitResult with extraction statistics
 
         Raises:
             ValueError: If session not found or already expired
@@ -382,23 +498,148 @@ class InMemorySessionService(SessionService):
         if session is None:
             raise ValueError(f"Session {session_id} not found or expired")
 
-        # Get working memory
-        working_memory_entries = await self.get_all_working_memory(workspace_id, session_id)
+        # Get working memory entries
+        working_memory_list = await self.get_all_working_memory(workspace_id, session_id)
 
         self.logger.info(
-            "Commit session %s: %d working memory entries (in-memory placeholder)",
+            "Committing session %s: %d working memory entries",
             session_id,
-            len(working_memory_entries)
+            len(working_memory_list)
         )
 
-        # Placeholder: return basic result without actual memory creation
-        return CommitResult(
+        # If no extraction service, return basic result
+        if not self.extraction_service:
+            self.logger.warning("No extraction service configured, skipping memory extraction")
+            return CommitResult(
+                session_id=session_id,
+                committed_at=datetime.now(timezone.utc),
+                memories_committed=0,
+                associations_committed=0,
+                success=True
+            )
+
+        # Convert CommitOptions to ExtractionOptions
+        from ..extraction import ExtractionOptions
+
+        # Build extraction options from commit options
+        min_importance = options.importance_threshold if options and options.importance_threshold is not None else 0.5
+        extraction_opts = ExtractionOptions(
+            min_importance=min_importance,
+            deduplicate=True,  # Always deduplicate
+            categories=None,  # Extract all categories
+            max_memories=50
+        )
+
+        # Build session content from working memory
+        working_memory_dict = {wm.key: wm.value for wm in working_memory_list}
+        session_content = "\n".join(
+            f"{wm.key}: {wm.value}" for wm in working_memory_list
+        )
+
+        # Extract memories using extraction service
+        extraction_result = await self.extraction_service.extract_from_session(
+            session_id=session_id,
+            workspace_id=workspace_id,
+            context_id=session.context_id,
+            session_content=session_content,
+            working_memory=working_memory_dict,
+            options=extraction_opts
+        )
+
+        # Store extracted memories via memory service
+        from ...models import RememberInput
+        from ..extraction import CATEGORY_MAPPING
+
+        if not self._memory_service:
+            self.logger.warning("No memory service available, cannot store extracted memories")
+            return CommitResult(
+                session_id=session_id,
+                committed_at=datetime.now(timezone.utc),
+                memories_committed=0,
+                associations_committed=0,
+                success=True,
+                memories_extracted=extraction_result.memories_extracted,
+                memories_deduplicated=extraction_result.memories_deduplicated,
+                extraction_summary={
+                    "breakdown": extraction_result.breakdown,
+                    "extraction_time_ms": extraction_result.extraction_time_ms,
+                    "stored_count": 0,
+                    "failed_count": len(extraction_result.memories_created),
+                }
+            )
+
+        memory_service = self._memory_service
+        stored_memories = []
+
+        for extracted_memory in extraction_result.memories_created:
+            # Convert ExtractedMemory to RememberInput
+            memory_type, memory_subtype = CATEGORY_MAPPING[extracted_memory.category]
+
+            remember_input = RememberInput(
+                content=extracted_memory.content,
+                type=memory_type,
+                subtype=memory_subtype,
+                importance=extracted_memory.importance,
+                tags=extracted_memory.tags,
+                metadata=extracted_memory.metadata,
+                context_id=session.context_id,
+                user_id=None,  # Will be inferred from workspace
+            )
+
+            # Store memory
+            try:
+                memory = await memory_service.remember(
+                    workspace_id=workspace_id,
+                    input=remember_input
+                )
+                stored_memories.append(memory)
+                self.logger.debug(
+                    "Stored extracted memory: %s (category: %s, importance: %.2f)",
+                    memory.id,
+                    extracted_memory.category,
+                    extracted_memory.importance
+                )
+            except Exception as e:
+                self.logger.error(
+                    "Failed to store extracted memory (category: %s): %s",
+                    extracted_memory.category,
+                    e
+                )
+
+        # Update session committed_at timestamp (in-memory only, no storage update)
+        committed_at = datetime.now(timezone.utc)
+        session.committed_at = committed_at
+
+        self.logger.info(
+            "Committed session %s: extracted %d memories, stored %d, deduplicated %d, breakdown: %s",
+            session_id,
+            len(extraction_result.memories_created),
+            len(stored_memories),
+            extraction_result.memories_deduplicated,
+            extraction_result.breakdown
+        )
+
+        # Build extraction summary for API response
+        extraction_summary = {
+            "breakdown": extraction_result.breakdown,
+            "extraction_time_ms": extraction_result.extraction_time_ms,
+            "stored_count": len(stored_memories),
+            "failed_count": len(extraction_result.memories_created) - len(stored_memories),
+        }
+
+        # Create CommitResult with extraction statistics and actual stored memories
+        commit_result = CommitResult(
             session_id=session_id,
             committed_at=datetime.now(timezone.utc),
-            memories_committed=len(working_memory_entries),
-            associations_committed=0,
-            success=True
+            memories_committed=len(stored_memories),  # Use actual stored count
+            associations_committed=0,  # Not yet implemented
+            success=True,
+            memories_extracted=extraction_result.memories_extracted,
+            memories_deduplicated=extraction_result.memories_deduplicated,
+            extraction_summary=extraction_summary
         )
+
+        return commit_result
 
     async def touch_session(
         self,
@@ -426,7 +667,11 @@ class InMemorySessionService(SessionService):
 
         # Extend TTL
         extend_by = extend_seconds or 3600
-        session.expires_at = session.expires_at + timedelta(seconds=extend_by)
+        # If session is expired but not yet cleaned up, extend from now
+        if session.is_expired:
+            session.expires_at = datetime.now(timezone.utc) + timedelta(seconds=extend_by)
+        else:
+            session.expires_at = session.expires_at + timedelta(seconds=extend_by)
 
         # Update in storage
         key = self._make_key(workspace_id, session_id)
@@ -477,8 +722,35 @@ class InMemorySessionService(SessionService):
 
 
 class InMemorySessionServicePlugin(SessionServicePluginBase):
-    """Default session service plugin."""
+    """In-memory session service plugin (no persistence)."""
     PROVIDER_NAME = 'in-memory'
 
+    def get_dependencies(self, v: Variables):
+        from ..storage import EXT_STORAGE_BACKEND
+        from ..extraction import EXT_EXTRACTION_SERVICE
+        from ..deduplication import EXT_DEDUPLICATION_SERVICE
+        from ..memory import EXT_MEMORY_SERVICE
+        from ..contradiction import EXT_CONTRADICTION_SERVICE
+        return (EXT_STORAGE_BACKEND, EXT_EXTRACTION_SERVICE, EXT_DEDUPLICATION_SERVICE, EXT_MEMORY_SERVICE, EXT_CONTRADICTION_SERVICE)
+
     def initialize(self, v: Variables, logger: Logger) -> SessionService:
-        return InMemorySessionService(v=v)
+        from ..storage import StorageBackend, EXT_STORAGE_BACKEND
+        from ..extraction import ExtractionService, EXT_EXTRACTION_SERVICE
+        from ..deduplication import DeduplicationService, EXT_DEDUPLICATION_SERVICE
+        from ..memory import MemoryService, EXT_MEMORY_SERVICE
+        from ..contradiction import ContradictionService, EXT_CONTRADICTION_SERVICE
+
+        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
+        extraction_service: ExtractionService = self.get_extension(EXT_EXTRACTION_SERVICE, v)
+        deduplication_service: DeduplicationService = self.get_extension(EXT_DEDUPLICATION_SERVICE, v)
+        memory_service: MemoryService = self.get_extension(EXT_MEMORY_SERVICE, v)
+        contradiction_service: ContradictionService = self.get_extension(EXT_CONTRADICTION_SERVICE, v)
+
+        return InMemorySessionService(
+            v=v,
+            storage=storage,
+            extraction_service=extraction_service,
+            deduplication_service=deduplication_service,
+            memory_service=memory_service,
+            contradiction_service=contradiction_service
+        )

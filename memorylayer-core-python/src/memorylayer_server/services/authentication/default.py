@@ -17,7 +17,12 @@ from .base import (
 )
 from ...models.auth import AuthIdentity
 from ...models.session import Session
-from ...config import DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID
+from ...config import (
+    DEFAULT_TENANT_ID,
+    DEFAULT_WORKSPACE_ID,
+    MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+    DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+)
 from ...services.session import SessionService, EXT_SESSION_SERVICE
 from ...services.workspace import WorkspaceService, EXT_WORKSPACE_SERVICE
 
@@ -35,11 +40,13 @@ class OpenAuthenticationService(AuthenticationService):
             self,
             session_service: SessionService,
             workspace_service: WorkspaceService,
+            implicit_session_create: bool = True,
             logger: Optional[logging.Logger] = None,
     ):
         super().__init__(logger)
         self.session_service = session_service
         self.workspace_service = workspace_service
+        self._implicit_session_create = implicit_session_create
 
     async def verify_api_key(self, api_key: Optional[str]) -> AuthIdentity:
         """
@@ -101,6 +108,45 @@ class OpenAuthenticationService(AuthenticationService):
 
         return workspace_id
 
+    async def ensure_session(
+        self,
+        session_id: str,
+        workspace_id: str,
+        tenant_id: str,
+    ) -> Optional[Session]:
+        """
+        Auto-create session for unknown session_id when workspace is explicit.
+
+        Gated on MEMORYLAYER_SESSION_IMPLICIT_CREATE config flag.
+        """
+        if not self._implicit_session_create:
+            self.logger.debug(
+                "Implicit session creation disabled, skipping for session %s",
+                session_id,
+            )
+            return None
+
+        try:
+            session = Session.create_with_ttl(
+                session_id=session_id,
+                workspace_id=workspace_id,
+                ttl_seconds=3600,
+                tenant_id=tenant_id,
+                metadata={"recreated": True},
+            )
+            created = await self.session_service.create_session(workspace_id, session)
+            self.logger.info(
+                "Implicitly created session %s in workspace %s",
+                session_id, workspace_id,
+            )
+            return created
+        except Exception as e:
+            self.logger.warning(
+                "Failed to implicitly create session %s: %s",
+                session_id, e,
+            )
+            return None
+
 
 class OpenAuthenticationServicePlugin(Plugin):
     """Plugin to register the OSS authentication service."""
@@ -112,9 +158,17 @@ class OpenAuthenticationServicePlugin(Plugin):
         session_service = get_extension(EXT_SESSION_SERVICE, v)
         workspace_service = get_extension(EXT_WORKSPACE_SERVICE, v)
 
+        from scitrera_app_framework import ext_parse_bool
+        implicit_create = v.environ(
+            MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+            default=DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+            type_fn=ext_parse_bool,
+        )
+
         return OpenAuthenticationService(
             session_service=session_service,
             workspace_service=workspace_service,
+            implicit_session_create=implicit_create,
             logger=logger,
         )
 

@@ -21,15 +21,10 @@ from .. import EXT_MULTI_API_ROUTERS
 from ...lifecycle.fastapi import get_logger, get_variables_dep
 from ...models.memory import RememberInput, RecallInput, ReflectInput
 from ...models.auth import RequestContext
-from ...services.memory import MemoryService, EXT_MEMORY_SERVICE
+from ...services.memory import MemoryService
 from ...services.reflect import ReflectService, EXT_REFLECT_SERVICE
-from ...services.authentication import (
-    AuthenticationService,
-    AuthenticationError,
-    get_authentication_service,
-    EXT_AUTHENTICATION_SERVICE,
-)
-from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SERVICE
+from ...services.authentication import AuthenticationService, AuthenticationError
+from ...services.authorization import AuthorizationService
 
 from .schemas import (
     MemoryCreateRequest,
@@ -45,27 +40,12 @@ from .schemas import (
     BatchOperationResponse,
     BatchOperationResult,
 )
-from .deps import get_active_session
+from .deps import get_active_session, get_auth_service, get_authz_service, get_memory_service
 
 router = APIRouter(prefix="/v1/memories", tags=["memories"])
 
 
 # Dependencies for services
-async def get_auth_service(v: Variables = Depends(get_variables_dep)) -> AuthenticationService:
-    """Get authentication service instance."""
-    return get_extension(EXT_AUTHENTICATION_SERVICE, v)
-
-
-async def get_authz_service(v: Variables = Depends(get_variables_dep)) -> AuthorizationService:
-    """Get authorization service instance."""
-    return get_extension(EXT_AUTHORIZATION_SERVICE, v)
-
-
-async def get_memory_service(v: Variables = Depends(get_variables_dep)) -> MemoryService:
-    """Get memory service instance for FastAPI dependency injection."""
-    return get_extension(EXT_MEMORY_SERVICE, v)
-
-
 async def get_reflect_service(v: Variables = Depends(get_variables_dep)) -> ReflectService:
     """Get reflect service instance for FastAPI dependency injection."""
     return get_extension(EXT_REFLECT_SERVICE, v)

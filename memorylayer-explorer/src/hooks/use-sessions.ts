@@ -2,70 +2,15 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useConnection } from '@/providers/connection-provider';
-import { useSyncExternalStore, useCallback } from 'react';
-import type { SessionCreateOptions, CommitOptions, CommitResponse } from '@/types';
+import type { Session, SessionCreateOptions, CommitOptions, CommitResponse } from '@/types';
 
-const STORAGE_KEY = 'memorylayer-sessions';
-
-// Cache for useSyncExternalStore: must return the same reference
-// if the underlying data hasn't changed to avoid infinite re-renders.
-let _cachedRaw: string | null = null;
-let _cachedIds: string[] = [];
-
-function getSessionIds(): string[] {
-  if (typeof window === 'undefined') return _cachedIds;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw !== _cachedRaw) {
-      _cachedRaw = raw;
-      _cachedIds = raw ? (JSON.parse(raw) as string[]) : [];
-    }
-  } catch {
-    // ignore parse errors
-  }
-  return _cachedIds;
-}
-
-function setSessionIds(ids: string[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
-  } catch {
-    // ignore storage errors
-  }
-  window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
-}
-
-function addSessionId(id: string): void {
-  const ids = getSessionIds();
-  if (!ids.includes(id)) {
-    setSessionIds([...ids, id]);
-  }
-}
-
-function removeSessionId(id: string): void {
-  const ids = getSessionIds().filter((sid) => sid !== id);
-  setSessionIds(ids);
-}
-
-function subscribeToStorage(callback: () => void): () => void {
-  const handler = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY || e.key === null) {
-      callback();
-    }
-  };
-  window.addEventListener('storage', handler);
-  return () => window.removeEventListener('storage', handler);
-}
-
-const serverSnapshot: string[] = [];
-
-export function useSessionIds(): string[] {
-  return useSyncExternalStore(
-    subscribeToStorage,
-    getSessionIds,
-    () => serverSnapshot
-  );
+export function useListSessions() {
+  const { client, isConnected, connectionConfig } = useConnection();
+  return useQuery<Session[]>({
+    queryKey: ['sessions', { workspaceId: connectionConfig.workspaceId }],
+    queryFn: () => client.listSessions(),
+    enabled: isConnected,
+  });
 }
 
 export function useSession(sessionId: string) {
@@ -96,9 +41,8 @@ export function useCreateSession() {
       const response = await client.createSession(options, false);
       return response;
     },
-    onSuccess: (data) => {
-      addSessionId(data.session.id);
-      queryClient.setQueryData(['sessions', data.session.id], data.session);
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
   });
 }
@@ -149,8 +93,8 @@ export function useDeleteSession() {
       return sessionId;
     },
     onSuccess: (sessionId) => {
-      removeSessionId(sessionId);
       queryClient.removeQueries({ queryKey: ['sessions', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
   });
 }
@@ -176,10 +120,4 @@ export function useSetWorkingMemory() {
       queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'memory'] });
     },
   });
-}
-
-export function useRemoveSessionId() {
-  return useCallback((id: string) => {
-    removeSessionId(id);
-  }, []);
 }

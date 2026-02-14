@@ -15,11 +15,11 @@ import {
 } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/shared/empty-state';
 import { SessionCard } from '@/components/session/session-card';
-import { useSessionIds, useCreateSession } from '@/hooks/use-sessions';
+import { useListSessions, useCreateSession } from '@/hooks/use-sessions';
 import { useConnection } from '@/providers/connection-provider';
 
 export default function SessionsPage() {
-  const sessionIds = useSessionIds();
+  const { data: sessions, isLoading, isError, error } = useListSessions();
   const createSession = useCreateSession();
   const { connectionConfig } = useConnection();
   const [showCreate, setShowCreate] = useState(false);
@@ -55,7 +55,19 @@ export default function SessionsPage() {
         </Button>
       </div>
 
-      {sessionIds.length === 0 ? (
+      {isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-32 rounded-lg" />
+          ))}
+        </div>
+      ) : isError ? (
+        <EmptyState
+          icon={Terminal}
+          title="Failed to load sessions"
+          description={(error as Error)?.message ?? 'Could not fetch sessions from the server.'}
+        />
+      ) : !sessions || sessions.length === 0 ? (
         <EmptyState
           icon={Terminal}
           title="No active sessions"
@@ -67,8 +79,8 @@ export default function SessionsPage() {
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {sessionIds.map((id) => (
-            <SessionCard key={id} sessionId={id} />
+          {sessions.map((session) => (
+            <SessionCard key={session.id} session={session} />
           ))}
         </div>
       )}

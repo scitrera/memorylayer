@@ -11,7 +11,7 @@ from ...models.authz import AuthorizationDecision, AuthorizationContext
 if TYPE_CHECKING:
     from ...models.auth import RequestContext
 
-EXT_AUTHORIZATION_SERVICE = 'memorylayer-authorization-service'
+from .._constants import EXT_AUTHORIZATION_SERVICE
 
 
 class AuthorizationService(ABC):
