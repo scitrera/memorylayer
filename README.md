@@ -128,7 +128,7 @@ For the full Claude Code experience, also install the **[MemoryLayer plugin](./m
 
 ```bash
 # Add the marketplace (one-time setup)
-claude plugin marketplace add https://github.com/scitrera/memorylayer.git
+claude plugin marketplace add scitrera/memorylayer
 
 # Install the plugin
 claude plugin install memorylayer@memorylayer.ai
