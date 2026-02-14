@@ -70,6 +70,16 @@ class WorkspaceService:
         self.logger.debug("Getting workspace: %s", workspace_id)
         return await self._storage.get_workspace(workspace_id)
 
+    async def list_workspaces(self) -> list["Workspace"]:
+        """
+        List all workspaces.
+
+        Returns:
+            List of all workspaces
+        """
+        self.logger.debug("Listing workspaces")
+        return await self._storage.list_workspaces()
+
     async def ensure_workspace(
             self,
             workspace_id: str,

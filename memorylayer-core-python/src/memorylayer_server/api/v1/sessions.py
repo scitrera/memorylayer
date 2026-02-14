@@ -168,7 +168,14 @@ async def create_session(
         briefing = None
         if request.briefing:
             logger.info("Generating briefing for session: %s", session_id)
-            briefing = await session_service.get_briefing(workspace_id)
+            briefing = await session_service.get_briefing(
+                workspace_id,
+                lookback_minutes=60,
+                detail_level="abstract",
+                limit=10,
+                include_memories=True,
+                include_contradictions=True,
+            )
 
         logger.info("Created session: %s", session_id)
         return SessionStartResponse(session=session, briefing=briefing)
@@ -199,6 +206,12 @@ async def create_session(
 )
 async def get_briefing(
         http_request: Request,
+        workspace_id: Optional[str] = None,
+        lookback_minutes: int = 60,
+        detail_level: str = "abstract",
+        limit: int = 10,
+        include_memories: bool = True,
+        include_contradictions: bool = True,
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
@@ -215,6 +228,7 @@ async def get_briefing(
 
     Args:
         http_request: FastAPI request (for headers)
+        workspace_id: Optional explicit workspace ID override
         auth_service: Authentication service for workspace resolution
         session_service: Session service instance
 
@@ -227,14 +241,22 @@ async def get_briefing(
     try:
         # Build context and check authorization
         ctx = await auth_service.build_context(http_request, None)
+        # Use explicit workspace_id if provided, otherwise fall back to context
+        workspace_id = workspace_id or ctx.workspace_id
         await authz_service.require_authorization(
-            ctx, "sessions", "read", workspace_id=ctx.workspace_id
+            ctx, "sessions", "read", workspace_id=workspace_id
         )
-        workspace_id = ctx.workspace_id
 
         logger.info("Generating briefing for workspace: %s", workspace_id)
 
-        briefing = await session_service.get_briefing(workspace_id)
+        briefing = await session_service.get_briefing(
+            workspace_id,
+            lookback_minutes=lookback_minutes,
+            detail_level=detail_level,
+            limit=limit,
+            include_memories=include_memories,
+            include_contradictions=include_contradictions,
+        )
         return SessionBriefingResponse(briefing=briefing)
 
     except HTTPException:

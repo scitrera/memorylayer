@@ -78,6 +78,16 @@
             "timeout": 5000
           }
         ]
+      },
+      {
+        "matcher": "Read|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook PostToolUse",
+            "timeout": 5000
+          }
+        ]
       }
     ],
     "Stop": [

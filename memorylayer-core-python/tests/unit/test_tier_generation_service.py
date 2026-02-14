@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from memorylayer_server.models.memory import Memory, MemoryType
 from memorylayer_server.services.semantic_tiering.default import DefaultSemanticTieringService
 from memorylayer_server.services.semantic_tiering.base import SemanticTieringService
-from memorylayer_server.services.semantic_tiering.task_handler import TierGenerationTaskHandler
+from memorylayer_server.services.semantic_tiering.semantic_tiering_task_handler import TierGenerationTaskHandler
 
 
 # ---------------------------------------------------------------------------

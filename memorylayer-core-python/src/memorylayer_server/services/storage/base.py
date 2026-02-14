@@ -1,5 +1,6 @@
 """Abstract storage backend interface."""
 from abc import ABC, abstractmethod
+from datetime import datetime
 from logging import Logger
 from typing import TYPE_CHECKING, Optional, Any
 
@@ -49,8 +50,12 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Optional[Memory]:
-        """Get memory by ID. Set track_access=False for internal reads that should not affect decay tracking."""
+        """Get memory by ID within a workspace. Set track_access=False for internal reads that should not affect decay tracking."""
         pass
+
+    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+        """Get memory by ID without workspace filter. Memory IDs are globally unique."""
+        raise NotImplementedError("Subclass should implement get_memory_by_id")
 
     @abstractmethod
     async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Optional[Memory]:
@@ -92,6 +97,29 @@ class StorageBackend(ABC):
     @abstractmethod
     async def get_memory_by_hash(self, workspace_id: str, content_hash: str) -> Optional[Memory]:
         """Get memory by content hash for deduplication."""
+        pass
+
+    @abstractmethod
+    async def get_recent_memories(
+        self,
+        workspace_id: str,
+        created_after: datetime,
+        limit: int = 10,
+        detail_level: str = "abstract",
+        offset: int = 0,
+    ) -> list:
+        """Get recent memories ordered by creation time (newest first).
+
+        Args:
+            workspace_id: Workspace boundary
+            created_after: Only return memories created after this time
+            limit: Maximum number of memories to return
+            detail_level: Level of detail - "abstract", "overview", or "full"
+            offset: Number of memories to skip (for pagination)
+
+        Returns:
+            List of dicts with memory data, newest first
+        """
         pass
 
     # Association operations
@@ -148,6 +176,11 @@ class StorageBackend(ABC):
     @abstractmethod
     async def list_contexts(self, workspace_id: str) -> list[Context]:
         """List all contexts in a workspace."""
+        pass
+
+    @abstractmethod
+    async def list_workspaces(self) -> list[Workspace]:
+        """List all workspaces."""
         pass
 
     # Statistics

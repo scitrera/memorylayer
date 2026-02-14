@@ -3,7 +3,7 @@
  * Retrieves briefing and relevant memories at session start
  */
 
-import type {Memory} from "../../types.js";
+import type { Memory } from "@scitrera/memorylayer-mcp-server";
 import type {HookInput, HookOutput} from "../types.js";
 import {getClient, checkHealth} from "../client.js";
 import {formatSessionStart} from "../formatters.js";
@@ -66,7 +66,7 @@ export async function handleSessionStart(input: HookInput): Promise<HookOutput> 
 
         // Run briefing, directive recall, and sandbox check in parallel
         const [briefingResult, directiveResult, sandboxResult] = await Promise.allSettled([
-            client.getBriefing(false),
+            client.getBriefing({ limit: 10, includeMemories: false }),
             client.recall({
                 query: "user directives and preferences",
                 subtypes: ["directive", "preference"],

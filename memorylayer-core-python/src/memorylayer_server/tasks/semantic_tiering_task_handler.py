@@ -7,11 +7,10 @@ via the TaskService infrastructure.
 from logging import Logger
 from typing import Optional
 
-from scitrera_app_framework import get_logger
-from scitrera_app_framework.api import Variables
+from scitrera_app_framework import get_logger, Variables
 
-from ..tasks import TaskHandlerPlugin, TaskSchedule
-from .base import SemanticTieringService, EXT_SEMANTIC_TIERING_SERVICE
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
+from ..services.semantic_tiering import SemanticTieringService, EXT_SEMANTIC_TIERING_SERVICE
 
 
 class TierGenerationTaskHandler(TaskHandlerPlugin):
@@ -28,17 +27,13 @@ class TierGenerationTaskHandler(TaskHandlerPlugin):
     def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
         return None  # On-demand only, not recurring
 
-    async def handle(self, payload: dict) -> None:
+    async def handle(self, v: Variables, payload: dict) -> None:
         memory_id = payload['memory_id']
         workspace_id = payload['workspace_id']
 
-        tier_service: SemanticTieringService = self.get_extension(EXT_SEMANTIC_TIERING_SERVICE, self._v)
-        logger: Logger = get_logger(self._v, name=self.get_task_type())
+        tier_service: SemanticTieringService = self.get_extension(EXT_SEMANTIC_TIERING_SERVICE, v)
+        logger: Logger = get_logger(v, name=self.get_task_type())
 
         logger.debug("Generating tiers for memory %s in workspace %s", memory_id, workspace_id)
         await tier_service.generate_tiers(memory_id, workspace_id)
         logger.debug("Completed tier generation for memory %s", memory_id)
-
-    def initialize(self, v, logger) -> 'TierGenerationTaskHandler':
-        self._v = v
-        return self

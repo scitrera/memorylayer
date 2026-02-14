@@ -104,6 +104,22 @@ export function getCurrentTopic(): string | undefined {
 }
 
 /**
+ * Store the user's current prompt for cross-hook context
+ */
+export function setCurrentPrompt(prompt: string): void {
+  const state = readHookState();
+  state.currentPrompt = prompt;
+  writeHookState(state);
+}
+
+/**
+ * Get the user's current prompt (set by UserPromptSubmit)
+ */
+export function getCurrentPrompt(): string | undefined {
+  return readHookState().currentPrompt;
+}
+
+/**
  * Update workspace/session info
  */
 export function updateSessionInfo(workspaceId: string, sessionId?: string): void {
@@ -121,8 +137,35 @@ export function getWorkspaceId(): string | undefined {
 }
 
 /**
- * Get current session ID from state
+ * Get current session ID from hook-state.json (disk read, singleton).
+ * Prefer resolveSessionId() which checks env first and avoids disk I/O.
  */
-export function getSessionId(): string | undefined {
+export function getSessionIdFromHookState(): string | undefined {
   return readHookState().sessionId;
+}
+
+/**
+ * Resolve session ID with env-first strategy.
+ *
+ * Prefers process.env.MEMORYLAYER_SESSION_ID (session-scoped via CLAUDE_ENV_FILE)
+ * over hook-state.json (singleton, shared across concurrent sessions).
+ * Only falls back to disk read if env var is not set.
+ *
+ * @param caller - label for diagnostic logging (e.g. "post-tool", "stop")
+ */
+export function resolveSessionId(caller: string): string | undefined {
+  const envSessionId = process.env.MEMORYLAYER_SESSION_ID;
+  if (envSessionId) {
+    console.error(`[${caller}] session=${envSessionId} source=env`);
+    return envSessionId;
+  }
+
+  const stateSessionId = getSessionIdFromHookState();
+  if (stateSessionId) {
+    console.error(`[${caller}] session=${stateSessionId} source=hook-state (env not set)`);
+    return stateSessionId;
+  }
+
+  console.error(`[${caller}] no session ID available (env or hook-state)`);
+  return undefined;
 }

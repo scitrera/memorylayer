@@ -5,7 +5,7 @@
  * so hooks and MCP tools share the same data contracts.
  */
 
-import type { Memory, RecallResult, ToolResponse } from "../types.js";
+import type { Memory, RecallResult, ToolResponse } from "@scitrera/memorylayer-mcp-server";
 
 /**
  * Format a single memory for display
@@ -122,7 +122,7 @@ export function formatDirectives(memories: Memory[]): string {
   ];
 
   for (const directive of directives) {
-    lines.push(`• ${directive.content}`);
+    lines.push(`\u2022 ${directive.content}`);
   }
 
   return lines.join("\n");
@@ -193,12 +193,12 @@ Storing Memories:
 - \`memory_remember\`: store to long-term memory with type, subtype, and importance
 - \`memory_session_commit\`: checkpoint working memory mid-session (without ending it)
 
-Importance Guide: directives/preferences → 0.9 | decisions/architecture → 0.7-0.8 | fixes/solutions → 0.7 | patterns → 0.5-0.6
+Importance Guide: directives/preferences \u2192 0.9 | decisions/architecture \u2192 0.7-0.8 | fixes/solutions \u2192 0.7 | patterns \u2192 0.5-0.6
 Types: semantic (facts), procedural (how-to), episodic (events), working (current context, auto-expires)
 Subtypes: directive, decision, fix, solution, code_pattern, error, workflow, preference, problem
 
 Context Environment (sandbox survives compaction):
-- Load + analyze memories server-side: \`memory_context_load\` → \`memory_context_query\` or \`memory_context_rlm\`
+- Load + analyze memories server-side: \`memory_context_load\` \u2192 \`memory_context_query\` or \`memory_context_rlm\`
 - Run computations on loaded data: \`memory_context_exec\` (Python sandbox)
 - After compaction, call \`memory_context_inspect\` to re-orient with existing sandbox variables`;
   sections.push(guidance);

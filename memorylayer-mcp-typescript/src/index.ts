@@ -23,3 +23,4 @@ export type { ToolProfile, ToolDefinition } from "./tools.js";
 export { SessionManager } from "./session.js";
 export type { SessionState, SessionConfig, WorkingMemoryEntry } from "./session.js";
 export * from "./types.js";
+export { detectWorkspaceId } from "./workspace.js";

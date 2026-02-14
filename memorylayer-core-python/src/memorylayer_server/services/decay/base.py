@@ -6,6 +6,7 @@ from typing import Optional
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_DECAY_PROVIDER, DEFAULT_MEMORYLAYER_DECAY_PROVIDER
+from ...models import Memory
 from ..storage import EXT_STORAGE_BACKEND
 
 EXT_DECAY_SERVICE = 'memorylayer-decay-service'
@@ -42,6 +43,10 @@ class DecayService(ABC):
     @abstractmethod
     async def archive_stale_memories(self, workspace_id: str, settings: Optional[DecaySettings] = None) -> int:
         """Archive stale low-importance memories. Returns count archived."""
+        pass
+
+    @abstractmethod
+    async def calculate_access_boost(self, memory: Memory, boost_factor: Optional[float] = None) -> Optional[float]:
         pass
 
     @abstractmethod

@@ -15,6 +15,7 @@ Operations:
 - touch_session: Extend session TTL (v2)
 """
 
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional, Any, List, Dict, TYPE_CHECKING
@@ -35,16 +36,16 @@ class CommitResult:
     """Result of a session commit operation."""
 
     def __init__(
-        self,
-        session_id: str,
-        committed_at: datetime,
-        memories_committed: int = 0,
-        associations_committed: int = 0,
-        success: bool = True,
-        error: Optional[str] = None,
-        memories_extracted: int = 0,
-        memories_deduplicated: int = 0,
-        extraction_summary: Optional[Dict[str, Any]] = None
+            self,
+            session_id: str,
+            committed_at: datetime,
+            memories_committed: int = 0,
+            associations_committed: int = 0,
+            success: bool = True,
+            error: Optional[str] = None,
+            memories_extracted: int = 0,
+            memories_deduplicated: int = 0,
+            extraction_summary: Optional[Dict[str, Any]] = None
     ):
         self.session_id = session_id
         self.committed_at = committed_at
@@ -61,11 +62,11 @@ class CommitOptions:
     """Options for session commit operation."""
 
     def __init__(
-        self,
-        include_working_memory: bool = True,
-        importance_threshold: Optional[float] = None,
-        delete_after_commit: bool = False,
-        tags: Optional[List[str]] = None
+            self,
+            include_working_memory: bool = True,
+            importance_threshold: Optional[float] = None,
+            delete_after_commit: bool = False,
+            tags: Optional[List[str]] = None
     ):
         self.include_working_memory = include_working_memory
         self.importance_threshold = importance_threshold
@@ -76,12 +77,14 @@ class CommitOptions:
 class SessionService(ABC):
     """Interface for session service."""
 
+    logger: logging.Logger = None
+
     @abstractmethod
     async def create_session(
-        self,
-        workspace_id: str,
-        session: Session,
-        context_id: Optional[str] = None
+            self,
+            workspace_id: str,
+            session: Session,
+            context_id: Optional[str] = None
     ) -> Session:
         """Store a new session.
 
@@ -151,8 +154,25 @@ class SessionService(ABC):
         pass
 
     @abstractmethod
-    async def get_briefing(self, workspace_id: str) -> 'SessionBriefing':
-        """Generate a session briefing with workspace summary and recent activity."""
+    async def get_briefing(
+            self,
+            workspace_id: str,
+            lookback_minutes: int = 60,
+            detail_level: str = "abstract",
+            limit: int = 10,
+            include_memories: bool = True,
+            include_contradictions: bool = True,
+    ) -> 'SessionBriefing':
+        """Generate a session briefing with workspace summary and recent activity.
+
+        Args:
+            workspace_id: Workspace identifier
+            lookback_minutes: Time window for recent memories (default 60)
+            detail_level: Memory detail level - abstract, overview, or full
+            limit: Maximum memories to include
+            include_memories: Whether to include memory content
+            include_contradictions: Whether to detect contradictions
+        """
         pass
 
     # ========================================
@@ -161,10 +181,10 @@ class SessionService(ABC):
 
     @abstractmethod
     async def commit_session(
-        self,
-        workspace_id: str,
-        session_id: str,
-        options: Optional[CommitOptions] = None
+            self,
+            workspace_id: str,
+            session_id: str,
+            options: Optional[CommitOptions] = None
     ) -> CommitResult:
         """Commit session working memory to long-term storage.
 
@@ -183,10 +203,10 @@ class SessionService(ABC):
 
     @abstractmethod
     async def touch_session(
-        self,
-        workspace_id: str,
-        session_id: str,
-        extend_seconds: Optional[int] = None
+            self,
+            workspace_id: str,
+            session_id: str,
+            extend_seconds: Optional[int] = None
     ) -> Session:
         """Extend session TTL.
 
@@ -205,10 +225,10 @@ class SessionService(ABC):
 
     @abstractmethod
     async def list_sessions(
-        self,
-        workspace_id: str,
-        context_id: Optional[str] = None,
-        include_expired: bool = False
+            self,
+            workspace_id: str,
+            context_id: Optional[str] = None,
+            include_expired: bool = False
     ) -> List[Session]:
         """List sessions in a workspace.
 

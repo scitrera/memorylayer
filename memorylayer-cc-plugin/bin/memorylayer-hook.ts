@@ -16,7 +16,9 @@
  *   Stop             - Called when session ends
  */
 
-import { appendFileSync } from "fs";
+import { appendFileSync, readFileSync, existsSync, unlinkSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { HookEvent, type HookInput, type HookOutput } from "../src/hooks/types.js";
 import { handleSessionStart } from "../src/hooks/handlers/session-start.js";
 import { handleUserPromptSubmit } from "../src/hooks/handlers/user-prompt.js";
@@ -162,23 +164,64 @@ async function dispatch(hookType: HookEvent, input: HookInput): Promise<HandlerR
       // Reset recall status at session start
       resetRecallStatus();
 
-      // Write workspace ID and session ID to CLAUDE_ENV_FILE for subsequent bash commands
       const envFile = process.env.CLAUDE_ENV_FILE;
-      if (envFile) {
+
+      // Try to read session from MCP server's handoff file
+      const handoffDir = join(tmpdir(), "memorylayer");
+      const handoffFile = join(handoffDir, `session-${process.ppid}.json`);
+
+      let sessionId: string | undefined;
+      let workspaceId: string | undefined;
+
+      try {
+        if (existsSync(handoffFile)) {
+          const data = JSON.parse(readFileSync(handoffFile, "utf-8"));
+          sessionId = data.sessionId;
+          workspaceId = data.workspaceId;
+          // Clean up the handoff file
+          unlinkSync(handoffFile);
+        }
+      } catch {
+        // Handoff file not available, fall through
+      }
+
+      // Fallback: if no handoff file, create session directly (backward compat)
+      if (!sessionId) {
         try {
           const client = getClient();
-          const workspaceId = client.getWorkspaceId();
-          appendFileSync(envFile, `export MEMORYLAYER_WORKSPACE_ID="${workspaceId}"\n`);
-
-          // Start a server-side session and export its ID
+          workspaceId = client.getWorkspaceId();
           const sessionResult = await client.startSession({ ttl_seconds: 3600 });
-          appendFileSync(envFile, `export MEMORYLAYER_SESSION_ID="${sessionResult.session_id}"\n`);
-
-          // Also save to hook state so the Stop handler can access it
-          updateSessionInfo(workspaceId, sessionResult.session_id);
+          sessionId = sessionResult.session_id;
+          console.error(`[session-start] created hook session=${sessionId} workspace=${workspaceId} (direct, no handoff)`);
         } catch {
-          // Ignore errors - memory features will still work via MCP tools
+          // Ignore - memory features will still work via MCP tools
+          console.error("[session-start] failed to create hook session (server unreachable?)");
         }
+      } else {
+        console.error(`[session-start] got hook session=${sessionId} workspace=${workspaceId} (from handoff file)`);
+      }
+
+      // Write to CLAUDE_ENV_FILE so subsequent hook processes get the session.
+      // Each Claude Code session has its own env file, providing session isolation.
+      if (envFile) {
+        try {
+          if (workspaceId) {
+            appendFileSync(envFile, `export MEMORYLAYER_WORKSPACE_ID="${workspaceId}"\n`);
+          }
+          if (sessionId) {
+            appendFileSync(envFile, `export MEMORYLAYER_SESSION_ID="${sessionId}"\n`);
+          }
+          console.error(`[session-start] wrote to CLAUDE_ENV_FILE=${envFile} sessionId=${sessionId || "(none)"} workspaceId=${workspaceId || "(none)"}`);
+        } catch (err) {
+          console.error(`[session-start] failed to write CLAUDE_ENV_FILE=${envFile}:`, err);
+        }
+      } else {
+        console.error("[session-start] CLAUDE_ENV_FILE not set -- env propagation unavailable, falling back to hook-state.json only");
+      }
+
+      // Save to hook state as fallback (singleton -- will be superseded by env propagation)
+      if (workspaceId) {
+        updateSessionInfo(workspaceId, sessionId);
       }
 
       return legacyToResult(await handleSessionStart(input));

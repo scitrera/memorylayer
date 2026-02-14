@@ -368,6 +368,24 @@ export interface WorkspaceSchema {
   can_customize: boolean;
 }
 
+// Workspace export/import
+export interface WorkspaceExportData {
+  version: string;
+  exported_at: string;
+  workspace_id: string;
+  total_memories: number;
+  total_associations: number;
+  memories: Array<Record<string, unknown>>;
+  associations: Array<Record<string, unknown>>;
+}
+
+export interface WorkspaceImportResult {
+  imported: number;
+  skipped_duplicates: number;
+  errors: number;
+  details: string[];
+}
+
 // Context Environment types
 export interface ContextExecOptions {
   resultVar?: string;

@@ -7,7 +7,7 @@ This implementation provides:
 - Workspace auto-creation on first access
 """
 import logging
-from typing import Optional
+from typing import Optional, Iterable
 
 from scitrera_app_framework import Plugin, Variables, get_extension
 
@@ -32,10 +32,10 @@ class OpenAuthenticationService(AuthenticationService):
     """
 
     def __init__(
-        self,
-        session_service: SessionService,
-        workspace_service: WorkspaceService,
-        logger: Optional[logging.Logger] = None,
+            self,
+            session_service: SessionService,
+            workspace_service: WorkspaceService,
+            logger: Optional[logging.Logger] = None,
     ):
         super().__init__(logger)
         self.session_service = session_service
@@ -72,10 +72,10 @@ class OpenAuthenticationService(AuthenticationService):
             return None
 
     async def resolve_workspace(
-        self,
-        request_workspace_id: Optional[str],
-        session: Optional[Session],
-        tenant_id: str,
+            self,
+            request_workspace_id: Optional[str],
+            session: Optional[Session],
+            tenant_id: str,
     ) -> str:
         """
         Resolve workspace with priority order and auto-creation.
@@ -87,9 +87,9 @@ class OpenAuthenticationService(AuthenticationService):
         """
         # Priority resolution
         workspace_id = (
-            request_workspace_id
-            or (session.workspace_id if session else None)
-            or DEFAULT_WORKSPACE_ID
+                request_workspace_id
+                or (session.workspace_id if session else None)
+                or DEFAULT_WORKSPACE_ID
         )
 
         # Auto-create workspace if needed (OSS "just works" pattern)
@@ -117,6 +117,9 @@ class OpenAuthenticationServicePlugin(Plugin):
             workspace_service=workspace_service,
             logger=logger,
         )
+
+    def get_dependencies(self, v: Variables) -> Iterable[str]:
+        return (EXT_SESSION_SERVICE, EXT_WORKSPACE_SERVICE,)
 
 
 def get_authentication_service(v: Variables) -> AuthenticationService:

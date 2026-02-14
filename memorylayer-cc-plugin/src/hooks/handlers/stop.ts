@@ -5,10 +5,9 @@
 
 import type { HookOutput } from "../types.js";
 import { getClient, checkHealth } from "../client.js";
-import { getSessionId } from "../state.js";
 
 /**
- * Handle Stop event — commit and end the server session.
+ * Handle Stop event -- commit and end the server session.
  *
  * Stop hooks cannot inject additional context (Claude Code is shutting down),
  * so this handler performs side effects only: committing working memory
@@ -20,13 +19,15 @@ export async function handleStop(): Promise<HookOutput> {
     return { success: true };
   }
 
-  const sessionId = getSessionId() || process.env.MEMORYLAYER_SESSION_ID;
+  // getClient() syncs session ID from env/hook-state via resolveSessionId
+  const client = getClient();
+  const sessionId = client.getSessionId();
   if (!sessionId) {
+    console.error("[stop] no session ID available, skipping commit/end");
     return { success: true };
   }
 
   try {
-    const client = getClient();
 
     // Commit working memory to long-term storage
     try {
@@ -45,7 +46,7 @@ export async function handleStop(): Promise<HookOutput> {
       // Session may already be ended
     }
   } catch {
-    // Best-effort — don't fail the hook on shutdown
+    // Best-effort -- don't fail the hook on shutdown
   }
 
   return { success: true };

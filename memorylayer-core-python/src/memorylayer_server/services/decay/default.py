@@ -6,9 +6,9 @@ from typing import Optional
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
+from ...models import Memory
+from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from .base import DecayService, DecayServicePluginBase, DecaySettings, DecayResult
-from ..storage import EXT_STORAGE_BACKEND
-from ..storage.base import StorageBackend
 
 
 class DefaultDecayService(DecayService):
@@ -81,14 +81,20 @@ class DefaultDecayService(DecayService):
             )
         return archived
 
-    async def boost_on_access(self, workspace_id: str, memory_id: str, boost_factor: Optional[float] = None) -> Optional[float]:
+    async def calculate_access_boost(self, memory: Memory, boost_factor: Optional[float] = None) -> Optional[float]:
         boost = boost_factor or DecaySettings().access_boost
-
-        memory = await self._storage.get_memory(workspace_id, memory_id, track_access=False)
         if not memory or memory.pinned:
             return memory.importance if memory else None
 
         new_importance = min(1.0, memory.importance * boost)
+        return new_importance
+
+    async def boost_on_access(self, workspace_id: str, memory_id: str, boost_factor: Optional[float] = None) -> Optional[float]:
+        memory = await self._storage.get_memory(workspace_id, memory_id, track_access=False)
+        if not memory or memory.pinned:
+            return memory.importance if memory else None
+
+        new_importance = await self.calculate_access_boost(memory, boost_factor=boost_factor)
         if abs(new_importance - memory.importance) > 0.001:
             await self._storage.update_memory(
                 workspace_id, memory_id,

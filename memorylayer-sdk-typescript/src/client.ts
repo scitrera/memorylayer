@@ -7,7 +7,7 @@ import type {
   ContextExecOptions, ContextExecResult, ContextInspectOptions, ContextInspectResult,
   ContextLoadOptions, ContextLoadResult, ContextInjectOptions, ContextInjectResult,
   ContextQueryOptions, ContextQueryResult, ContextRlmOptions, ContextRlmResult,
-  ContextStatusResult
+  ContextStatusResult, WorkspaceExportData, WorkspaceImportResult
 } from "./types.js";
 import { RelationshipType } from "./types.js";
 import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError } from "./errors.js";
@@ -63,6 +63,9 @@ export class MemoryLayerClient {
     }
     if (this.sessionId) {
       headers["X-Session-ID"] = this.sessionId;
+    }
+    if (this.workspaceId) {
+      headers["X-Workspace-ID"] = this.workspaceId;
     }
 
     const url = `${this.baseUrl}${path}`;
@@ -300,10 +303,43 @@ export class MemoryLayerClient {
     return response.session;
   }
 
-  async getBriefing(lookbackHours = 24, includeContradictions = true): Promise<SessionBriefing> {
+  async getBriefing(
+    optionsOrLookbackHours?: number | {
+      lookbackMinutes?: number;
+      detailLevel?: string;
+      limit?: number;
+      includeMemories?: boolean;
+      includeContradictions?: boolean;
+    },
+    includeContradictions?: boolean
+  ): Promise<SessionBriefing> {
+    let params: URLSearchParams;
+
+    if (typeof optionsOrLookbackHours === 'object' && optionsOrLookbackHours !== null) {
+      const opts = optionsOrLookbackHours;
+      params = new URLSearchParams();
+      if (opts.lookbackMinutes !== undefined) params.set('lookback_minutes', String(opts.lookbackMinutes));
+      if (opts.detailLevel !== undefined) params.set('detail_level', opts.detailLevel);
+      if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+      if (opts.includeMemories !== undefined) params.set('include_memories', String(opts.includeMemories));
+      if (opts.includeContradictions !== undefined) params.set('include_contradictions', String(opts.includeContradictions));
+    } else {
+      // Backward compatible: getBriefing(24, true)
+      const lookbackHours = optionsOrLookbackHours ?? 24;
+      const ic = includeContradictions ?? true;
+      params = new URLSearchParams();
+      params.set('lookback_minutes', String(lookbackHours * 60));
+      params.set('include_contradictions', String(ic));
+    }
+
+    // Always include workspace_id if configured
+    if (this.workspaceId) {
+      params.set('workspace_id', this.workspaceId);
+    }
+
     const response = await this.request<{ briefing: SessionBriefing }>(
       "GET",
-      `/v1/sessions/briefing?lookback_hours=${lookbackHours}&include_contradictions=${includeContradictions}`
+      `/v1/sessions/briefing?${params.toString()}`
     );
     return response.briefing;
   }
@@ -323,6 +359,11 @@ export class MemoryLayerClient {
     if (!id) throw new ValidationError("Workspace ID required");
     const response = await this.request<{ workspace: Workspace }>("GET", `/v1/workspaces/${id}`);
     return response.workspace;
+  }
+
+  async listWorkspaces(): Promise<Workspace[]> {
+    const response = await this.request<{ workspaces: Workspace[] }>("GET", "/v1/workspaces");
+    return response.workspaces;
   }
 
   async updateWorkspace(workspaceId: string, updates: { name?: string; settings?: Record<string, unknown> }): Promise<Workspace> {
@@ -398,6 +439,199 @@ export class MemoryLayerClient {
     const id = workspaceId ?? this.workspaceId;
     if (!id) throw new ValidationError("Workspace ID required");
     return this.request<WorkspaceSchema>("GET", `/v1/workspaces/${id}/schema`);
+  }
+
+  async exportWorkspace(
+    workspaceId?: string,
+    options?: { includeAssociations?: boolean; offset?: number; limit?: number }
+  ): Promise<WorkspaceExportData> {
+    const id = workspaceId ?? this.workspaceId;
+    if (!id) throw new ValidationError("Workspace ID required");
+    const params = new URLSearchParams();
+    if (options?.includeAssociations === false) {
+      params.set('include_associations', 'false');
+    }
+    if (options?.offset !== undefined) {
+      params.set('offset', String(options.offset));
+    }
+    if (options?.limit !== undefined) {
+      params.set('limit', String(options.limit));
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+
+    // Fetch NDJSON response
+    const url = `${this.baseUrl}/v1/workspaces/${id}/export${query}`;
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
+    if (this.sessionId) {
+      headers["X-Session-ID"] = this.sessionId;
+    }
+    if (this.workspaceId) {
+      headers["X-Workspace-ID"] = this.workspaceId;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        await this.handleError(response);
+      }
+
+      const text = await response.text();
+
+      // Parse NDJSON: split by newlines, parse each line
+      const lines = text.trim().split('\n').filter(line => line.trim());
+      let header: any = null;
+      const memories: any[] = [];
+      const associations: any[] = [];
+
+      for (const line of lines) {
+        const parsed = JSON.parse(line);
+        if (parsed.type === 'header') {
+          header = parsed;
+        } else if (parsed.type === 'memory') {
+          memories.push(parsed.data);
+        } else if (parsed.type === 'association') {
+          associations.push(parsed.data);
+        }
+      }
+
+      // Build backward-compatible response
+      return {
+        version: header?.version || '1.0',
+        workspace_id: header?.workspace_id || id,
+        exported_at: header?.exported_at || new Date().toISOString(),
+        total_memories: header?.total_memories || memories.length,
+        total_associations: header?.total_associations || associations.length,
+        memories,
+        associations,
+      };
+    } catch (error) {
+      if (error instanceof MemoryLayerError) throw error;
+      throw new MemoryLayerError(`Export request failed: ${error}`);
+    }
+  }
+
+  async *exportWorkspaceStream(
+    workspaceId?: string,
+    options?: { includeAssociations?: boolean; offset?: number; limit?: number }
+  ): AsyncGenerator<Record<string, unknown>> {
+    const id = workspaceId ?? this.workspaceId;
+    if (!id) throw new ValidationError("Workspace ID required");
+    const params = new URLSearchParams();
+    if (options?.includeAssociations === false) {
+      params.set('include_associations', 'false');
+    }
+    if (options?.offset !== undefined) {
+      params.set('offset', String(options.offset));
+    }
+    if (options?.limit !== undefined) {
+      params.set('limit', String(options.limit));
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+
+    const url = `${this.baseUrl}/v1/workspaces/${id}/export${query}`;
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
+    if (this.sessionId) {
+      headers["X-Session-ID"] = this.sessionId;
+    }
+    if (this.workspaceId) {
+      headers["X-Workspace-ID"] = this.workspaceId;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        await this.handleError(response);
+      }
+
+      const text = await response.text();
+      const lines = text.trim().split('\n').filter(line => line.trim());
+
+      for (const line of lines) {
+        yield JSON.parse(line);
+      }
+    } catch (error) {
+      if (error instanceof MemoryLayerError) throw error;
+      throw new MemoryLayerError(`Export stream failed: ${error}`);
+    }
+  }
+
+  async importWorkspace(
+    workspaceId: string,
+    data: WorkspaceExportData
+  ): Promise<WorkspaceImportResult> {
+    const response = await this.request<WorkspaceImportResult>(
+      "POST", `/v1/workspaces/${workspaceId}/import`,
+      { data }
+    );
+    return response;
+  }
+
+  async importWorkspaceStream(
+    workspaceId: string,
+    ndjsonBody: string
+  ): Promise<WorkspaceImportResult> {
+    const url = `${this.baseUrl}/v1/workspaces/${workspaceId}/import`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-ndjson",
+    };
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
+    if (this.sessionId) {
+      headers["X-Session-ID"] = this.sessionId;
+    }
+    if (this.workspaceId) {
+      headers["X-Workspace-ID"] = this.workspaceId;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: ndjsonBody,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        await this.handleError(response);
+      }
+
+      return await response.json() as WorkspaceImportResult;
+    } catch (error) {
+      if (error instanceof MemoryLayerError) throw error;
+      throw new MemoryLayerError(`Import stream failed: ${error}`);
+    }
   }
 
   // Context Environment operations

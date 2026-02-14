@@ -6,7 +6,7 @@
 import type { HookInput, HookOutput } from "../types.js";
 import { getClient, checkHealth } from "../client.js";
 import { formatRecallResult } from "../formatters.js";
-import { wasRecallDoneThisTurn, markRecallDone, setCurrentTopic } from "../state.js";
+import { wasRecallDoneThisTurn, markRecallDone, setCurrentTopic, setCurrentPrompt } from "../state.js";
 
 /** Pattern categories and their recall queries */
 const PATTERNS = {
@@ -71,6 +71,9 @@ export async function handleUserPromptSubmit(input: HookInput): Promise<HookOutp
   if (!prompt) {
     return { success: true };
   }
+
+  // Persist the user's prompt for intent detection in PostToolUse
+  setCurrentPrompt(prompt);
 
   // Skip if recall was already done this turn
   if (wasRecallDoneThisTurn()) {

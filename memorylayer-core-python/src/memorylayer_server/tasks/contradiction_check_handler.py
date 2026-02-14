@@ -5,8 +5,8 @@ from typing import Optional
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ..tasks import TaskHandlerPlugin, TaskSchedule
-from .base import ContradictionService, EXT_CONTRADICTION_SERVICE
+from ..services.contradiction import ContradictionService, EXT_CONTRADICTION_SERVICE
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 
 
 class ContradictionCheckTaskHandler(TaskHandlerPlugin):
@@ -25,11 +25,11 @@ class ContradictionCheckTaskHandler(TaskHandlerPlugin):
         # No recurring schedule - triggered on-demand after remember
         return None
 
-    async def handle(self, payload: dict) -> None:
+    async def handle(self, v: Variables, payload: dict) -> None:
         contradiction_service: ContradictionService = self.get_extension(
-            EXT_CONTRADICTION_SERVICE, self._v
+            EXT_CONTRADICTION_SERVICE, v
         )
-        logger: Logger = get_logger(self._v, name=self.get_task_type())
+        logger: Logger = get_logger(v, name=self.get_task_type())
 
         workspace_id = payload.get('workspace_id')
         memory_id = payload.get('memory_id')
@@ -54,7 +54,3 @@ class ContradictionCheckTaskHandler(TaskHandlerPlugin):
                 "No contradictions found for memory %s in workspace %s",
                 memory_id, workspace_id,
             )
-
-    def initialize(self, v, logger) -> 'ContradictionCheckTaskHandler':
-        self._v = v
-        return self

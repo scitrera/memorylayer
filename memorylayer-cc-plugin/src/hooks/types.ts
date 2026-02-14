@@ -79,4 +79,6 @@ export interface HookState {
   recallQueriesThisTurn?: string[];
   /** User's current topic from most recent prompt */
   currentTopic?: string;
+  /** User's current prompt text for intent detection */
+  currentPrompt?: string;
 }

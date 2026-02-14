@@ -8,6 +8,7 @@ Operations:
 - decay: Reduce memory importance over time
 - get: Retrieve single memory by ID
 """
+import asyncio
 import json
 import math
 import re
@@ -173,7 +174,8 @@ class MemoryService:
             "tolerance": input.tolerance.value if input.tolerance and hasattr(input.tolerance, 'value') else str(input.tolerance),
             "limit": input.limit,
             "context_id": input.context_id,
-            "detail_level": input.detail_level.value if input.detail_level and hasattr(input.detail_level, 'value') else str(input.detail_level),
+            "detail_level": input.detail_level.value if input.detail_level and hasattr(input.detail_level, 'value') else str(
+                input.detail_level),
         }, sort_keys=True)
         hash_input = f"{query}|{filter_data}"
         key_hash = compute_content_hash(hash_input)[:16]
@@ -735,7 +737,7 @@ class MemoryService:
             except Exception as e:
                 self.logger.debug("Cache get failed: %s", e)
 
-        # RAG mode: Pure vector similarity
+        # RAG mode: Pass 1 - Pure vector similarity
         if effective_mode == RecallMode.RAG:
             result = await self._recall_rag(
                 workspace_id=workspace_id,
@@ -774,9 +776,9 @@ class MemoryService:
             else:
                 result.mode_used = RecallMode.RAG
 
-        # Calculate latency
-        latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-        result.search_latency_ms = latency_ms
+        # Calculate search-only latency (vector/LLM search phase)
+        search_latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+        result.search_latency_ms = search_latency_ms
 
         # Resolve None → server defaults for graph traversal
         effective_include_associations = (
@@ -793,7 +795,9 @@ class MemoryService:
         )
 
         # Association expansion (Phase 3A)
+        assoc_ms = 0
         if effective_include_associations or effective_traverse_depth > 0:
+            t0 = datetime.now(timezone.utc)
             result.memories = await self._expand_with_associations(
                 workspace_id=workspace_id,
                 memories=result.memories,
@@ -801,42 +805,60 @@ class MemoryService:
                 include_associations=effective_include_associations,
                 max_expansion=effective_max_expansion,
             )
+            assoc_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
 
         # Reranking across all modes (Phase 3B)
-        if self.reranker_service and len(result.memories) > input.limit:
+        # Skip reranking for wildcard/trivial queries where ranking is meaningless
+        rerank_ms = 0
+        trivial_query = input.query.strip() in ("*", "", "**")
+        if self.reranker_service and len(result.memories) > input.limit and not trivial_query:
+            t0 = datetime.now(timezone.utc)
             result.memories = await self._apply_reranking(
                 query=input.query,
                 memories=result.memories,
                 limit=input.limit,
             )
+            rerank_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+        elif len(result.memories) > input.limit:
+            # Truncate without reranking (trivial query or no reranker)
+            result.memories = result.memories[:input.limit]
 
         # Apply detail_level filtering if requested
+        detail_ms = 0
         if effective_detail_level != DetailLevel.FULL:
+            t0 = datetime.now(timezone.utc)
             filtered_memories = self._apply_detail_level(
                 result.memories,
                 effective_detail_level
             )
             result.memories = filtered_memories
+            detail_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+
+        # Increment access counts (and boost importance) in parallel
+        access_ms = 0
+        if result.memories:
+            t0 = datetime.now(timezone.utc)
+            access_tasks = [self.increment_access(workspace_id, m.id) for m in result.memories]
+            await asyncio.gather(*access_tasks, return_exceptions=True)
+            access_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+
+        # Calculate total latency
+        total_latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
         self.logger.info(
-            "Recalled %s memories in %s ms using %s mode (detail_level: %s)",
+            "Recalled %s memories in %s ms "
+            "(search: %s ms, associations: %s ms, rerank: %s ms, detail_filter: %s ms, access_tracking: %s ms) "
+            "using %s mode (detail_level: %s)",
             len(result.memories),
-            latency_ms,
+            total_latency_ms,
+            search_latency_ms,
+            assoc_ms,
+            rerank_ms,
+            detail_ms,
+            access_ms,
             result.mode_used,
             effective_detail_level.value
         )
-
-        # Increment access counts
-        for memory in result.memories:
-            await self.increment_access(workspace_id, memory.id)
-
-        # Boost importance for accessed memories (fire-and-forget)
-        if self.decay_service and result.memories:
-            for memory in result.memories:
-                try:
-                    await self.decay_service.boost_on_access(workspace_id, memory.id)
-                except Exception as e:
-                    self.logger.debug("Failed to boost importance for %s: %s", memory.id, e)
 
         # Phase 4: Cache recall result
         if self.cache and cache_key:
@@ -1258,9 +1280,17 @@ Top {limit} indices (comma-separated):"""
             workspace_id: str,
             memory_id: str,
     ) -> Optional[Memory]:
-        """Get a single memory by ID."""
-        self.logger.debug("Getting memory: %s", memory_id)
+        """Get a single memory by ID within a workspace."""
+        self.logger.debug("Getting memory: %s in workspace: %s", memory_id, workspace_id)
         return await self.storage.get_memory(workspace_id, memory_id)
+
+    async def get_by_id(
+            self,
+            memory_id: str,
+    ) -> Optional[Memory]:
+        """Get a single memory by ID without workspace filter. Memory IDs are globally unique."""
+        self.logger.debug("Getting memory by ID: %s", memory_id)
+        return await self.storage.get_memory_by_id(memory_id)
 
     async def increment_access(
             self,
@@ -1271,11 +1301,13 @@ Top {limit} indices (comma-separated):"""
         try:
             memory = await self.storage.get_memory(workspace_id, memory_id)
             if memory:
+                importance = await self.decay_service.calculate_access_boost(memory)
                 await self.storage.update_memory(
                     workspace_id=workspace_id,
                     memory_id=memory_id,
                     access_count=memory.access_count + 1,
-                    last_accessed_at=datetime.now(timezone.utc)
+                    last_accessed_at=datetime.now(timezone.utc),
+                    importance=importance,
                 )
         except Exception as e:
             self.logger.warning("Failed to increment access for %s: %s", memory_id, e)

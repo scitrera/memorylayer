@@ -322,6 +322,12 @@ class WorkspaceResponse(BaseModel):
     workspace: Workspace
 
 
+class WorkspaceListResponse(BaseModel):
+    """Response schema for listing workspaces."""
+
+    workspaces: list[Workspace]
+
+
 class TokenSummary(BaseModel):
     """Token usage summary for detail level recall."""
 
@@ -492,3 +498,59 @@ class ContextStatusResponse(BaseModel):
     total_size_bytes: int = Field(0, description="Total size of all variables")
     memory_limit_bytes: Optional[int] = Field(None, description="Memory limit in bytes")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Environment metadata")
+
+
+# ============================================
+# Workspace Export/Import API Schemas
+# ============================================
+
+class MemoryExportItem(BaseModel):
+    """Serialized memory for export."""
+    id: str
+    content: str
+    content_hash: str
+    type: str
+    subtype: Optional[str] = None
+    importance: float = 0.5
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    abstract: Optional[str] = None
+    overview: Optional[str] = None
+    session_id: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class AssociationExportItem(BaseModel):
+    """Serialized association for export."""
+    source_id: str
+    target_id: str
+    relationship_type: str
+    strength: float = 1.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceExportData(BaseModel):
+    """Export envelope for workspace data."""
+    version: str = "1.0"
+    exported_at: str
+    workspace_id: str
+    memories: list[MemoryExportItem] = Field(default_factory=list)
+    associations: list[AssociationExportItem] = Field(default_factory=list)
+    total_memories: int = 0
+    total_associations: int = 0
+    offset: int = 0
+    limit: int = 0
+
+
+class WorkspaceImportRequest(BaseModel):
+    """Import request body."""
+    data: WorkspaceExportData
+
+
+class WorkspaceImportResult(BaseModel):
+    """Import operation results."""
+    imported: int = 0
+    skipped_duplicates: int = 0
+    errors: int = 0
+    details: list[str] = Field(default_factory=list)

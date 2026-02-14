@@ -140,8 +140,10 @@ class AuthenticationService(ABC):
         session_id = request.headers.get(HEADER_SESSION_ID)
         session = await self.resolve_session(session_id) if session_id else None
 
-        # 4. Extract workspace_id from body if present
+        # 4. Extract workspace_id from body or X-Workspace-ID header
         request_workspace_id = getattr(body, "workspace_id", None) if body else None
+        if not request_workspace_id:
+            request_workspace_id = request.headers.get("X-Workspace-ID")
 
         # 5. Resolve effective workspace
         workspace_id = await self.resolve_workspace(

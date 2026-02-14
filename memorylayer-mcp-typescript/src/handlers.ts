@@ -149,9 +149,13 @@ export class MCPToolHandlers {
   }
 
   async handleMemoryBriefing(args: Record<string, unknown>): Promise<string> {
-    const includeContradictions = args.include_contradictions as boolean !== false;
-
-    const result = await this.client.getBriefing(includeContradictions);
+    const result = await this.client.getBriefing({
+      timeWindowMinutes: args.time_window_minutes as number | undefined,
+      detailLevel: args.detail_level as string | undefined,
+      limit: args.limit as number | undefined,
+      includeMemories: args.include_memories as boolean | undefined,
+      includeContradictions: args.include_contradictions as boolean | undefined,
+    });
 
     return JSON.stringify(result, null, 2);
   }
@@ -227,6 +231,21 @@ export class MCPToolHandlers {
       return JSON.stringify({
         success: false,
         error: "Session mode is not enabled"
+      }, null, 2);
+    }
+
+    // If a session already exists, return it instead of creating a duplicate
+    const existing = this.sessionManager.currentSession;
+    if (existing) {
+      console.error(`Session already active: ${existing.id} (server: ${existing.serverSessionId}), reusing`);
+      return JSON.stringify({
+        success: true,
+        session_id: existing.id,
+        workspace_id: existing.workspaceId,
+        server_session_id: existing.serverSessionId,
+        created_at: existing.createdAt.toISOString(),
+        reused: true,
+        message: "Existing session reused. If resuming after context compaction, call memory_context_inspect to see existing sandbox variables."
       }, null, 2);
     }
 

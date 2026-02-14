@@ -24,7 +24,8 @@ export {
   resetRecallStatus,
   updateSessionInfo,
   getWorkspaceId,
-  getSessionId,
+  getSessionIdFromHookState,
+  resolveSessionId,
 } from "./state.js";
 
 // Client (same MemoryLayerClient used by MCP tools)

@@ -6,12 +6,15 @@ Provides background task scheduling abstraction for memory lifecycle operations.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Awaitable, Optional
-from logging import Logger
+from typing import Callable, Awaitable
 
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_TASK_PROVIDER, DEFAULT_MEMORYLAYER_TASK_PROVIDER
+
+from ..storage import EXT_STORAGE_BACKEND
+from ..memory import EXT_MEMORY_SERVICE
+from ..session import EXT_SESSION_SERVICE
 
 # Extension point constants
 EXT_TASK_SERVICE = 'memorylayer-task-service'
@@ -45,11 +48,11 @@ class TaskService(ABC):
 
     @abstractmethod
     async def schedule_task(
-        self,
-        task_type: str,
-        payload: dict,
-        delay_seconds: int = 0,
-        priority: int = 5
+            self,
+            task_type: str,
+            payload: dict,
+            delay_seconds: int = 0,
+            priority: int = 5
     ) -> str:
         """
         Schedule a task for background execution.
@@ -67,10 +70,10 @@ class TaskService(ABC):
 
     @abstractmethod
     async def schedule_recurring(
-        self,
-        task_type: str,
-        interval_seconds: int,
-        payload: dict
+            self,
+            task_type: str,
+            interval_seconds: int,
+            payload: dict
     ) -> str:
         """
         Schedule a recurring task.
@@ -113,9 +116,9 @@ class TaskService(ABC):
 
     @abstractmethod
     def register_handler(
-        self,
-        task_type: str,
-        handler: Callable[[dict], Awaitable[None]]
+            self,
+            task_type: str,
+            handler: Callable[[Variables, dict], Awaitable[None]]
     ) -> None:
         """
         Register a handler for a task type.
@@ -167,4 +170,4 @@ class TaskServicePluginBase(Plugin):
 
     def get_dependencies(self, v: Variables):
         """Declare dependencies. Override in subclasses if needed."""
-        return ()
+        return (EXT_STORAGE_BACKEND,)

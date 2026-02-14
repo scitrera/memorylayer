@@ -147,7 +147,15 @@ class PersistentSessionService(SessionService):
             self.logger.info("Cleaned up %d expired sessions in workspace %s", count, workspace_id)
         return count
 
-    async def get_briefing(self, workspace_id: str) -> SessionBriefing:
+    async def get_briefing(
+            self,
+            workspace_id: str,
+            lookback_minutes: int = 60,
+            detail_level: str = "abstract",
+            limit: int = 10,
+            include_memories: bool = True,
+            include_contradictions: bool = True,
+    ) -> SessionBriefing:
         """
         Generate a session briefing with workspace summary and recent activity.
 
@@ -157,6 +165,11 @@ class PersistentSessionService(SessionService):
 
         Args:
             workspace_id: Workspace identifier
+            lookback_minutes: Time window for recent memories (default 60)
+            detail_level: Memory detail level - abstract, overview, or full
+            limit: Maximum memories to include
+            include_memories: Whether to include memory content
+            include_contradictions: Whether to detect contradictions
 
         Returns:
             SessionBriefing with workspace summary and activity
@@ -174,36 +187,41 @@ class PersistentSessionService(SessionService):
             "memory_types": stats.get("memory_types", {}),
         }
 
-        # Count recent memories (created in last 24 hours)
-        # This is a simple approximation - custom implementations can enhance with actual queries
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=24)
+        # Get recent memories if requested
+        memories = []
+        if include_memories:
+            now = datetime.now(timezone.utc)
+            created_after = now - timedelta(minutes=lookback_minutes)
+            memories = await self.storage.get_recent_memories(
+                workspace_id, created_after=created_after,
+                limit=limit, detail_level=detail_level
+            )
 
-        # Use a simple heuristic here
-        # Custom implementations can query storage for actual recent memory counts
-        workspace_summary["recent_memories"] = 0  # Storage backend can implement this
+            # Update workspace summary with recent count
+            workspace_summary["recent_memories"] = len(memories)
 
         # Build recent activity list
         recent_activity = []
         # Note: Storage backend doesn't track detailed session activity
         # Custom implementations can enhance this with actual activity tracking
         recent_activity.append({
-            "timestamp": now.isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "summary": f"Workspace stats: {workspace_summary['total_memories']} total memories",
             "memories_created": 0,
             "key_decisions": [],
         })
 
         self.logger.debug(
-            "Generated briefing for workspace %s: %d memories, %d associations",
+            "Generated briefing for workspace %s: %d memories, %d associations, %d recent memories",
             workspace_id,
             workspace_summary["total_memories"],
-            workspace_summary["total_associations"]
+            workspace_summary["total_associations"],
+            workspace_summary["recent_memories"]
         )
 
         # Get unresolved contradictions
         contradictions_detected = []
-        if self.contradiction_service:
+        if include_contradictions and self.contradiction_service:
             try:
                 records = await self.contradiction_service.get_unresolved(workspace_id, limit=3)
                 for record in records:
@@ -222,6 +240,7 @@ class PersistentSessionService(SessionService):
             recent_activity=recent_activity,
             open_threads=[],  # Advanced feature - empty for OSS
             contradictions_detected=contradictions_detected,
+            memories=memories,
         )
 
     async def commit_session(
@@ -437,6 +456,7 @@ class PersistentSessionService(SessionService):
         extend_by = extend_seconds or 3600
         session.expires_at = session.expires_at + timedelta(seconds=extend_by)
 
+        # TODO: THIS IS UNFINISHED!!
         # Note: storage.update_session() not yet implemented
         # For now, just return the modified session object
         self.logger.warning(

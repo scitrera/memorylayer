@@ -15,14 +15,14 @@ When triggered:
 from logging import Logger
 from typing import Optional
 
-from scitrera_app_framework import get_logger
-from scitrera_app_framework.api import Variables
+from scitrera_app_framework import get_logger, Variables
 
-from ...models.association import AssociateInput
-from ...models.memory import MemoryType, MemorySubtype, MemoryStatus, RememberInput
-from ..storage import StorageBackend, EXT_STORAGE_BACKEND
-from ..tasks import TaskHandlerPlugin, TaskSchedule
-from .base import ExtractionService, EXT_EXTRACTION_SERVICE
+from ..models.association import AssociateInput
+from ..models.memory import MemoryType, MemorySubtype, MemoryStatus, RememberInput
+from ..services.storage import StorageBackend, EXT_STORAGE_BACKEND
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
+from ..services.extraction import ExtractionService, EXT_EXTRACTION_SERVICE
+from ..services.memory import EXT_MEMORY_SERVICE, MemoryService
 
 
 class FactDecompositionTaskHandler(TaskHandlerPlugin):
@@ -44,19 +44,19 @@ class FactDecompositionTaskHandler(TaskHandlerPlugin):
     def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
         return None  # On-demand only, not recurring
 
-    async def handle(self, payload: dict) -> None:
+    async def handle(self, v: Variables, payload: dict) -> None:
         """Execute fact decomposition for a composite memory.
 
         Args:
+            v: Variables object
             payload: Must contain 'memory_id' and 'workspace_id'
         """
-        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, self._v)
-        extraction_service: ExtractionService = self.get_extension(EXT_EXTRACTION_SERVICE, self._v)
-        logger: Logger = get_logger(self._v, name=self.get_task_type())
+        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
+        extraction_service: ExtractionService = self.get_extension(EXT_EXTRACTION_SERVICE, v)
+        logger: Logger = get_logger(v, name=self.get_task_type())
 
         # Get memory service for per-fact pipeline
-        from ..memory import EXT_MEMORY_SERVICE
-        memory_service = self.get_extension(EXT_MEMORY_SERVICE, self._v)
+        memory_service: MemoryService = self.get_extension(EXT_MEMORY_SERVICE, v)
 
         memory_id = payload.get('memory_id')
         workspace_id = payload.get('workspace_id')
@@ -155,7 +155,3 @@ class FactDecompositionTaskHandler(TaskHandlerPlugin):
             )
         except Exception as e:
             logger.warning("Failed to archive parent memory %s: %s", memory_id, e)
-
-    def initialize(self, v, logger) -> 'FactDecompositionTaskHandler':
-        self._v = v
-        return self

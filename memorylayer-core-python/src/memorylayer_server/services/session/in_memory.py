@@ -279,7 +279,15 @@ class InMemorySessionService(SessionService):
 
         return list(entries.values())
 
-    async def get_briefing(self, workspace_id: str) -> SessionBriefing:
+    async def get_briefing(
+        self,
+        workspace_id: str,
+        lookback_minutes: int = 60,
+        detail_level: str = "abstract",
+        limit: int = 10,
+        include_memories: bool = True,
+        include_contradictions: bool = True,
+    ) -> SessionBriefing:
         """
         Generate a session briefing with workspace summary and recent activity.
 
@@ -288,6 +296,11 @@ class InMemorySessionService(SessionService):
 
         Args:
             workspace_id: Workspace identifier
+            lookback_minutes: Time window for recent memories (default 60)
+            detail_level: Memory detail level - abstract, overview, or full
+            limit: Maximum memories to include
+            include_memories: Whether to include memory content
+            include_contradictions: Whether to detect contradictions
 
         Returns:
             SessionBriefing with basic workspace summary
@@ -336,6 +349,7 @@ class InMemorySessionService(SessionService):
             recent_activity=recent_activity,
             open_threads=[],  # Advanced feature - empty for OSS
             contradictions_detected=[],  # Advanced feature - empty for OSS
+            memories=[],  # In-memory service has no storage backend
         )
 
     async def commit_session(

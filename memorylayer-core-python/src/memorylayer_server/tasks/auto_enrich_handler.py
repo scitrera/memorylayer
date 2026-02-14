@@ -8,11 +8,11 @@ from typing import Optional
 
 from scitrera_app_framework import Variables, get_logger
 
-from ..tasks import TaskHandlerPlugin, TaskSchedule
-from ..storage import StorageBackend, EXT_STORAGE_BACKEND
-from ..embedding import EmbeddingService, EXT_EMBEDDING_SERVICE
-from ..association import EXT_ASSOCIATION_SERVICE
-from ..extraction import EXT_EXTRACTION_SERVICE
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
+from ..services.storage import StorageBackend, EXT_STORAGE_BACKEND
+from ..services.embedding import EmbeddingService, EXT_EMBEDDING_SERVICE
+from ..services.association import EXT_ASSOCIATION_SERVICE
+from ..services.extraction import EXT_EXTRACTION_SERVICE
 
 
 class AutoEnrichTaskHandler(TaskHandlerPlugin):
@@ -41,8 +41,8 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
         # No recurring schedule - triggered on-demand after remember
         return None
 
-    async def handle(self, payload: dict) -> None:
-        logger: Logger = get_logger(self._v, name=self.get_task_type())
+    async def handle(self, v: Variables, payload: dict) -> None:
+        logger: Logger = get_logger(v, name=self.get_task_type())
 
         memory_id = payload.get('memory_id')
         workspace_id = payload.get('workspace_id')
@@ -61,12 +61,12 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
             return
 
         # Resolve services from the framework
-        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, self._v)
+        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
 
         # If no embedding was provided in the payload, generate one
         if embedding is None:
             try:
-                embedding_service: EmbeddingService = self.get_extension(EXT_EMBEDDING_SERVICE, self._v)
+                embedding_service: EmbeddingService = self.get_extension(EXT_EMBEDDING_SERVICE, v)
                 embedding = await embedding_service.embed(content)
             except Exception as e:
                 logger.warning("Failed to generate embedding for memory %s: %s", memory_id, e)
@@ -92,7 +92,7 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
             ]
             if candidates:
                 try:
-                    association_service = self.get_extension(EXT_ASSOCIATION_SERVICE, self._v)
+                    association_service = self.get_extension(EXT_ASSOCIATION_SERVICE, v)
                     associations = await association_service.auto_associate(
                         workspace_id=workspace_id,
                         new_memory_id=memory_id,
@@ -114,7 +114,7 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
         # Type classification (when flag is set)
         if payload.get('classify_type', False):
             try:
-                extraction_service = self.get_extension(EXT_EXTRACTION_SERVICE, self._v)
+                extraction_service = self.get_extension(EXT_EXTRACTION_SERVICE, v)
                 classified_type, classified_subtype = await extraction_service.classify_content(content)
 
                 # Fetch current memory to compare types
@@ -134,7 +134,3 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
                     )
             except Exception as e:
                 logger.debug("Type classification skipped for %s: %s", memory_id, e)
-
-    def initialize(self, v, logger) -> 'AutoEnrichTaskHandler':
-        self._v = v
-        return self

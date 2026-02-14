@@ -11,6 +11,7 @@ Endpoints:
 - POST /v1/memories/{memory_id}/decay - Decay importance
 - POST /v1/memories/batch - Batch operations (create, update, delete)
 """
+
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
@@ -44,6 +45,7 @@ from .schemas import (
     BatchOperationResponse,
     BatchOperationResult,
 )
+from .deps import get_active_session
 
 router = APIRouter(prefix="/v1/memories", tags=["memories"])
 
@@ -81,12 +83,13 @@ async def get_reflect_service(v: Variables = Depends(get_variables_dep)) -> Refl
     },
 )
 async def create_memory(
-        http_request: Request,
-        request: MemoryCreateRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    request: MemoryCreateRequest,
+    session_id: str = Depends(get_active_session),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> MemoryResponse:
     """
     Store a new memory with automatic embedding and classification.
@@ -115,15 +118,9 @@ async def create_memory(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, request)
-        await authz_service.require_authorization(
-            ctx, "memories", "create", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "memories", "create", workspace_id=ctx.workspace_id)
 
-        logger.info(
-            "Creating memory in workspace: %s, content length: %d",
-            ctx.workspace_id,
-            len(request.content)
-        )
+        logger.info("Creating memory in workspace: %s, content length: %d", ctx.workspace_id, len(request.content))
 
         # Convert request to domain input
         remember_input = RememberInput(
@@ -148,22 +145,13 @@ async def create_memory(
 
     except AuthenticationError as e:
         logger.warning("Authentication failed: %s", e)
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=e.message
-        )
+        raise HTTPException(status_code=e.status_code, detail=e.message)
     except ValueError as e:
         logger.warning("Invalid memory creation request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to create memory: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create memory"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create memory")
 
 
 @router.get(
@@ -177,12 +165,12 @@ async def create_memory(
     },
 )
 async def get_memory(
-        http_request: Request,
-        memory_id: str,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    memory_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> MemoryResponse:
     """
     Retrieve a single memory by ID.
@@ -202,23 +190,16 @@ async def get_memory(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "memories", "read",
-            resource_id=memory_id, workspace_id=ctx.workspace_id
-        )
 
         logger.debug("Getting memory: %s", memory_id)
 
-        memory = await memory_service.get(
-            workspace_id=ctx.workspace_id,
-            memory_id=memory_id,
-        )
+        # Memory IDs are globally unique; look up without workspace filter
+        memory = await memory_service.get_by_id(memory_id=memory_id)
 
         if not memory:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Memory not found: {memory_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
+
+        await authz_service.require_authorization(ctx, "memories", "read", resource_id=memory_id, workspace_id=memory.workspace_id)
 
         return MemoryResponse(memory=memory)
 
@@ -226,10 +207,7 @@ async def get_memory(
         raise
     except Exception as e:
         logger.error("Failed to get memory %s: %s", memory_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve memory"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve memory")
 
 
 @router.put(
@@ -244,13 +222,13 @@ async def get_memory(
     },
 )
 async def update_memory(
-        http_request: Request,
-        memory_id: str,
-        request: MemoryUpdateRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    memory_id: str,
+    request: MemoryUpdateRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> MemoryResponse:
     """
     Update an existing memory.
@@ -271,20 +249,14 @@ async def update_memory(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "memories", "write",
-            resource_id=memory_id, workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "memories", "write", resource_id=memory_id, workspace_id=ctx.workspace_id)
 
         logger.info("Updating memory: %s", memory_id)
 
         # Check if memory exists
         existing_memory = await memory_service.get(ctx.workspace_id, memory_id)
         if not existing_memory:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Memory not found: {memory_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
 
         # Build update kwargs from non-None fields
         update_kwargs = {}
@@ -305,17 +277,10 @@ async def update_memory(
 
         # Update memory via storage
         # Note: This assumes memory_service has access to storage.update_memory
-        updated_memory = await memory_service.storage.update_memory(
-            workspace_id=ctx.workspace_id,
-            memory_id=memory_id,
-            **update_kwargs
-        )
+        updated_memory = await memory_service.storage.update_memory(workspace_id=ctx.workspace_id, memory_id=memory_id, **update_kwargs)
 
         if not updated_memory:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update memory"
-            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update memory")
 
         logger.info("Updated memory: %s", memory_id)
         return MemoryResponse(memory=updated_memory)
@@ -324,16 +289,10 @@ async def update_memory(
         raise
     except ValueError as e:
         logger.warning("Invalid memory update request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to update memory %s: %s", memory_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update memory"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update memory")
 
 
 @router.delete(
@@ -347,13 +306,13 @@ async def update_memory(
     },
 )
 async def delete_memory(
-        http_request: Request,
-        memory_id: str,
-        hard: bool = False,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    memory_id: str,
+    hard: bool = False,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> None:
     """
     Delete a memory (soft delete by default).
@@ -371,10 +330,7 @@ async def delete_memory(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "memories", "delete",
-            resource_id=memory_id, workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "memories", "delete", resource_id=memory_id, workspace_id=ctx.workspace_id)
 
         logger.info("Deleting memory: %s (hard=%s)", memory_id, hard)
 
@@ -385,10 +341,7 @@ async def delete_memory(
         )
 
         if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Memory not found: {memory_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
 
         logger.info("Deleted memory: %s", memory_id)
 
@@ -396,10 +349,7 @@ async def delete_memory(
         raise
     except Exception as e:
         logger.error("Failed to delete memory %s: %s", memory_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete memory"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete memory")
 
 
 @router.post(
@@ -413,12 +363,13 @@ async def delete_memory(
     },
 )
 async def recall_memories(
-        http_request: Request,
-        request: MemoryRecallRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    request: MemoryRecallRequest,
+    session_id: str = Depends(get_active_session),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> RecallResult:
     """
     Query memories using vector similarity and optional filters.
@@ -443,16 +394,9 @@ async def recall_memories(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, request)
-        await authz_service.require_authorization(
-            ctx, "memories", "read", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "memories", "read", workspace_id=ctx.workspace_id)
 
-        logger.debug(
-            "(API) Recalling memories in workspace: %s, mode: %s, query: %s",
-            ctx.workspace_id,
-            request.mode,
-            request.query[:50]
-        )
+        logger.debug("(API) Recalling memories in workspace: %s, mode: %s, query: %s", ctx.workspace_id, request.mode, request.query[:50])
 
         # Convert request to domain input
         recall_input = RecallInput(
@@ -482,27 +426,16 @@ async def recall_memories(
             input=recall_input,
         )
 
-        logger.debug(
-            "Recalled %d memories in %d ms using %s mode",
-            len(result.memories),
-            result.search_latency_ms,
-            result.mode_used
-        )
+        logger.debug("Recalled %d memories in %d ms using %s mode", len(result.memories), result.search_latency_ms, result.mode_used)
 
         return result
 
     except ValueError as e:
         logger.warning("Invalid recall request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to recall memories: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to recall memories"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to recall memories")
 
 
 @router.post(
@@ -516,12 +449,12 @@ async def recall_memories(
     },
 )
 async def reflect_memories(
-        http_request: Request,
-        request: MemoryReflectRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        reflection_service: ReflectService = Depends(get_reflect_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    request: MemoryReflectRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    reflection_service: ReflectService = Depends(get_reflect_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> ReflectResult:
     """
     Synthesize memories into a coherent reflection.
@@ -541,18 +474,13 @@ async def reflect_memories(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, request)
-        await authz_service.require_authorization(
-            ctx, "memories", "read", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "memories", "read", workspace_id=ctx.workspace_id)
 
-        logger.info(
-            "Reflecting on memories in workspace: %s, query: %s",
-            ctx.workspace_id,
-            request.query[:50]
-        )
+        logger.info("Reflecting on memories in workspace: %s, query: %s", ctx.workspace_id, request.query[:50])
 
         # Convert detail_level string to DetailLevel enum
         from ...models.memory import DetailLevel
+
         detail_level = DetailLevel.FULL
         if request.detail_level:
             detail_level_map = {
@@ -580,26 +508,16 @@ async def reflect_memories(
             input=reflect_input,
         )
 
-        logger.info(
-            "Reflected on %d source memories, generated %d tokens",
-            len(result.source_memories),
-            result.tokens_processed
-        )
+        logger.info("Reflected on %d source memories, generated %d tokens", len(result.source_memories), result.tokens_processed)
 
         return result
 
     except ValueError as e:
         logger.warning("Invalid reflect request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to reflect memories: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reflect memories"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reflect memories")
 
 
 @router.post(
@@ -614,13 +532,13 @@ async def reflect_memories(
     },
 )
 async def decay_memory(
-        http_request: Request,
-        memory_id: str,
-        request: MemoryDecayRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    memory_id: str,
+    request: MemoryDecayRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> MemoryResponse:
     """
     Reduce memory importance by decay rate.
@@ -641,10 +559,7 @@ async def decay_memory(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "memories", "write",
-            resource_id=memory_id, workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "memories", "write", resource_id=memory_id, workspace_id=ctx.workspace_id)
 
         logger.info("Decaying memory: %s by rate: %f", memory_id, request.decay_rate)
 
@@ -655,10 +570,7 @@ async def decay_memory(
         )
 
         if not updated_memory:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Memory not found: {memory_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
 
         logger.info("Decayed memory: %s", memory_id)
         return MemoryResponse(memory=updated_memory)
@@ -667,16 +579,10 @@ async def decay_memory(
         raise
     except ValueError as e:
         logger.warning("Invalid decay request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to decay memory %s: %s", memory_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to decay memory"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to decay memory")
 
 
 @router.post(
@@ -690,12 +596,12 @@ async def decay_memory(
     },
 )
 async def batch_operations(
-        http_request: Request,
-        request: MemoryBatchRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    request: MemoryBatchRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> BatchOperationResponse:
     """
     Perform multiple memory operations in a single request.
@@ -720,15 +626,9 @@ async def batch_operations(
     try:
         # Build request context and check authorization (batch requires write access)
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "memories", "write", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "memories", "write", workspace_id=ctx.workspace_id)
 
-        logger.info(
-            "Processing batch operations in workspace: %s, count: %d",
-            ctx.workspace_id,
-            len(request.operations)
-        )
+        logger.info("Processing batch operations in workspace: %s, count: %d", ctx.workspace_id, len(request.operations))
 
         results = []
         successful = 0
@@ -761,12 +661,14 @@ async def batch_operations(
                         input=remember_input,
                     )
 
-                    results.append(BatchOperationResult(
-                        index=i,
-                        type=op_type,
-                        status="success",
-                        memory_id=memory.id,
-                    ))
+                    results.append(
+                        BatchOperationResult(
+                            index=i,
+                            type=op_type,
+                            status="success",
+                            memory_id=memory.id,
+                        )
+                    )
                     successful += 1
 
                 # UPDATE operation
@@ -797,17 +699,17 @@ async def batch_operations(
 
                     # Update memory
                     updated = await memory_service.storage.update_memory(
-                        workspace_id=ctx.workspace_id,
-                        memory_id=memory_id,
-                        **update_kwargs
+                        workspace_id=ctx.workspace_id, memory_id=memory_id, **update_kwargs
                     )
 
-                    results.append(BatchOperationResult(
-                        index=i,
-                        type=op_type,
-                        status="success",
-                        memory_id=memory_id,
-                    ))
+                    results.append(
+                        BatchOperationResult(
+                            index=i,
+                            type=op_type,
+                            status="success",
+                            memory_id=memory_id,
+                        )
+                    )
                     successful += 1
 
                 # DELETE operation
@@ -828,12 +730,14 @@ async def batch_operations(
                     if not success:
                         raise ValueError(f"Memory not found: {memory_id}")
 
-                    results.append(BatchOperationResult(
-                        index=i,
-                        type=op_type,
-                        status="success",
-                        memory_id=memory_id,
-                    ))
+                    results.append(
+                        BatchOperationResult(
+                            index=i,
+                            type=op_type,
+                            status="success",
+                            memory_id=memory_id,
+                        )
+                    )
                     successful += 1
 
                 # Unknown operation type
@@ -841,25 +745,18 @@ async def batch_operations(
                     raise ValueError(f"Unknown operation type: {op_type}")
 
             except Exception as e:
-                logger.warning(
-                    "Batch operation %d failed: %s - %s",
-                    i,
-                    op_type,
-                    str(e)
+                logger.warning("Batch operation %d failed: %s - %s", i, op_type, str(e))
+                results.append(
+                    BatchOperationResult(
+                        index=i,
+                        type=op_type or "unknown",
+                        status="error",
+                        error=str(e),
+                    )
                 )
-                results.append(BatchOperationResult(
-                    index=i,
-                    type=op_type or "unknown",
-                    status="error",
-                    error=str(e),
-                ))
                 failed += 1
 
-        logger.info(
-            "Completed batch operations: %d successful, %d failed",
-            successful,
-            failed
-        )
+        logger.info("Completed batch operations: %d successful, %d failed", successful, failed)
 
         return BatchOperationResponse(
             total_operations=len(request.operations),
@@ -870,16 +767,10 @@ async def batch_operations(
 
     except ValueError as e:
         logger.warning("Invalid batch request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to process batch operations: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process batch operations"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process batch operations")
 
 
 class MemoriesAPIPlugin(Plugin):

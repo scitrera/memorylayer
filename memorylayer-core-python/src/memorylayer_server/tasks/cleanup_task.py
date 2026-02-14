@@ -8,9 +8,9 @@ from typing import Optional
 
 from scitrera_app_framework import Variables, ext_parse_bool, get_logger
 
-from ..storage import EXT_STORAGE_BACKEND, StorageBackend
-from ..tasks import TaskHandlerPlugin, TaskSchedule
-from .base import EXT_SESSION_SERVICE, SessionService
+from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
+from ..services.session import EXT_SESSION_SERVICE, SessionService
 
 MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_ENABLED = 'MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_ENABLED'
 DEFAULT_CLEANUP_ENABLED = True
@@ -110,5 +110,5 @@ class SessionCleanupTaskHandlerPlugin(TaskHandlerPlugin):
             'logger': get_logger(name=self.get_task_type(), v=v)
         })
 
-    async def handle(self, payload: dict):
+    async def handle(self, v: Variables, payload: dict):
         return await periodic_session_cleanup_task(**payload)

@@ -5,8 +5,8 @@
  * timeout since hooks need to respond quickly.
  */
 
-import { MemoryLayerClient } from "../client.js";
-import { detectWorkspaceId } from "../workspace.js";
+import { MemoryLayerClient, detectWorkspaceId } from "@scitrera/memorylayer-mcp-server";
+import { resolveSessionId } from "./state.js";
 
 /** Singleton client instance for hooks */
 let clientInstance: MemoryLayerClient | null = null;
@@ -14,6 +14,10 @@ let clientInstance: MemoryLayerClient | null = null;
 /**
  * Get or create the singleton MemoryLayerClient instance.
  * This is the same client class used by MCP tools.
+ *
+ * On each call, syncs the session ID via resolveSessionId() so that
+ * hooks running after SessionStart send the X-Session-ID header for
+ * correct workspace resolution on the server.
  */
 export function getClient(): MemoryLayerClient {
   if (!clientInstance) {
@@ -33,6 +37,14 @@ export function getClient(): MemoryLayerClient {
       timeout: 5000, // Shorter timeout for hooks
     });
   }
+
+  // Sync session ID on every call — resolveSessionId prefers env (cheap)
+  // and only falls back to hook-state.json disk read if env is unset.
+  const sessionId = resolveSessionId("client");
+  if (sessionId && clientInstance.getSessionId() !== sessionId) {
+    clientInstance.setSessionId(sessionId);
+  }
+
   return clientInstance;
 }
 
@@ -41,7 +53,7 @@ export function getClient(): MemoryLayerClient {
  */
 export async function checkHealth(): Promise<boolean> {
   try {
-    await getClient().getBriefing(false);
+    await getClient().getBriefing({ limit: 1, includeMemories: false });
     return true;
   } catch {
     return false;

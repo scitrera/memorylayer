@@ -23,36 +23,36 @@ class SemanticTieringService(ABC):
 
     @abstractmethod
     async def generate_abstract(
-        self,
-        content: str,
-        max_tokens: int = 30
+            self,
+            content: str,
+            max_tokens: int = 30
     ) -> str:
         """Generate brief abstract (tier 1) from memory content."""
         pass
 
     @abstractmethod
     async def generate_overview(
-        self,
-        content: str,
-        max_tokens: int = 100
+            self,
+            content: str,
+            max_tokens: int = 100
     ) -> str:
         """Generate overview (tier 2) from memory content."""
         pass
 
     @abstractmethod
     async def generate_tiers(
-        self,
-        memory_id: str,
-        workspace_id: str,
-        force: bool = False
+            self,
+            memory_id: str,
+            workspace_id: str,
+            force: bool = False
     ) -> Memory:
         """Generate all tiers (abstract, overview) for a memory."""
         pass
 
     @abstractmethod
     async def generate_tiers_for_content(
-        self,
-        content: str
+            self,
+            content: str
     ) -> tuple[str, str]:
         """Generate tiers for content without persisting."""
         pass
@@ -92,4 +92,4 @@ class SemanticTieringServicePluginBase(Plugin):
         v.set_default_value(MEMORYLAYER_SEMANTIC_TIERING_SERVICE, DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_SERVICE)
 
     def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND, EXT_LLM_SERVICE)
+        return (EXT_STORAGE_BACKEND, EXT_LLM_SERVICE,)
