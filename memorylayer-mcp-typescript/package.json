@@ -1,6 +1,6 @@
 {
   "name": "@scitrera/memorylayer-mcp-server",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "MCP (Model Context Protocol) server for MemoryLayer.ai",
   "type": "module",
   "main": "dist/src/index.js",

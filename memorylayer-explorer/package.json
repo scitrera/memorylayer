@@ -1,6 +1,6 @@
 {
   "name": "@scitrera/memorylayer-explorer",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "description": "Web UI for exploring MemoryLayer memories and graph relationships",
   "scripts": {

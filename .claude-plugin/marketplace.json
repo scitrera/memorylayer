@@ -10,7 +10,7 @@
     {
       "name": "memorylayer",
       "description": "Persistent memory system designed to work seamlessly with Claude agents. MemoryLayer proactively preserves important context before compaction and allows agents to recall relevant information on demand, ensuring critical knowledge is never lost.",
-      "version": "0.0.4",
+      "version": "0.0.5",
       "author": {
         "name": "scitrera.ai",
         "email": "open-source-team@scitrera.com"

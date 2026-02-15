@@ -1,6 +1,6 @@
 [project]
 name = "memorylayer-client"
-version = "0.0.4"
+version = "0.0.5"
 description = "Python SDK for MemoryLayer.ai - memory infrastructure for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
