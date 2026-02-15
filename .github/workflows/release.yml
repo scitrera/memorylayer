@@ -143,6 +143,55 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────
+  # Claude Code plugin → npm (after MCP server is published)
+  # ──────────────────────────────────────────────────────────────────
+  publish-npm-cc-plugin:
+    name: "npm: @scitrera/memorylayer-cc-plugin"
+    needs: publish-npm-mcp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Replace local MCP reference with registry version
+        working-directory: memorylayer-cc-plugin
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i 's|"file:../memorylayer-mcp-typescript"|"^'"${VERSION}"'"|' package.json
+
+      - name: Wait for MCP server availability on npm
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            if npm view "@scitrera/memorylayer-mcp-server@${VERSION}" version 2>/dev/null; then
+              echo "MCP server v${VERSION} is available on npm"
+              exit 0
+            fi
+            echo "Waiting for @scitrera/memorylayer-mcp-server@${VERSION} (attempt ${i}/30)..."
+            sleep 10
+          done
+          echo "::error::MCP server not available on npm after 5 minutes"
+          exit 1
+
+      - name: Install dependencies
+        working-directory: memorylayer-cc-plugin
+        run: npm install
+
+      - name: Build
+        working-directory: memorylayer-cc-plugin
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: memorylayer-cc-plugin
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────────────
   # Docker image → Docker Hub (after memorylayer-server is on PyPI)
   # ──────────────────────────────────────────────────────────────────
   publish-docker:

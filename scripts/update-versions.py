@@ -66,6 +66,7 @@ UpdateRule = tuple  # (strategy, rel_path[, *extras])
 
 PROJECT_RULES: dict[str, list[UpdateRule]] = {
     "memorylayer-cc-plugin": [
+        ("package", Path("memorylayer-cc-plugin/package.json")),
         ("plugin", Path("memorylayer-cc-plugin/.claude-plugin/plugin.json")),
         ("marketplace", Path(".claude-plugin/marketplace.json"), "memorylayer-cc-plugin"),
     ],
