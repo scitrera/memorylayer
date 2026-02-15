@@ -255,15 +255,13 @@ def test_create_session(client: SyncMemoryLayerClient, base_url: str) -> None:
 def test_session_context(client: SyncMemoryLayerClient, base_url: str) -> None:
     """Test session context operations."""
     # Mock set context - return empty success response
-    respx.post(f"{base_url}/v1/sessions/sess_123/context").mock(return_value=Response(200, json={}))
+    respx.post(f"{base_url}/v1/sessions/sess_123/memory").mock(return_value=Response(200, json={}))
 
     # Mock get context
     mock_context = {
-        "context": {
-            "current_file": {"path": "auth.py", "line": 42},
-        }
+        "current_file": {"path": "auth.py", "line": 42},
     }
-    respx.get(f"{base_url}/v1/sessions/sess_123/context").mock(return_value=Response(200, json=mock_context))
+    respx.get(f"{base_url}/v1/sessions/sess_123/memory").mock(return_value=Response(200, json=mock_context))
 
     # Test
     with client:

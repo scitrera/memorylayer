@@ -421,7 +421,7 @@ See the `examples/` directory for complete working examples:
 
 ## License
 
-Apache 2.0 License - see LICENSE file for details.
+Apache 2.0 License -- see [LICENSE](../LICENSE) for details.
 
 ## Links
 

@@ -177,6 +177,17 @@ export MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER=google
 export MEMORYLAYER_LLM_PROFILE_DEFAULT_API_KEY=...
 ```
 
+**Profile configuration variables** (replace `DEFAULT` with any profile name):
+
+| Variable | Description |
+|----------|-------------|
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_PROVIDER` | Provider (`openai`, `anthropic`, `google`) |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_API_KEY` | API key |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_MODEL` | Model name override |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_BASE_URL` | Custom API base URL |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_MAX_TOKENS` | Max response tokens |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_TEMPERATURE` | Sampling temperature |
+
 Without an LLM provider, core memory operations (remember, recall, forget, associate) work normally, but synthesis features will be unavailable.
 
 ### Context Environment
@@ -194,6 +205,7 @@ The Context Environment provides server-side Python sandboxes for memory analysi
 | `MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES` | `268435456` | Memory limit per sandbox (256 MB) |
 | `MEMORYLAYER_CONTEXT_RLM_MAX_ITERATIONS` | `10` | Max iterations for RLM loops |
 | `MEMORYLAYER_CONTEXT_RLM_MAX_EXEC_SECONDS` | `120` | Total timeout for RLM loops |
+| `MEMORYLAYER_CONTEXT_MAX_OPERATIONS` | `1000000` | Max operations per sandbox execution |
 
 ## Storage
 

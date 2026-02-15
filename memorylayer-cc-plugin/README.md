@@ -230,4 +230,4 @@ export MEMORYLAYER_WORKSPACE_ID="my-custom-workspace"
 
 ## License
 
-Apache 2.0
+Apache 2.0 License -- see [LICENSE](../LICENSE) for details.

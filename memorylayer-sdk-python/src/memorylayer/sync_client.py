@@ -70,6 +70,7 @@ class SyncMemoryLayerClient:
         base_url: str = "http://localhost:61001",
         api_key: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         timeout: float = 30.0,
     ):
         """
@@ -79,11 +80,13 @@ class SyncMemoryLayerClient:
             base_url: API base URL (default: http://localhost:61001)
             api_key: API key for authentication
             workspace_id: Default workspace ID for operations
+            session_id: Session ID for session-based workspace resolution
             timeout: Request timeout in seconds (default: 30.0)
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.workspace_id = workspace_id
+        self.session_id = session_id
         self.timeout = timeout
         self._client: Optional[httpx.Client] = None
 
@@ -103,12 +106,43 @@ class SyncMemoryLayerClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         if self.workspace_id:
             headers["X-Workspace-ID"] = self.workspace_id
+        if self.session_id:
+            headers["X-Session-ID"] = self.session_id
 
         self._client = httpx.Client(
             base_url=f"{self.base_url}/v1",
             headers=headers,
             timeout=self.timeout,
         )
+
+    def set_session(self, session_id: str) -> None:
+        """
+        Set the active session ID.
+
+        All subsequent requests will include this session ID in the
+        X-Session-ID header, enabling session-based workspace resolution.
+
+        Args:
+            session_id: Session ID to use
+        """
+        self.session_id = session_id
+        if self._client:
+            self._client.headers["X-Session-ID"] = session_id
+
+    def clear_session(self) -> None:
+        """Clear the active session ID."""
+        self.session_id = None
+        if self._client and "X-Session-ID" in self._client.headers:
+            del self._client.headers["X-Session-ID"]
+
+    def get_session_id(self) -> Optional[str]:
+        """
+        Get the current session ID, if any.
+
+        Returns:
+            Current session ID or None
+        """
+        return self.session_id
 
     def close(self) -> None:
         """Close the HTTP client."""
@@ -428,7 +462,7 @@ class SyncMemoryLayerClient:
         if metadata is not None:
             payload["metadata"] = metadata
 
-        data = self._request("PATCH", f"/memories/{memory_id}", json=payload)
+        data = self._request("PUT", f"/memories/{memory_id}", json=payload)
         return Memory(**data)
 
     # Association methods
@@ -497,6 +531,78 @@ class SyncMemoryLayerClient:
 
         associations_adapter = TypeAdapter(list[Association])
         return associations_adapter.validate_python(data.get("associations", []))
+
+    # Memory extension operations
+
+    def decay(
+        self,
+        memory_id: str,
+        decay_rate: float = 0.1,
+    ) -> Memory:
+        """
+        Reduce memory importance by decay rate.
+
+        Args:
+            memory_id: Memory ID
+            decay_rate: Rate of decay 0.0-1.0 (default: 0.1)
+
+        Returns:
+            Updated memory with decayed importance
+
+        Example:
+            memory = client.decay("mem_123", decay_rate=0.2)
+        """
+        payload = {"decay_rate": decay_rate}
+        data = self._request("POST", f"/memories/{memory_id}/decay", json=payload)
+        return Memory(**data.get("memory", data))
+
+    def trace_memory(self, memory_id: str) -> dict[str, Any]:
+        """
+        Trace memory provenance back to source.
+
+        Returns information about the memory's origin including
+        source resource, category membership, and association chain.
+
+        Args:
+            memory_id: Memory ID
+
+        Returns:
+            Trace result with provenance information
+
+        Example:
+            trace = client.trace_memory("mem_123")
+            print(trace["chain"])
+        """
+        data = self._request("GET", f"/memories/{memory_id}/trace")
+        return data.get("trace", data)
+
+    def batch_memories(
+        self,
+        operations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        Perform multiple memory operations in a single request.
+
+        Supported operation types:
+        - create: {"type": "create", "data": {"content": "...", ...}}
+        - update: {"type": "update", "data": {"memory_id": "...", "content": "..."}}
+        - delete: {"type": "delete", "data": {"memory_id": "...", "hard": False}}
+
+        Args:
+            operations: List of operations to perform
+
+        Returns:
+            Results for each operation with success/error status
+
+        Example:
+            results = client.batch_memories([
+                {"type": "create", "data": {"content": "Memory 1"}},
+                {"type": "create", "data": {"content": "Memory 2"}},
+                {"type": "delete", "data": {"memory_id": "mem_old"}}
+            ])
+        """
+        payload = {"operations": operations}
+        return self._request("POST", "/memories/batch", json=payload)
 
     # Session methods
 
@@ -591,7 +697,7 @@ class SyncMemoryLayerClient:
         if ttl_seconds is not None:
             payload["ttl_seconds"] = ttl_seconds
 
-        self._request("POST", f"/sessions/{session_id}/context", json=payload)
+        self._request("POST", f"/sessions/{session_id}/memory", json=payload)
 
     def get_context(
         self,
@@ -614,9 +720,9 @@ class SyncMemoryLayerClient:
                 ["current_file", "user_intent"]
             )
         """
-        params = {"keys": ",".join(keys)}
-        data = self._request("GET", f"/sessions/{session_id}/context", params=params)
-        return data.get("context", {})
+        params = {"key": ",".join(keys)}
+        data = self._request("GET", f"/sessions/{session_id}/memory", params=params)
+        return data
 
     def get_briefing(
         self,
@@ -653,6 +759,76 @@ class SyncMemoryLayerClient:
         }
         data = self._request("GET", "/sessions/briefing", params=params)
         return SessionBriefing(**data)
+
+    def touch_session(self, session_id: str) -> dict[str, Any]:
+        """
+        Update session expiration (extend TTL).
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Updated expiration timestamp
+
+        Example:
+            result = client.touch_session("sess_123")
+            print(f"Expires at: {result['expires_at']}")
+        """
+        return self._request("POST", f"/sessions/{session_id}/touch")
+
+    def commit_session(
+        self,
+        session_id: str,
+        min_importance: float = 0.5,
+        deduplicate: bool = True,
+        categories: Optional[list[str]] = None,
+        max_memories: int = 50,
+    ) -> dict[str, Any]:
+        """
+        Commit session working memory to long-term memory.
+
+        Extracts memories from session working memory, deduplicates them,
+        and creates new long-term memories.
+
+        Args:
+            session_id: Session ID
+            min_importance: Minimum importance threshold (default: 0.5)
+            deduplicate: Whether to deduplicate memories (default: True)
+            categories: Filter by categories (optional)
+            max_memories: Maximum memories to extract (default: 50)
+
+        Returns:
+            Commit result with extraction statistics
+
+        Example:
+            result = client.commit_session("sess_123")
+            print(f"Created {result['memories_created']} memories")
+        """
+        payload: dict[str, Any] = {
+            "min_importance": min_importance,
+            "deduplicate": deduplicate,
+            "max_memories": max_memories,
+        }
+        if categories is not None:
+            payload["categories"] = categories
+
+        return self._request("POST", f"/sessions/{session_id}/commit", json=payload)
+
+    def delete_session(self, session_id: str) -> bool:
+        """
+        Delete a session and all its context data.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            True if successful
+
+        Example:
+            client.delete_session("sess_123")
+        """
+        self._request("DELETE", f"/sessions/{session_id}")
+        return True
 
     # Workspace methods
 
@@ -692,6 +868,108 @@ class SyncMemoryLayerClient:
 
         data = self._request("GET", f"/workspaces/{ws_id}")
         return Workspace(**data)
+
+    def update_workspace(
+        self,
+        workspace_id: str,
+        name: Optional[str] = None,
+        settings: Optional[dict[str, Any]] = None,
+    ) -> Workspace:
+        """
+        Update an existing workspace.
+
+        Args:
+            workspace_id: Workspace ID
+            name: New workspace name (optional)
+            settings: New workspace settings (optional)
+
+        Returns:
+            Updated workspace
+
+        Example:
+            workspace = client.update_workspace(
+                "ws_123",
+                name="New Name",
+                settings={"key": "value"}
+            )
+        """
+        payload = {}
+        if name is not None:
+            payload["name"] = name
+        if settings is not None:
+            payload["settings"] = settings
+
+        data = self._request("PUT", f"/workspaces/{workspace_id}", json=payload)
+        return Workspace(**data.get("workspace", data))
+
+    def create_context(
+        self,
+        workspace_id: str,
+        name: str,
+        description: Optional[str] = None,
+        settings: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """
+        Create a context within a workspace.
+
+        Contexts provide logical grouping of memories (e.g., by project, topic).
+
+        Args:
+            workspace_id: Parent workspace ID
+            name: Context name
+            description: Context description (optional)
+            settings: Context settings (optional)
+
+        Returns:
+            Created context
+
+        Example:
+            context = client.create_context(
+                "ws_123",
+                name="project-alpha",
+                description="Memories for Project Alpha"
+            )
+        """
+        payload: dict[str, Any] = {"name": name}
+        if description is not None:
+            payload["description"] = description
+        if settings is not None:
+            payload["settings"] = settings
+
+        data = self._request("POST", f"/workspaces/{workspace_id}/contexts", json=payload)
+        return data.get("context", data)
+
+    def list_contexts(self, workspace_id: str) -> list[dict[str, Any]]:
+        """
+        List all contexts in a workspace.
+
+        Args:
+            workspace_id: Workspace ID
+
+        Returns:
+            List of contexts
+
+        Example:
+            contexts = client.list_contexts("ws_123")
+        """
+        data = self._request("GET", f"/workspaces/{workspace_id}/contexts")
+        return data.get("contexts", [])
+
+    def get_workspace_schema(self, workspace_id: str) -> dict[str, Any]:
+        """
+        Get workspace schema including relationship types and memory subtypes.
+
+        Args:
+            workspace_id: Workspace ID
+
+        Returns:
+            Schema with relationship_types, memory_subtypes, and can_customize flag
+
+        Example:
+            schema = client.get_workspace_schema("ws_123")
+            print(schema["relationship_types"])
+        """
+        return self._request("GET", f"/workspaces/{workspace_id}/schema")
 
     # Context Environment operations
 
@@ -1032,6 +1310,7 @@ def sync_client(
     base_url: str = "http://localhost:61001",
     api_key: Optional[str] = None,
     workspace_id: Optional[str] = None,
+    session_id: Optional[str] = None,
     timeout: float = 30.0,
 ) -> Generator[SyncMemoryLayerClient, None, None]:
     """
@@ -1041,6 +1320,7 @@ def sync_client(
         base_url: API base URL (default: http://localhost:61001)
         api_key: API key for authentication
         workspace_id: Default workspace ID for operations
+        session_id: Session ID for session-based workspace resolution
         timeout: Request timeout in seconds (default: 30.0)
 
     Yields:
@@ -1055,6 +1335,7 @@ def sync_client(
         base_url=base_url,
         api_key=api_key,
         workspace_id=workspace_id,
+        session_id=session_id,
         timeout=timeout,
     )
     with client:
