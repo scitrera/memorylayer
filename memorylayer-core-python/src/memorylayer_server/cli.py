@@ -197,28 +197,38 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
 
 @cli.command()
 @click.option("--format", "output_format", default="text", type=click.Choice(["text", "json"]))
-def info(output_format: str):
+@click.option("--reveal-secrets", is_flag=True, help="Reveal secret keys in text output")
+def info(output_format: str, reveal_secrets: bool):
     """Show system information and configuration."""
 
+    from memorylayer import __version__
     from memorylayer_server.dependencies import _initialize_sync
+    from datetime import datetime, timezone
     v = get_variables()
     v.set("LOGGING_LEVEL", "ERROR")  # suppress logs during info output
     v = _initialize_sync(v)
+
+    redact_keys: bool = not reveal_secrets
+
     # TODO: move redaction log to scitrera_app_framework and share with log_framework_variables
-    settings = {
-        k.removeprefix('MEMORYLAYER_'): '(redacted)' if any(
+    def _redacted(k, val):
+        return '(redacted)' if any(
             (not 'max_tokens' in k.lower()) and x in k.lower() for x in ('password', 'secret', 'credentials', 'token', 'key',)) else val
-        for (k, val) in sorted(v.export_all_variables().items(), key=lambda kv: kv[0])
-        if k.startswith('MEMORYLAYER')
-    }
+
+    settings = ({k: _redacted(k, v) for (k, v) in sorted(v.export_all_variables().items(), key=lambda kv: kv[0])
+                 if k.startswith('MEMORYLAYER')} if redact_keys else
+                {k: v for k, v in sorted(v.export_all_variables().items(), key=lambda kv: kv[0]) if k.startswith('MEMORYLAYER')})
 
     if output_format == "json":
-        click.echo(json.dumps(settings, indent=2))
+        click.echo(json.dumps({k.removeprefix('MEMORYLAYER_').lower(): v for k, v in settings.items()}, indent=2))
     else:
-        click.echo("MemoryLayer.ai Configuration")
-        click.echo("=" * 40)
+        click.echo('# ' + "=" * 50)
+        click.echo("# MemoryLayer.ai Configuration")
+        click.echo(f"# exported at {datetime.now(tz=timezone.utc).isoformat()}")
+        click.echo(f"# version = v{__version__}")
+        click.echo('# ' + "=" * 50)
         for k, v in settings.items():
-            click.echo(f"{k}: {v}")
+            click.echo(f"{k}={v}")
         click.echo("")
 
 
