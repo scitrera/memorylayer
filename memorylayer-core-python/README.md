@@ -81,32 +81,33 @@ docker run -d \
 
 ## API Usage
 
+The server exposes a REST API. Use any HTTP client, or install the Python SDK (`pip install memorylayer-client`) for a typed client:
+
 ```python
 from memorylayer import MemoryLayerClient
 
-client = MemoryLayerClient(base_url="http://localhost:61001")
+async with MemoryLayerClient(base_url="http://localhost:61001") as client:
+    # Store a memory
+    memory = await client.remember(
+        content="User prefers Python for backend development",
+        type="semantic",
+        importance=0.8,
+        tags=["preferences", "programming"]
+    )
 
-# Store a memory
-memory = await client.remember(
-    content="User prefers Python for backend development",
-    type="semantic",
-    importance=0.8,
-    tags=["preferences", "programming"]
-)
+    # Recall memories
+    results = await client.recall(
+        query="What programming languages does the user like?",
+        limit=5
+    )
 
-# Recall memories
-results = await client.recall(
-    query="What programming languages does the user like?",
-    limit=5
-)
-
-# Create associations
-await client.associate(
-    source_id=memory.id,
-    target_id=other_memory.id,
-    relationship="related_to",
-    strength=0.9
-)
+    # Create associations
+    await client.associate(
+        source_id=memory.id,
+        target_id=other_memory.id,
+        relationship="related_to",
+        strength=0.9
+    )
 ```
 
 ## Configuration
@@ -240,4 +241,4 @@ The Docker image includes a built-in health check at `/health` (every 30s, 10s s
 
 ## License
 
-Apache 2.0 License
+Apache 2.0 License -- see [LICENSE](../LICENSE) for details.

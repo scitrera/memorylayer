@@ -25,8 +25,6 @@ npx memorylayer-mcp
 
 ### Claude Code Configuration (Recommended)
 
-> **Detailed setup guide:** See [CLAUDE_CODE_SETUP.md](../docs/CLAUDE_CODE_SETUP.md) for step-by-step instructions.
-
 Claude Code runs MCP servers from the project directory, so our server auto-detects the workspace from your git repo or folder name. Add `.mcp.json` to your project root:
 
 ```json
@@ -358,6 +356,9 @@ Checkpoint sandbox state for persistence (enterprise deployments).
 | `MEMORYLAYER_API_KEY` | API key for authentication | (none) |
 | `MEMORYLAYER_WORKSPACE_ID` | Workspace ID (overrides auto-detection) | (auto-detected) |
 | `MEMORYLAYER_AUTO_WORKSPACE` | Set to `false` to disable auto-detection | `true` |
+| `MEMORYLAYER_TOOL_PROFILE` | Tool profile: `cc`, `full`, or `minimal` | `cc` |
+| `MEMORYLAYER_AUTO_START_SESSION` | Auto-start session on MCP connection | `true` |
+| `MEMORYLAYER_SESSION_MODE` | Enable session mode | `true` |
 
 ## Memory Types
 
@@ -393,6 +394,7 @@ memorylayer-mcp-typescript/
 │   ├── tools.ts       # MCP tool definitions (21 tools)
 │   ├── client.ts      # Wrapper around @scitrera/memorylayer-sdk
 │   ├── session.ts     # Local session state management
+│   ├── workspace.ts   # Workspace ID auto-detection
 │   ├── handlers.ts    # Tool handler implementations
 │   ├── server.ts      # MCP server using @modelcontextprotocol/sdk
 │   └── index.ts       # Main exports

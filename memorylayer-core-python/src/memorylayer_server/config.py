@@ -103,13 +103,14 @@ DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE = 'default'  # Open permissions (allow
 class RerankerProviderType(str, Enum):
     """Available reranker provider types."""
     LLM = "llm"  # Use LLM service for reranking
-    HYDE = "hyde"  # Hypothetical Document Embeddings (LLM + embedding) (default)
+    HYDE = "hyde"  # Hypothetical Document Embeddings (LLM + embedding)
+    RRF = "rrf"  # Reciprocal Rank Fusion (embedding-only multi-query) (default)
     LOCAL = "local"  # sentence-transformers CrossEncoder (self-hosted)
     NONE = "none"  # Disabled (no reranking)
 
 
 MEMORYLAYER_RERANKER_PROVIDER = 'MEMORYLAYER_RERANKER_PROVIDER'
-DEFAULT_MEMORYLAYER_RERANKER_PROVIDER = 'hyde'
+DEFAULT_MEMORYLAYER_RERANKER_PROVIDER = 'rrf'
 
 MEMORYLAYER_RERANKER_SERVICE = 'MEMORYLAYER_RERANKER_SERVICE'
 DEFAULT_MEMORYLAYER_RERANKER_SERVICE = 'default'

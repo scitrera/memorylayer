@@ -225,10 +225,8 @@ export MEMORYLAYER_WORKSPACE_ID="my-custom-workspace"
 
 ## Links
 
-- [MemoryLayer Documentation](https://memorylayer.ai/docs)
+- [MemoryLayer Documentation](https://docs.memorylayer.ai)
 - [MCP Server README](../memorylayer-mcp-typescript/README.md)
-- [Hook Configuration Details](../docs/CLAUDE_CODE_HOOKS.md)
-- [CLAUDE.md Templates](../docs/CLAUDE_MD_TEMPLATES.md)
 
 ## License
 
