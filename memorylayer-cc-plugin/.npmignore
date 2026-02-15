@@ -1,0 +1,21 @@
+# Source files (only ship dist/)
+src/
+bin/
+tsconfig.json
+
+# Claude Code plugin metadata (not needed at runtime)
+.claude-plugin/
+commands/
+skills/
+hooks/
+.mcp.json
+
+# Development files
+*.log
+.env*
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
