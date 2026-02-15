@@ -72,6 +72,9 @@ DEFAULT_MEMORYLAYER_SESSION_SERVICE = 'in-memory'
 MEMORYLAYER_SESSION_IMPLICIT_CREATE = 'MEMORYLAYER_SESSION_IMPLICIT_CREATE'
 DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE = True
 
+MEMORYLAYER_SESSION_TOUCH_TTL = 'MEMORYLAYER_SESSION_TOUCH_TTL'
+DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL = 3600
+
 # ============================================
 # Workspace Service
 # ============================================
@@ -118,7 +121,7 @@ DEFAULT_MEMORYLAYER_RERANKER_PRELOAD_ENABLED = True
 # Cache Service
 # ============================================
 MEMORYLAYER_CACHE_SERVICE = 'MEMORYLAYER_CACHE_SERVICE'
-DEFAULT_MEMORYLAYER_CACHE_SERVICE = 'default'
+DEFAULT_MEMORYLAYER_CACHE_SERVICE = 'lru'
 
 # Default tenant and workspace constants
 # Use underscore prefix for all reserved/system entities

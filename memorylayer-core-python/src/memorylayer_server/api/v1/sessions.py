@@ -647,21 +647,18 @@ async def commit_session(
         logger: logging.Logger = Depends(get_logger),
 ) -> CommitResponse:
     """
-    Commit session working memory to long-term memory.
+    Commit session and finalize working memory.
 
-    Extracts memories from session working memory using the extraction service,
-    deduplicates them, and creates new long-term memories.
+    Marks the session as committed. Working memories are persisted to
+    long-term storage via write-behind as they are written during the
+    session, so this operation is lightweight.
 
     Args:
         session_id: Session identifier
-        options: Optional commit options (min_importance, deduplicate, categories, max_memories)
-        session_service: Session service instance
+        options: Optional commit options (retained for API compatibility)
 
     Returns:
-        CommitResponse with extraction statistics and breakdown by category
-
-    Raises:
-        HTTPException: If session not found or commit fails
+        CommitResponse with session statistics
     """
     try:
         # Build context
@@ -739,16 +736,21 @@ async def commit_session(
 async def touch_session(
         http_request: Request,
         session_id: str,
+        extend_seconds: Optional[int] = None,
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> dict:
     """
-    Update session expiration (extend TTL).
+    Update session expiration (extend TTL) using sliding window.
+
+    Resets the session's expires_at to now + TTL. If extend_seconds is provided,
+    it overrides the server's default TTL for this call.
 
     Args:
         session_id: Session identifier
+        extend_seconds: Optional TTL override in seconds (uses server default if None)
         session_service: Session service instance
 
     Returns:
@@ -775,9 +777,11 @@ async def touch_session(
             resource_id=session_id, workspace_id=session.workspace_id
         )
 
-        logger.debug("Touching session: %s", session_id)
+        logger.debug("Touching session: %s with extend_seconds=%s", session_id, extend_seconds)
 
-        updated_session = await session_service.touch_session(session.workspace_id, session_id)
+        updated_session = await session_service.touch_session(
+            session.workspace_id, session_id, extend_seconds=extend_seconds
+        )
         if not updated_session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

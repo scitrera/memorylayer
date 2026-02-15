@@ -6,13 +6,13 @@ from fastapi import Depends, Request
 from scitrera_app_framework import Variables, get_extension
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
-from ...tasks.session_touch_handler import SESSION_TOUCH_HANDLER_TASK
 from ...services.tasks import TaskService, EXT_TASK_SERVICE
 from ...services.authentication import AuthenticationService, EXT_AUTHENTICATION_SERVICE
 from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SERVICE
-from ...services.session import get_session_service as _get_session_service, SessionService
-from ...services.workspace import get_workspace_service as _get_workspace_service, WorkspaceService
-from ...services.memory import get_memory_service as _get_memory_service, MemoryService
+from ...services.session import SessionService, EXT_SESSION_SERVICE
+from ...services.workspace import WorkspaceService, EXT_WORKSPACE_SERVICE
+from ...services.memory import MemoryService, EXT_MEMORY_SERVICE
+from ...tasks.session_touch_handler import SESSION_TOUCH_HANDLER_TASK
 
 
 async def get_task_service(v: Variables = Depends(get_variables_dep)) -> TaskService:
@@ -48,14 +48,14 @@ async def get_authz_service(v: Variables = Depends(get_variables_dep)) -> Author
 
 def get_session_service(v: Variables = Depends(get_variables_dep)) -> SessionService:
     """FastAPI dependency wrapper for session service."""
-    return _get_session_service(v)
+    return get_extension(EXT_SESSION_SERVICE, v)
 
 
 def get_workspace_service(v: Variables = Depends(get_variables_dep)) -> WorkspaceService:
     """FastAPI dependency wrapper for workspace service."""
-    return _get_workspace_service(v)
+    return get_extension(EXT_WORKSPACE_SERVICE, v)
 
 
 def get_memory_service(v: Variables = Depends(get_variables_dep)) -> MemoryService:
     """FastAPI dependency wrapper for memory service."""
-    return _get_memory_service(v)
+    return get_extension(EXT_MEMORY_SERVICE, v)

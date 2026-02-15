@@ -200,7 +200,7 @@ class AsyncIOTaskService(TaskService):
             handler: Async handler function
         """
         self._handlers[task_type] = handler
-        self.logger.info("Registered handler for task type: %s", task_type)
+        self.logger.debug("Registered handler for task type: %s", task_type)
 
 
 class AsyncIOTaskServicePlugin(TaskServicePluginBase):

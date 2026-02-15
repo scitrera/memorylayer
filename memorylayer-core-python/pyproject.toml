@@ -21,6 +21,7 @@ classifiers = [
 dependencies = [
     "scitrera-app-framework>=0.0.69",
     "scitrera-rt-data>=0.0.7",
+    "scitrera-ext-cachetools>=0.0.1",
     "fastapi>=0.128.7",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.12.5",

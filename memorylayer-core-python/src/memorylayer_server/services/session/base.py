@@ -77,6 +77,7 @@ class SessionService(ABC):
     """Interface for session service."""
 
     logger: logging.Logger = None
+    default_touch_ttl: int = 3600
 
     @abstractmethod
     async def create_session(
@@ -207,12 +208,15 @@ class SessionService(ABC):
             session_id: str,
             extend_seconds: Optional[int] = None
     ) -> Session:
-        """Extend session TTL.
+        """Extend session TTL using sliding window.
+
+        Resets expires_at to now + TTL. If extend_seconds is provided,
+        it overrides the server default for this call.
 
         Args:
             workspace_id: Workspace boundary
             session_id: Session to extend
-            extend_seconds: Additional seconds to add (uses default TTL if None)
+            extend_seconds: TTL override for this call (uses server default if None)
 
         Returns:
             Updated session with new expiration time
@@ -257,4 +261,6 @@ class SessionServicePluginBase(Plugin):
         return enabled_option_pattern(self, v, MEMORYLAYER_SESSION_SERVICE, self_attr='PROVIDER_NAME')
 
     def on_registration(self, v: Variables) -> None:
+        from ...config import MEMORYLAYER_SESSION_TOUCH_TTL, DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL
         v.set_default_value(MEMORYLAYER_SESSION_SERVICE, DEFAULT_MEMORYLAYER_SESSION_SERVICE)
+        v.set_default_value(MEMORYLAYER_SESSION_TOUCH_TTL, DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL)

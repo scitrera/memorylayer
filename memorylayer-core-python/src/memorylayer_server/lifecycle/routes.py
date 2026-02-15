@@ -22,7 +22,7 @@ class RoutesPlugin(Plugin):
 
         # Register API routers -- requires that we run after all API router plugins are registered!
         for ext_name, router in get_extensions(EXT_MULTI_API_ROUTERS, v).items():
-            logger.info('Adding API router from extension: %s', ext_name)
+            logger.debug('Adding API router from extension: %s', ext_name)
             app.include_router(router)
 
         return
