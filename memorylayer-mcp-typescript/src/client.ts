@@ -141,8 +141,23 @@ export class MemoryLayerClient {
     return this.sdk.getMemory(memoryId);
   }
 
-  async getBriefing(includeContradictions: boolean = true): Promise<ToolResponse> {
-    const briefing = await this.sdk.getBriefing(24, includeContradictions);
+  async getBriefing(options?: {
+    timeWindowMinutes?: number;
+    detailLevel?: string;
+    limit?: number;
+    includeMemories?: boolean;
+    includeContradictions?: boolean;
+  }): Promise<ToolResponse> {
+    const opts = options ?? {};
+    const lookbackMinutes = opts.timeWindowMinutes ?? 60;
+
+    const briefing = await this.sdk.getBriefing({
+      lookbackMinutes: lookbackMinutes,
+      detailLevel: opts.detailLevel ?? "abstract",
+      limit: opts.limit ?? 10,
+      includeMemories: opts.includeMemories !== false,
+      includeContradictions: opts.includeContradictions !== false,
+    });
 
     return {
       success: true,
@@ -153,6 +168,7 @@ export class MemoryLayerClient {
       active_topics: briefing.workspace_summary?.active_topics ?? [],
       recent_activity: briefing.recent_activity ?? [],
       contradictions_found: briefing.contradictions_detected?.length ?? 0,
+      memories: briefing.memories ?? [],
     };
   }
 

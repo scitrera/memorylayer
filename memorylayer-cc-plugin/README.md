@@ -17,7 +17,7 @@ This plugin integrates [MemoryLayer](https://memorylayer.ai) with Claude Code to
 
 ```bash
 # Add the marketplace (one-time setup)
-claude plugin marketplace add https://github.com/scitrera/memorylayer.git
+claude plugin marketplace add scitrera/memorylayer
 
 # Install the plugin
 claude plugin install memorylayer@memorylayer.ai
@@ -225,11 +225,9 @@ export MEMORYLAYER_WORKSPACE_ID="my-custom-workspace"
 
 ## Links
 
-- [MemoryLayer Documentation](https://memorylayer.ai/docs)
+- [MemoryLayer Documentation](https://docs.memorylayer.ai)
 - [MCP Server README](../memorylayer-mcp-typescript/README.md)
-- [Hook Configuration Details](../docs/CLAUDE_CODE_HOOKS.md)
-- [CLAUDE.md Templates](../docs/CLAUDE_MD_TEMPLATES.md)
 
 ## License
 
-Apache 2.0
+Apache 2.0 License -- see [LICENSE](../LICENSE) for details.

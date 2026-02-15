@@ -1,7 +1,8 @@
 """Main client for MemoryLayer.ai SDK."""
 
+import json
 import logging
-from typing import Any, Optional, Union
+from typing import Any, AsyncGenerator, Optional, Union
 
 import httpx
 from pydantic import TypeAdapter
@@ -647,20 +648,39 @@ class MemoryLayerClient:
         data = await self._request("GET", f"/sessions/{session_id}/memory", params=params)
         return data
 
-    async def get_briefing(self, lookback_hours: int = 24) -> SessionBriefing:
+    async def get_briefing(
+        self,
+        lookback_hours: Optional[int] = None,
+        lookback_minutes: int = 60,
+        detail_level: str = "abstract",
+        limit: int = 10,
+        include_memories: bool = True,
+        include_contradictions: bool = True,
+    ) -> SessionBriefing:
         """
         Get a session briefing with recent activity and context.
 
         Args:
-            lookback_hours: How far back to look for activity (default: 24)
+            lookback_hours: DEPRECATED - Use lookback_minutes instead. If provided, overrides lookback_minutes.
+            lookback_minutes: Time window in minutes for recent memories (default: 60)
+            detail_level: Level of memory detail - "abstract", "overview", or "full" (default: "abstract")
+            limit: Maximum number of recent memories to include (default: 10)
+            include_memories: Whether to include recent memory content (default: True)
+            include_contradictions: Flag contradicting memories in briefing (default: True)
 
         Returns:
             Session briefing
 
         Example:
-            briefing = await client.get_briefing(lookback_hours=48)
+            briefing = await client.get_briefing(lookback_minutes=120, detail_level="full")
         """
-        params = {"lookback_hours": lookback_hours}
+        params = {
+            "lookback_minutes": lookback_hours * 60 if lookback_hours is not None else lookback_minutes,
+            "detail_level": detail_level,
+            "limit": limit,
+            "include_memories": str(include_memories).lower(),
+            "include_contradictions": str(include_contradictions).lower(),
+        }
         data = await self._request("GET", "/sessions/briefing", params=params)
         return SessionBriefing(**data)
 
@@ -805,6 +825,216 @@ class MemoryLayerClient:
         """
         return await self._request("GET", f"/workspaces/{workspace_id}/schema")
 
+    async def export_workspace(
+        self,
+        workspace_id: Optional[str] = None,
+        include_associations: bool = True,
+        offset: int = 0,
+        limit: int = 0,
+    ) -> dict:
+        """Export workspace memories and associations as JSON.
+
+        Args:
+            workspace_id: Workspace to export (uses default if not specified)
+            include_associations: Whether to include associations
+            offset: Skip first N memories (default: 0)
+            limit: Maximum memories to export (default: 0 = all)
+
+        Returns:
+            Export data dictionary with memories and associations
+
+        Example:
+            data = await client.export_workspace("ws_123")
+            print(f"Exported {len(data['memories'])} memories")
+        """
+        ws_id = workspace_id or self.workspace_id
+        if not ws_id:
+            raise ValueError("Workspace ID required")
+        params = {
+            "include_associations": str(include_associations).lower(),
+            "offset": str(offset),
+            "limit": str(limit),
+        }
+
+        # Fetch raw NDJSON response
+        client = self._ensure_client()
+        response = await client.get(f"/workspaces/{ws_id}/export", params=params)
+
+        # Handle errors
+        if response.status_code >= 400:
+            if response.status_code == 401:
+                raise AuthenticationError(response.json().get("detail", "Authentication failed"))
+            elif response.status_code == 404:
+                raise NotFoundError(response.json().get("detail", "Resource not found"))
+            elif response.status_code == 422:
+                raise ValidationError(response.json().get("detail", "Validation error"))
+            else:
+                raise MemoryLayerError(
+                    response.json().get("detail", "Request failed"),
+                    status_code=response.status_code,
+                )
+
+        response.raise_for_status()
+
+        # Parse NDJSON response
+        import json
+        text = response.text
+        lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+
+        header = None
+        memories = []
+        associations = []
+
+        for line in lines:
+            parsed = json.loads(line)
+            if parsed.get("type") == "header":
+                header = parsed
+            elif parsed.get("type") == "memory":
+                memories.append(parsed["data"])
+            elif parsed.get("type") == "association":
+                associations.append(parsed["data"])
+
+        # Build backward-compatible response
+        return {
+            "version": header.get("version", "1.0") if header else "1.0",
+            "workspace_id": header.get("workspace_id", ws_id) if header else ws_id,
+            "exported_at": header.get("exported_at", "") if header else "",
+            "total_memories": header.get("total_memories", len(memories)) if header else len(memories),
+            "total_associations": header.get("total_associations", len(associations)) if header else len(associations),
+            "memories": memories,
+            "associations": associations,
+        }
+
+    async def import_workspace(
+        self,
+        workspace_id: str,
+        data: dict,
+    ) -> dict:
+        """Import memories and associations into a workspace.
+
+        Args:
+            workspace_id: Target workspace ID
+            data: Export data dictionary (from export_workspace)
+
+        Returns:
+            Import results with counts of imported/skipped/errors
+
+        Example:
+            result = await client.import_workspace("ws_123", export_data)
+            print(f"Imported {result['imported']} memories")
+        """
+        response = await self._request(
+            "POST", f"/workspaces/{workspace_id}/import",
+            json={"data": data}
+        )
+        return response
+
+    async def export_workspace_stream(
+        self,
+        workspace_id: Optional[str] = None,
+        include_associations: bool = True,
+        offset: int = 0,
+        limit: int = 0,
+    ) -> AsyncGenerator[dict, None]:
+        """Export workspace as streaming NDJSON.
+
+        Yields parsed JSON objects line-by-line (header, memory, association, footer).
+
+        Args:
+            workspace_id: Workspace to export (uses default if not specified)
+            include_associations: Whether to include associations
+            offset: Skip first N memories (default: 0)
+            limit: Maximum memories to export (default: 0 = all)
+
+        Yields:
+            Parsed JSON objects from NDJSON stream
+
+        Example:
+            async for line in client.export_workspace_stream("ws_123"):
+                if line["type"] == "memory":
+                    print(f"Memory: {line['data']['content']}")
+        """
+        ws_id = workspace_id or self.workspace_id
+        if not ws_id:
+            raise ValueError("Workspace ID required")
+        params = {
+            "include_associations": str(include_associations).lower(),
+            "offset": str(offset),
+            "limit": str(limit),
+        }
+
+        client = self._ensure_client()
+        response = await client.get(f"/workspaces/{ws_id}/export", params=params)
+
+        if response.status_code >= 400:
+            if response.status_code == 401:
+                raise AuthenticationError(response.json().get("detail", "Authentication failed"))
+            elif response.status_code == 404:
+                raise NotFoundError(response.json().get("detail", "Resource not found"))
+            elif response.status_code == 422:
+                raise ValidationError(response.json().get("detail", "Validation error"))
+            else:
+                raise MemoryLayerError(
+                    response.json().get("detail", "Request failed"),
+                    status_code=response.status_code,
+                )
+
+        response.raise_for_status()
+
+        text = response.text
+        lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+
+        for line in lines:
+            yield json.loads(line)
+
+    async def import_workspace_stream(
+        self,
+        workspace_id: str,
+        ndjson_lines: list[dict],
+    ) -> dict:
+        """Import workspace from NDJSON format.
+
+        Args:
+            workspace_id: Target workspace ID
+            ndjson_lines: List of dicts to serialize as NDJSON
+
+        Returns:
+            Import results with counts of imported/skipped/errors
+
+        Example:
+            lines = [
+                {"type": "header", "version": "1.0", ...},
+                {"type": "memory", "data": {...}},
+            ]
+            result = await client.import_workspace_stream("ws_123", lines)
+            print(f"Imported {result['imported']} memories")
+        """
+        # Serialize to NDJSON
+        ndjson_body = '\n'.join(json.dumps(line) for line in ndjson_lines)
+
+        client = self._ensure_client()
+        response = await client.post(
+            f"/workspaces/{workspace_id}/import",
+            content=ndjson_body,
+            headers={"Content-Type": "application/x-ndjson"}
+        )
+
+        if response.status_code >= 400:
+            if response.status_code == 401:
+                raise AuthenticationError(response.json().get("detail", "Authentication failed"))
+            elif response.status_code == 404:
+                raise NotFoundError(response.json().get("detail", "Resource not found"))
+            elif response.status_code == 422:
+                raise ValidationError(response.json().get("detail", "Validation error"))
+            else:
+                raise MemoryLayerError(
+                    response.json().get("detail", "Request failed"),
+                    status_code=response.status_code,
+                )
+
+        response.raise_for_status()
+        return response.json()
+
     # Memory extension operations
 
     async def decay(
@@ -878,6 +1108,37 @@ class MemoryLayerClient:
         return await self._request("POST", "/memories/batch", json=payload)
 
     # Session extension operations
+
+    async def list_sessions(
+        self,
+        workspace_id: Optional[str] = None,
+        context_id: Optional[str] = None,
+        include_expired: bool = False,
+    ) -> list[dict[str, Any]]:
+        """
+        List sessions in a workspace.
+
+        Args:
+            workspace_id: Workspace ID (defaults to client workspace)
+            context_id: Optional filter by context
+            include_expired: Whether to include expired sessions
+
+        Returns:
+            List of session dicts
+
+        Example:
+            sessions = await client.list_sessions()
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self._workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+        if context_id:
+            params["context_id"] = context_id
+        if include_expired:
+            params["include_expired"] = "true"
+        data = await self._request("GET", "/sessions", params=params)
+        return data.get("sessions", [])
 
     async def delete_session(self, session_id: str) -> bool:
         """

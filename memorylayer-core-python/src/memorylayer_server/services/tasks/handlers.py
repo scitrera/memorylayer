@@ -10,6 +10,8 @@ from typing import Optional, Awaitable, Callable, Iterable
 from scitrera_app_framework import Plugin, Variables, get_extensions
 
 from .base import EXT_MULTI_TASK_HANDLERS, TaskSchedule, TaskService, EXT_TASK_SERVICE
+from ..memory import EXT_MEMORY_SERVICE
+from ..session import EXT_SESSION_SERVICE
 
 
 class TaskHandlerPlugin(Plugin, ABC):
@@ -38,7 +40,7 @@ class TaskHandlerPlugin(Plugin, ABC):
         pass
 
     @abstractmethod
-    async def handle(self, payload: dict) -> None:
+    async def handle(self, v: Variables, payload: dict) -> None:
         """
         Execute the task with given payload.
 
@@ -115,4 +117,6 @@ class TaskHandlersSetupPlugin(Plugin):
     def get_dependencies(self, v: Variables) -> Iterable[str] | None:
         return (
             EXT_TASK_SERVICE,  # register handlers must come after task service initialization
+            EXT_MEMORY_SERVICE,  # ensure we have memory service available before registering tasks
+            EXT_SESSION_SERVICE,  # ensure we have session service available before registering tasks
         )

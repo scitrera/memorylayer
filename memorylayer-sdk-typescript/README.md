@@ -409,7 +409,7 @@ This SDK is written in TypeScript and provides full type definitions out of the 
 
 ## License
 
-Apache 2.0 License
+Apache 2.0 License -- see [LICENSE](../LICENSE) for details.
 
 ## Links
 

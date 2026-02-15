@@ -473,13 +473,12 @@ class TestFactDecompositionHandlerIntegration:
     @pytest.mark.asyncio
     async def test_handler_uses_ingest_fact(self):
         """Handler should route each fact through memory_service.ingest_fact()."""
-        from memorylayer_server.services.extraction.fact_decomposition_handler import (
+        from memorylayer_server.tasks.fact_decomposition_handler import (
             FactDecompositionTaskHandler,
         )
 
         handler = FactDecompositionTaskHandler()
         mock_v = MagicMock()
-        handler._v = mock_v
 
         parent = _make_memory(
             memory_id="mem_parent",
@@ -516,7 +515,7 @@ class TestFactDecompositionHandlerIntegration:
             return MagicMock()
 
         with patch.object(handler, 'get_extension', side_effect=get_ext):
-            await handler.handle({
+            await handler.handle(mock_v, {
                 'memory_id': 'mem_parent',
                 'workspace_id': 'ws_test',
             })
@@ -541,13 +540,12 @@ class TestFactDecompositionHandlerIntegration:
     @pytest.mark.asyncio
     async def test_handler_skips_atomic_memory(self):
         """Handler should skip decomposition for atomic content."""
-        from memorylayer_server.services.extraction.fact_decomposition_handler import (
+        from memorylayer_server.tasks.fact_decomposition_handler import (
             FactDecompositionTaskHandler,
         )
 
         handler = FactDecompositionTaskHandler()
         mock_v = MagicMock()
-        handler._v = mock_v
 
         parent = _make_memory(memory_id="mem_atomic", content="Single fact.")
 
@@ -574,7 +572,7 @@ class TestFactDecompositionHandlerIntegration:
             return MagicMock()
 
         with patch.object(handler, 'get_extension', side_effect=get_ext):
-            await handler.handle({
+            await handler.handle(mock_v, {
                 'memory_id': 'mem_atomic',
                 'workspace_id': 'ws_test',
             })
@@ -585,13 +583,12 @@ class TestFactDecompositionHandlerIntegration:
     @pytest.mark.asyncio
     async def test_handler_handles_dedup_skip_in_fact(self):
         """Handler should handle facts that are deduplicated (return None)."""
-        from memorylayer_server.services.extraction.fact_decomposition_handler import (
+        from memorylayer_server.tasks.fact_decomposition_handler import (
             FactDecompositionTaskHandler,
         )
 
         handler = FactDecompositionTaskHandler()
         mock_v = MagicMock()
-        handler._v = mock_v
 
         parent = _make_memory(
             memory_id="mem_parent2",
@@ -628,7 +625,7 @@ class TestFactDecompositionHandlerIntegration:
             return MagicMock()
 
         with patch.object(handler, 'get_extension', side_effect=get_ext):
-            await handler.handle({
+            await handler.handle(mock_v, {
                 'memory_id': 'mem_parent2',
                 'workspace_id': 'ws_test',
             })

@@ -13,8 +13,7 @@ from ...config import (
     DEFAULT_MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
 )
 
-# Extension point constant
-EXT_CONTEXT_ENVIRONMENT_SERVICE = 'memorylayer-context-environment-service'
+from .._constants import EXT_CONTEXT_ENVIRONMENT_SERVICE
 
 
 class ContextEnvironmentService(ABC):

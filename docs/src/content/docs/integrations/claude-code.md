@@ -33,7 +33,7 @@ First, add the MemoryLayer marketplace, then install the plugin:
 
 ```bash
 # Add the marketplace (one-time setup)
-claude plugin marketplace add https://github.com/scitrera/memorylayer.git
+claude plugin marketplace add scitrera/memorylayer
 
 # Install the plugin
 claude plugin install memorylayer@memorylayer.ai

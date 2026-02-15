@@ -1,17 +1,17 @@
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_MEMORY_SERVICE, DEFAULT_MEMORYLAYER_MEMORY_SERVICE
-from ..storage import EXT_STORAGE_BACKEND
-from ..embedding import EXT_EMBEDDING_PROVIDER
-from ..cache import EXT_CACHE_SERVICE
-from ..semantic_tiering import EXT_SEMANTIC_TIERING_SERVICE
-from ..deduplication import EXT_DEDUPLICATION_SERVICE
-from ..reranker import EXT_RERANKER_SERVICE
-from ..contradiction import EXT_CONTRADICTION_SERVICE
-from ..extraction import EXT_EXTRACTION_SERVICE
-
-# Extension point constant
-EXT_MEMORY_SERVICE = 'memorylayer-memory-service'
+from .._constants import (
+    EXT_CACHE_SERVICE,
+    EXT_CONTRADICTION_SERVICE,
+    EXT_DEDUPLICATION_SERVICE,
+    EXT_EMBEDDING_PROVIDER,
+    EXT_EXTRACTION_SERVICE,
+    EXT_MEMORY_SERVICE,
+    EXT_RERANKER_SERVICE,
+    EXT_SEMANTIC_TIERING_SERVICE,
+    EXT_STORAGE_BACKEND,
+)
 
 # Recall overfetch multiplier for reranker candidate pool
 MEMORYLAYER_MEMORY_RECALL_OVERFETCH = 'MEMORYLAYER_MEMORY_RECALL_OVERFETCH'

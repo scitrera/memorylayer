@@ -81,32 +81,33 @@ docker run -d \
 
 ## API Usage
 
+The server exposes a REST API. Use any HTTP client, or install the Python SDK (`pip install memorylayer-client`) for a typed client:
+
 ```python
 from memorylayer import MemoryLayerClient
 
-client = MemoryLayerClient(base_url="http://localhost:61001")
+async with MemoryLayerClient(base_url="http://localhost:61001") as client:
+    # Store a memory
+    memory = await client.remember(
+        content="User prefers Python for backend development",
+        type="semantic",
+        importance=0.8,
+        tags=["preferences", "programming"]
+    )
 
-# Store a memory
-memory = await client.remember(
-    content="User prefers Python for backend development",
-    type="semantic",
-    importance=0.8,
-    tags=["preferences", "programming"]
-)
+    # Recall memories
+    results = await client.recall(
+        query="What programming languages does the user like?",
+        limit=5
+    )
 
-# Recall memories
-results = await client.recall(
-    query="What programming languages does the user like?",
-    limit=5
-)
-
-# Create associations
-await client.associate(
-    source_id=memory.id,
-    target_id=other_memory.id,
-    relationship="related_to",
-    strength=0.9
-)
+    # Create associations
+    await client.associate(
+        source_id=memory.id,
+        target_id=other_memory.id,
+        relationship="related_to",
+        strength=0.9
+    )
 ```
 
 ## Configuration
@@ -176,6 +177,17 @@ export MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER=google
 export MEMORYLAYER_LLM_PROFILE_DEFAULT_API_KEY=...
 ```
 
+**Profile configuration variables** (replace `DEFAULT` with any profile name):
+
+| Variable | Description |
+|----------|-------------|
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_PROVIDER` | Provider (`openai`, `anthropic`, `google`) |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_API_KEY` | API key |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_MODEL` | Model name override |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_BASE_URL` | Custom API base URL |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_MAX_TOKENS` | Max response tokens |
+| `MEMORYLAYER_LLM_PROFILE_<NAME>_TEMPERATURE` | Sampling temperature |
+
 Without an LLM provider, core memory operations (remember, recall, forget, associate) work normally, but synthesis features will be unavailable.
 
 ### Context Environment
@@ -193,6 +205,7 @@ The Context Environment provides server-side Python sandboxes for memory analysi
 | `MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES` | `268435456` | Memory limit per sandbox (256 MB) |
 | `MEMORYLAYER_CONTEXT_RLM_MAX_ITERATIONS` | `10` | Max iterations for RLM loops |
 | `MEMORYLAYER_CONTEXT_RLM_MAX_EXEC_SECONDS` | `120` | Total timeout for RLM loops |
+| `MEMORYLAYER_CONTEXT_MAX_OPERATIONS` | `1000000` | Max operations per sandbox execution |
 
 ## Storage
 
@@ -240,4 +253,4 @@ The Docker image includes a built-in health check at `/health` (every 30s, 10s s
 
 ## License
 
-Apache 2.0 License
+Apache 2.0 License -- see [LICENSE](../LICENSE) for details.

@@ -3,6 +3,7 @@ Working memory/session context API endpoints.
 
 Endpoints:
 - POST /v1/sessions - Create session
+- GET /v1/sessions - List sessions in a workspace
 - GET /v1/sessions/{session_id} - Get session
 - DELETE /v1/sessions/{session_id} - Delete session
 - POST /v1/sessions/{session_id}/memory - Set working memory key
@@ -16,14 +17,15 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
-from scitrera_app_framework import Plugin, Variables, get_extension
+from scitrera_app_framework import Plugin, Variables
 
 from .. import EXT_MULTI_API_ROUTERS
-from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
+from memorylayer_server.lifecycle.fastapi import get_logger
 
 from .schemas import (
     SessionCreateRequest,
     WorkingMemorySetRequest,
+    SessionListResponse,
     SessionResponse,
     SessionStartResponse,
     WorkingMemoryResponse,
@@ -32,36 +34,14 @@ from .schemas import (
     CommitResponse,
     ErrorResponse,
 )
-from ...services.session import get_session_service as _get_session_service, SessionService
-from ...services.workspace import get_workspace_service as _get_workspace_service, WorkspaceService
-from ...services.authentication import (
-    AuthenticationService,
-    EXT_AUTHENTICATION_SERVICE,
-)
-from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SERVICE
+from ...services.session import SessionService
+from ...services.workspace import WorkspaceService
+from ...services.authentication import AuthenticationService
+from ...services.authorization import AuthorizationService
 from ...config import DEFAULT_TENANT_ID, DEFAULT_CONTEXT_ID
+from .deps import get_auth_service, get_authz_service, get_session_service, get_workspace_service, get_active_session
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
-
-
-async def get_auth_service(v: Variables = Depends(get_variables_dep)) -> AuthenticationService:
-    """Get authentication service instance."""
-    return get_extension(EXT_AUTHENTICATION_SERVICE, v)
-
-
-async def get_authz_service(v: Variables = Depends(get_variables_dep)) -> AuthorizationService:
-    """Get authorization service instance."""
-    return get_extension(EXT_AUTHORIZATION_SERVICE, v)
-
-
-def get_session_service(v: Variables = Depends(get_variables_dep)) -> SessionService:
-    """FastAPI dependency wrapper for session service."""
-    return _get_session_service(v)
-
-
-def get_workspace_service(v: Variables = Depends(get_variables_dep)) -> WorkspaceService:
-    """FastAPI dependency wrapper for workspace service."""
-    return _get_workspace_service(v)
 
 
 @router.post(
@@ -168,7 +148,14 @@ async def create_session(
         briefing = None
         if request.briefing:
             logger.info("Generating briefing for session: %s", session_id)
-            briefing = await session_service.get_briefing(workspace_id)
+            briefing = await session_service.get_briefing(
+                workspace_id,
+                lookback_minutes=60,
+                detail_level="abstract",
+                limit=10,
+                include_memories=True,
+                include_contradictions=True,
+            )
 
         logger.info("Created session: %s", session_id)
         return SessionStartResponse(session=session, briefing=briefing)
@@ -187,7 +174,78 @@ async def create_session(
         )
 
 
-# NOTE: /briefing must be defined BEFORE /{session_id} to avoid route collision
+# NOTE: list and /briefing must be defined BEFORE /{session_id} to avoid route collision
+@router.get(
+    "",
+    response_model=SessionListResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def list_sessions(
+        http_request: Request,
+        workspace_id: Optional[str] = None,
+        context_id: Optional[str] = None,
+        include_expired: bool = False,
+        auth_service: AuthenticationService = Depends(get_auth_service),
+        authz_service: AuthorizationService = Depends(get_authz_service),
+        session_service: SessionService = Depends(get_session_service),
+        logger: logging.Logger = Depends(get_logger),
+) -> SessionListResponse:
+    """
+    List sessions in a workspace.
+
+    Args:
+        http_request: FastAPI request (for headers)
+        workspace_id: Optional explicit workspace ID override
+        context_id: Optional filter by context
+        include_expired: Whether to include expired sessions (default: False)
+        auth_service: Authentication service for workspace resolution
+        authz_service: Authorization service
+        session_service: Session service instance
+
+    Returns:
+        List of sessions with total count
+
+    Raises:
+        HTTPException: If listing fails
+    """
+    try:
+        # Build context and check authorization
+        ctx = await auth_service.build_context(http_request, None)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(
+            ctx, "sessions", "read", workspace_id=workspace_id
+        )
+
+        logger.debug(
+            "Listing sessions for workspace: %s, context: %s, include_expired: %s",
+            workspace_id, context_id, include_expired
+        )
+
+        sessions = await session_service.list_sessions(
+            workspace_id,
+            context_id=context_id,
+            include_expired=include_expired,
+        )
+
+        return SessionListResponse(
+            sessions=sessions,
+            total_count=len(sessions),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to list sessions: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list sessions"
+        )
+
+
 @router.get(
     "/briefing",
     response_model=SessionBriefingResponse,
@@ -199,6 +257,12 @@ async def create_session(
 )
 async def get_briefing(
         http_request: Request,
+        workspace_id: Optional[str] = None,
+        lookback_minutes: int = 60,
+        detail_level: str = "abstract",
+        limit: int = 10,
+        include_memories: bool = True,
+        include_contradictions: bool = True,
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
@@ -215,6 +279,7 @@ async def get_briefing(
 
     Args:
         http_request: FastAPI request (for headers)
+        workspace_id: Optional explicit workspace ID override
         auth_service: Authentication service for workspace resolution
         session_service: Session service instance
 
@@ -227,14 +292,22 @@ async def get_briefing(
     try:
         # Build context and check authorization
         ctx = await auth_service.build_context(http_request, None)
+        # Use explicit workspace_id if provided, otherwise fall back to context
+        workspace_id = workspace_id or ctx.workspace_id
         await authz_service.require_authorization(
-            ctx, "sessions", "read", workspace_id=ctx.workspace_id
+            ctx, "sessions", "read", workspace_id=workspace_id
         )
-        workspace_id = ctx.workspace_id
 
         logger.info("Generating briefing for workspace: %s", workspace_id)
 
-        briefing = await session_service.get_briefing(workspace_id)
+        briefing = await session_service.get_briefing(
+            workspace_id,
+            lookback_minutes=lookback_minutes,
+            detail_level=detail_level,
+            limit=limit,
+            include_memories=include_memories,
+            include_contradictions=include_contradictions,
+        )
         return SessionBriefingResponse(briefing=briefing)
 
     except HTTPException:
@@ -260,6 +333,7 @@ async def get_briefing(
 async def get_session(
         http_request: Request,
         session_id: str,
+        _active_session: str | None = Depends(get_active_session),
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
@@ -391,6 +465,7 @@ async def set_working_memory(
         http_request: Request,
         session_id: str,
         request: WorkingMemorySetRequest,
+        _active_session: str | None = Depends(get_active_session),
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
@@ -484,6 +559,7 @@ async def get_working_memory(
         http_request: Request,
         session_id: str,
         key: str | None = None,
+        _active_session: str | None = Depends(get_active_session),
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
@@ -571,21 +647,18 @@ async def commit_session(
         logger: logging.Logger = Depends(get_logger),
 ) -> CommitResponse:
     """
-    Commit session working memory to long-term memory.
+    Commit session and finalize working memory.
 
-    Extracts memories from session working memory using the extraction service,
-    deduplicates them, and creates new long-term memories.
+    Marks the session as committed. Working memories are persisted to
+    long-term storage via write-behind as they are written during the
+    session, so this operation is lightweight.
 
     Args:
         session_id: Session identifier
-        options: Optional commit options (min_importance, deduplicate, categories, max_memories)
-        session_service: Session service instance
+        options: Optional commit options (retained for API compatibility)
 
     Returns:
-        CommitResponse with extraction statistics and breakdown by category
-
-    Raises:
-        HTTPException: If session not found or commit fails
+        CommitResponse with session statistics
     """
     try:
         # Build context
@@ -663,16 +736,21 @@ async def commit_session(
 async def touch_session(
         http_request: Request,
         session_id: str,
+        extend_seconds: Optional[int] = None,
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> dict:
     """
-    Update session expiration (extend TTL).
+    Update session expiration (extend TTL) using sliding window.
+
+    Resets the session's expires_at to now + TTL. If extend_seconds is provided,
+    it overrides the server's default TTL for this call.
 
     Args:
         session_id: Session identifier
+        extend_seconds: Optional TTL override in seconds (uses server default if None)
         session_service: Session service instance
 
     Returns:
@@ -699,9 +777,11 @@ async def touch_session(
             resource_id=session_id, workspace_id=session.workspace_id
         )
 
-        logger.debug("Touching session: %s", session_id)
+        logger.debug("Touching session: %s with extend_seconds=%s", session_id, extend_seconds)
 
-        updated_session = await session_service.touch_session(session.workspace_id, session_id)
+        updated_session = await session_service.touch_session(
+            session.workspace_id, session_id, extend_seconds=extend_seconds
+        )
         if not updated_session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

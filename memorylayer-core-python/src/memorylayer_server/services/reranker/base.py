@@ -23,9 +23,7 @@ from ...config import (
     MEMORYLAYER_RERANKER_PRELOAD_ENABLED, DEFAULT_MEMORYLAYER_RERANKER_PRELOAD_ENABLED,
 )
 
-# Extension point constants
-EXT_RERANKER_PROVIDER = 'reranker-provider'
-EXT_RERANKER_SERVICE = 'reranker-service'
+from .._constants import EXT_RERANKER_PROVIDER, EXT_RERANKER_SERVICE
 
 
 @dataclass

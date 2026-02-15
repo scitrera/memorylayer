@@ -169,10 +169,31 @@ export const TOOLS = [
   },
   {
     name: "memory_briefing",
-    description: "Get a session briefing summarizing recent activity and context. Use at session start to get oriented.",
+    description: "Get a session briefing summarizing recent activity and context. Returns workspace stats and recent memory content at configurable detail level. Use at session start or after compaction to regain context.",
     inputSchema: {
       type: "object",
       properties: {
+        time_window_minutes: {
+          type: "number",
+          default: 60,
+          description: "Time window in minutes for recent memories (default: 60)"
+        },
+        detail_level: {
+          type: "string",
+          enum: ["abstract", "overview", "full"],
+          default: "abstract",
+          description: "Level of memory detail: abstract (summaries), overview (more detail), full (complete content)"
+        },
+        limit: {
+          type: "number",
+          default: 10,
+          description: "Maximum number of recent memories to include (max: 50)"
+        },
+        include_memories: {
+          type: "boolean",
+          default: true,
+          description: "Whether to include recent memory content in the briefing"
+        },
         include_contradictions: {
           type: "boolean",
           default: true,

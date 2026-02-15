@@ -264,15 +264,13 @@ async def test_create_session(client: MemoryLayerClient, base_url: str) -> None:
 async def test_session_context(client: MemoryLayerClient, base_url: str) -> None:
     """Test session context operations."""
     # Mock set context - return empty success response
-    respx.post(f"{base_url}/v1/sessions/sess_123/context").mock(return_value=Response(200, json={}))
+    respx.post(f"{base_url}/v1/sessions/sess_123/memory").mock(return_value=Response(200, json={}))
 
     # Mock get context
     mock_context = {
-        "context": {
-            "current_file": {"path": "auth.py", "line": 42},
-        }
+        "current_file": {"path": "auth.py", "line": 42},
     }
-    respx.get(f"{base_url}/v1/sessions/sess_123/context").mock(return_value=Response(200, json=mock_context))
+    respx.get(f"{base_url}/v1/sessions/sess_123/memory").mock(return_value=Response(200, json=mock_context))
 
     # Test
     async with client:

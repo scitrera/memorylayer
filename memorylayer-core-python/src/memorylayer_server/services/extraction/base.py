@@ -9,17 +9,17 @@ from enum import Enum
 from typing import Optional
 from datetime import datetime
 
-from memorylayer_server.services.deduplication import EXT_DEDUPLICATION_SERVICE
-from memorylayer_server.services.embedding import EXT_EMBEDDING_SERVICE
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_EXTRACTION_SERVICE, DEFAULT_MEMORYLAYER_EXTRACTION_SERVICE
 from ...models.memory import Memory, MemoryType, MemorySubtype
-from ..storage import EXT_STORAGE_BACKEND
-from ..llm import EXT_LLM_SERVICE
-
-# Extension point constant
-EXT_EXTRACTION_SERVICE = 'memorylayer-extraction-service'
+from .._constants import (
+    EXT_DEDUPLICATION_SERVICE,
+    EXT_EMBEDDING_SERVICE,
+    EXT_EXTRACTION_SERVICE,
+    EXT_LLM_SERVICE,
+    EXT_STORAGE_BACKEND,
+)
 
 
 class ExtractionCategory(str, Enum):

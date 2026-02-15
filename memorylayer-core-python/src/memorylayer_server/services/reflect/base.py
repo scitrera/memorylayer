@@ -1,11 +1,7 @@
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_REFLECT_SERVICE, DEFAULT_MEMORYLAYER_REFLECT_SERVICE
-from ..storage import EXT_STORAGE_BACKEND
-from ..memory import EXT_MEMORY_SERVICE
-
-# Extension point constant
-EXT_REFLECT_SERVICE = 'memorylayer-reflect-service'
+from .._constants import EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE, EXT_REFLECT_SERVICE
 
 
 # noinspection PyAbstractClass

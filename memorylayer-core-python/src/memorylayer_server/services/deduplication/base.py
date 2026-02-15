@@ -13,11 +13,7 @@ from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_DEDUPLICATION_SERVICE, DEFAULT_MEMORYLAYER_DEDUPLICATION_SERVICE
 
-from ..storage import EXT_STORAGE_BACKEND
-from ..embedding import EXT_EMBEDDING_SERVICE
-
-# Extension point constant
-EXT_DEDUPLICATION_SERVICE = 'memorylayer-deduplication-service'
+from .._constants import EXT_STORAGE_BACKEND, EXT_EMBEDDING_SERVICE, EXT_DEDUPLICATION_SERVICE
 
 # ============================================
 # Deduplication Configuration

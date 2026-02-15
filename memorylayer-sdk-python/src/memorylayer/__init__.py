@@ -28,7 +28,7 @@ from .types import (
     SearchTolerance,
 )
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 __all__ = [
     # Main clients

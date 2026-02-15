@@ -6,7 +6,7 @@ from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_CACHE_SERVICE, DEFAULT_MEMORYLAYER_CACHE_SERVICE
 
-EXT_CACHE_SERVICE = 'memorylayer-cache-service'
+from .._constants import EXT_CACHE_SERVICE
 
 
 class CacheService(ABC):

@@ -21,7 +21,7 @@ _preconfigure_hooks: list[Callable[[Variables], None]] = []
 def preconfigure(v: Variables = None, test_mode: bool = False, test_logger: Logger = None) -> (Variables, dict):
     """ Pre-configure the framework """
     from scitrera_app_framework import register_package_plugins
-    from . import api, services, lifecycle  # noqa: F401
+    from . import api, services, lifecycle, tasks  # noqa: F401
 
     # handle test mode
     additional_kwargs = {} if not test_mode else {
@@ -67,6 +67,9 @@ def preconfigure(v: Variables = None, test_mode: bool = False, test_logger: Logg
     logger.debug('Registering API Routes')
     register_package_plugins(api.__package__, v, recursive=True)
 
+    logger.debug('Registering Task Handlers')
+    register_package_plugins(tasks.__package__, v, recursive=True)
+
     # handle preconfiguration hooks
     logger.debug('Evaluating preconfigure hooks')
     global _preconfigure_hooks
@@ -84,9 +87,7 @@ def preconfigure(v: Variables = None, test_mode: bool = False, test_logger: Logg
     return v, services
 
 
-async def initialize_services(v: Variables = None) -> Variables:
-    """Initialize all services on application startup."""
-
+def _initialize_sync(v: Variables = None) -> Variables:
     # ensure preconfigured
     v, services = preconfigure(v)
     logger = get_logger(v)
@@ -94,7 +95,15 @@ async def initialize_services(v: Variables = None) -> Variables:
     logger.debug("Initializing services")
     from scitrera_app_framework.core.plugins import init_all_plugins
     init_all_plugins(v, async_enabled=False)  # handle sync part
-    await async_plugins_ready(v)  # handle async part with sequencing managed
+    return v
+
+
+async def initialize_services(v: Variables = None, async_startup: bool = True) -> Variables:
+    """Initialize all services on application startup."""
+
+    v = _initialize_sync(v)
+    if async_startup:
+        await async_plugins_ready(v)  # handle async part with sequencing managed
 
     return v
 

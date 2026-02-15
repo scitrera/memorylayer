@@ -38,6 +38,7 @@ class AsyncIOTaskService(TaskService):
         self._tasks: dict[str, asyncio.Task] = {}
         self._recurring: dict[str, bool] = {}
         self._handlers: dict[str, Callable[[dict], Awaitable[None]]] = {}
+        self._v = v
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info("Initialized AsyncIOTaskService")
 
@@ -73,7 +74,7 @@ class AsyncIOTaskService(TaskService):
                 handler = self._handlers.get(task_type)
                 if handler:
                     self.logger.debug("Executing task %s (type: %s)", task_id, task_type)
-                    await handler(payload)
+                    await handler(self._v, payload)
                     self.logger.debug("Task %s completed", task_id)
                 else:
                     self.logger.error("No handler registered for task type: %s", task_type)
@@ -112,7 +113,7 @@ class AsyncIOTaskService(TaskService):
                 if handler:
                     try:
                         self.logger.debug("Executing recurring task (type: %s)", task_type)
-                        await handler(payload)
+                        await handler(self._v, payload)
                     except Exception as e:
                         self.logger.error(
                             "Recurring task %s failed: %s",
@@ -189,7 +190,7 @@ class AsyncIOTaskService(TaskService):
     def register_handler(
             self,
             task_type: str,
-            handler: Callable[[dict], Awaitable[None]]
+            handler: Callable[[Variables, dict], Awaitable[None]]
     ) -> None:
         """
         Register a handler for a task type.
@@ -199,7 +200,7 @@ class AsyncIOTaskService(TaskService):
             handler: Async handler function
         """
         self._handlers[task_type] = handler
-        self.logger.info("Registered handler for task type: %s", task_type)
+        self.logger.debug("Registered handler for task type: %s", task_type)
 
 
 class AsyncIOTaskServicePlugin(TaskServicePluginBase):

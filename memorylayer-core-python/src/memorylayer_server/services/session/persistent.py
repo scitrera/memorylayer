@@ -1,4 +1,5 @@
 """Persistent session service using storage backend."""
+import json
 from datetime import datetime, timezone, timedelta
 from logging import Logger
 from typing import Optional, Any, List, TYPE_CHECKING
@@ -34,12 +35,16 @@ class PersistentSessionService(SessionService):
             deduplication_service: Optional[DeduplicationService] = None,
             memory_service: Optional[MemoryService] = None,
             contradiction_service: Optional[ContradictionService] = None,
+            task_service: Optional['TaskService'] = None,
+            default_touch_ttl: int = 3600,
     ):
         self.storage = storage
         self.extraction_service = extraction_service
         self.deduplication_service = deduplication_service
         self._memory_service = memory_service
         self.contradiction_service = contradiction_service
+        self.task_service = task_service
+        self.default_touch_ttl = default_touch_ttl
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info("Initialized PersistentSessionService with storage backend")
 
@@ -111,9 +116,24 @@ class PersistentSessionService(SessionService):
         if session is None:
             raise ValueError(f"Session {session_id} not found or expired")
 
-        return await self.storage.set_working_memory(
+        result = await self.storage.set_working_memory(
             workspace_id, session_id, key, value, ttl_seconds
         )
+
+        # Write-behind: persist to long-term memory via background task
+        content_str = value if isinstance(value, str) else json.dumps(value, default=str)
+        await self.task_service.schedule_task(
+            'remember_working_memory',
+            {
+                'workspace_id': workspace_id,
+                'session_id': session_id,
+                'key': key,
+                'content': content_str,
+                'context_id': session.context_id if hasattr(session, 'context_id') else None,
+            },
+        )
+
+        return result
 
     async def get_working_memory(
             self,
@@ -147,7 +167,15 @@ class PersistentSessionService(SessionService):
             self.logger.info("Cleaned up %d expired sessions in workspace %s", count, workspace_id)
         return count
 
-    async def get_briefing(self, workspace_id: str) -> SessionBriefing:
+    async def get_briefing(
+            self,
+            workspace_id: str,
+            lookback_minutes: int = 60,
+            detail_level: str = "abstract",
+            limit: int = 10,
+            include_memories: bool = True,
+            include_contradictions: bool = True,
+    ) -> SessionBriefing:
         """
         Generate a session briefing with workspace summary and recent activity.
 
@@ -157,6 +185,11 @@ class PersistentSessionService(SessionService):
 
         Args:
             workspace_id: Workspace identifier
+            lookback_minutes: Time window for recent memories (default 60)
+            detail_level: Memory detail level - abstract, overview, or full
+            limit: Maximum memories to include
+            include_memories: Whether to include memory content
+            include_contradictions: Whether to detect contradictions
 
         Returns:
             SessionBriefing with workspace summary and activity
@@ -174,36 +207,41 @@ class PersistentSessionService(SessionService):
             "memory_types": stats.get("memory_types", {}),
         }
 
-        # Count recent memories (created in last 24 hours)
-        # This is a simple approximation - custom implementations can enhance with actual queries
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=24)
+        # Get recent memories if requested
+        memories = []
+        if include_memories:
+            now = datetime.now(timezone.utc)
+            created_after = now - timedelta(minutes=lookback_minutes)
+            memories = await self.storage.get_recent_memories(
+                workspace_id, created_after=created_after,
+                limit=limit, detail_level=detail_level
+            )
 
-        # Use a simple heuristic here
-        # Custom implementations can query storage for actual recent memory counts
-        workspace_summary["recent_memories"] = 0  # Storage backend can implement this
+            # Update workspace summary with recent count
+            workspace_summary["recent_memories"] = len(memories)
 
         # Build recent activity list
         recent_activity = []
         # Note: Storage backend doesn't track detailed session activity
         # Custom implementations can enhance this with actual activity tracking
         recent_activity.append({
-            "timestamp": now.isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "summary": f"Workspace stats: {workspace_summary['total_memories']} total memories",
             "memories_created": 0,
             "key_decisions": [],
         })
 
         self.logger.debug(
-            "Generated briefing for workspace %s: %d memories, %d associations",
+            "Generated briefing for workspace %s: %d memories, %d associations, %d recent memories",
             workspace_id,
             workspace_summary["total_memories"],
-            workspace_summary["total_associations"]
+            workspace_summary["total_associations"],
+            workspace_summary["recent_memories"]
         )
 
         # Get unresolved contradictions
         contradictions_detected = []
-        if self.contradiction_service:
+        if include_contradictions and self.contradiction_service:
             try:
                 records = await self.contradiction_service.get_unresolved(workspace_id, limit=3)
                 for record in records:
@@ -222,6 +260,7 @@ class PersistentSessionService(SessionService):
             recent_activity=recent_activity,
             open_threads=[],  # Advanced feature - empty for OSS
             contradictions_detected=contradictions_detected,
+            memories=memories,
         )
 
     async def commit_session(
@@ -231,136 +270,33 @@ class PersistentSessionService(SessionService):
             options: Optional[CommitOptions] = None
     ) -> CommitResult:
         """
-        Commit session working memory to long-term storage.
+        Finalize a session and mark it as committed.
 
-        Uses extraction service to extract memories from working memory,
-        then stores them in the memory backend.
+        Working memories are persisted to long-term storage via write-behind
+        as they are written (in set_working_memory). This method simply marks
+        the session as committed and returns statistics.
 
         Args:
-            workspace_id: Workspace boundary
-            session_id: Session to commit
-            options: Optional commit configuration
+            workspace_id: Workspace identifier
+            session_id: Session identifier
+            options: Commit options (retained for API compatibility)
 
         Returns:
-            CommitResult with extraction statistics
+            CommitResult with session statistics
 
         Raises:
-            ValueError: If session not found or already expired
+            ValueError: If session doesn't exist or has expired
         """
-        # Verify session exists
+        # Verify session exists and is not expired
         session = await self.get_session(workspace_id, session_id)
         if session is None:
-            raise ValueError(f"Session {session_id} not found or expired")
+            raise ValueError(f"Session {session_id} not found or expired in workspace {workspace_id}")
 
-        # Get working memory entries
-        working_memory_list = await self.storage.get_all_working_memory(workspace_id, session_id)
+        # Count working memory entries
+        working_memory_list = await self.get_all_working_memory(workspace_id, session_id)
+        memory_count = len(working_memory_list)
 
-        self.logger.info(
-            "Committing session %s: %d working memory entries",
-            session_id,
-            len(working_memory_list)
-        )
-
-        # If no extraction service, return basic result
-        if not self.extraction_service:
-            self.logger.warning("No extraction service configured, skipping memory extraction")
-            return CommitResult(
-                session_id=session_id,
-                committed_at=datetime.now(timezone.utc),
-                memories_committed=0,
-                associations_committed=0,
-                success=True
-            )
-
-        # Convert CommitOptions to ExtractionOptions
-        from ..extraction import ExtractionOptions, ExtractionCategory
-
-        # Build extraction options from commit options
-        min_importance = options.importance_threshold if options and options.importance_threshold is not None else 0.5
-        extraction_opts = ExtractionOptions(
-            min_importance=min_importance,
-            deduplicate=True,  # Always deduplicate
-            categories=None,  # Extract all categories
-            max_memories=50
-        )
-
-        # Build session content from working memory
-        working_memory_dict = {wm.key: wm.value for wm in working_memory_list}
-        session_content = "\n".join(
-            f"{wm.key}: {wm.value}" for wm in working_memory_list
-        )
-
-        # Extract memories using extraction service
-        extraction_result = await self.extraction_service.extract_from_session(
-            session_id=session_id,
-            workspace_id=workspace_id,
-            context_id=session.context_id,
-            session_content=session_content,
-            working_memory=working_memory_dict,
-            options=extraction_opts
-        )
-
-        # Store extracted memories via memory service
-        from ...models import RememberInput
-        from ..extraction import CATEGORY_MAPPING
-
-        if not self._memory_service:
-            self.logger.warning("No memory service available, cannot store extracted memories")
-            return CommitResult(
-                session_id=session_id,
-                committed_at=datetime.now(timezone.utc),
-                memories_committed=0,
-                associations_committed=0,
-                success=True,
-                memories_extracted=extraction_result.memories_extracted,
-                memories_deduplicated=extraction_result.memories_deduplicated,
-                extraction_summary={
-                    "breakdown": extraction_result.breakdown,
-                    "extraction_time_ms": extraction_result.extraction_time_ms,
-                    "stored_count": 0,
-                    "failed_count": len(extraction_result.memories_created),
-                }
-            )
-
-        memory_service = self._memory_service
-        stored_memories = []
-
-        for extracted_memory in extraction_result.memories_created:
-            # Convert ExtractedMemory to RememberInput
-            memory_type, memory_subtype = CATEGORY_MAPPING[extracted_memory.category]
-
-            remember_input = RememberInput(
-                content=extracted_memory.content,
-                type=memory_type,
-                subtype=memory_subtype,
-                importance=extracted_memory.importance,
-                tags=extracted_memory.tags,
-                metadata=extracted_memory.metadata,
-                context_id=session.context_id,
-                user_id=None,  # Will be inferred from workspace
-            )
-
-            # Store memory
-            try:
-                memory = await memory_service.remember(
-                    workspace_id=workspace_id,
-                    input=remember_input
-                )
-                stored_memories.append(memory)
-                self.logger.debug(
-                    "Stored extracted memory: %s (category: %s, importance: %.2f)",
-                    memory.id,
-                    extracted_memory.category,
-                    extracted_memory.importance
-                )
-            except Exception as e:
-                self.logger.error(
-                    "Failed to store extracted memory (category: %s): %s",
-                    extracted_memory.category,
-                    e
-                )
-
-        # Update session committed_at timestamp
+        # Mark session as committed
         committed_at = datetime.now(timezone.utc)
         session.committed_at = committed_at
 
@@ -374,119 +310,110 @@ class PersistentSessionService(SessionService):
         except Exception as e:
             self.logger.warning(
                 "Failed to persist committed_at for session %s: %s",
-                session_id,
-                e
+                session_id, e
             )
 
         self.logger.info(
-            "Committed session %s: extracted %d memories, stored %d, deduplicated %d, breakdown: %s",
-            session_id,
-            len(extraction_result.memories_created),
-            len(stored_memories),
-            extraction_result.memories_deduplicated,
-            extraction_result.breakdown
+            "Committed session %s: %d working memory entries (persisted via write-behind)",
+            session_id, memory_count,
         )
 
-        # Build extraction summary for API response
-        extraction_summary = {
-            "breakdown": extraction_result.breakdown,
-            "extraction_time_ms": extraction_result.extraction_time_ms,
-            "stored_count": len(stored_memories),
-            "failed_count": len(extraction_result.memories_created) - len(stored_memories),
-        }
-
-        # Create CommitResult with extraction statistics and actual stored memories
-        commit_result = CommitResult(
+        return CommitResult(
             session_id=session_id,
-            committed_at=datetime.now(timezone.utc),
-            memories_committed=len(stored_memories),  # Use actual stored count
-            associations_committed=0,  # Not yet implemented
+            committed_at=committed_at,
+            memories_committed=memory_count,
+            memories_extracted=memory_count,
+            memories_deduplicated=0,
             success=True,
-            memories_extracted=extraction_result.memories_extracted,
-            memories_deduplicated=extraction_result.memories_deduplicated,
-            extraction_summary=extraction_summary
         )
-
-        return commit_result
 
     async def touch_session(
             self,
             workspace_id: str,
             session_id: str,
-            extend_seconds: Optional[int] = None
-    ) -> Session:
-        """
-        Extend session TTL.
+            extend_seconds: int | None = None,
+    ) -> 'Session':
+        """Extend session TTL using sliding window.
+
+        Resets expires_at to now + TTL. If extend_seconds is provided,
+        it overrides the server default for this call.
 
         Args:
             workspace_id: Workspace boundary
             session_id: Session to extend
-            extend_seconds: Additional seconds to add (uses 3600 if None)
+            extend_seconds: TTL override for this call (uses server default if None)
 
         Returns:
-            Updated session with new expiration time
+            Updated session with new expires_at
 
         Raises:
-            ValueError: If session not found or already expired
+            ValueError: If session not found in storage
         """
         session = await self.get_session(workspace_id, session_id)
         if session is None:
-            raise ValueError(f"Session {session_id} not found or expired")
+            raise ValueError(f"Session {session_id} not found in workspace {workspace_id}")
 
-        # Extend TTL
-        extend_by = extend_seconds or 3600
-        session.expires_at = session.expires_at + timedelta(seconds=extend_by)
+        ttl = extend_seconds if extend_seconds is not None else self.default_touch_ttl
+        new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
-        # Note: storage.update_session() not yet implemented
-        # For now, just return the modified session object
-        self.logger.warning(
-            "Session TTL extension not persisted - storage.update_session() not implemented"
+        updated = await self.storage.update_session(
+            workspace_id, session_id, expires_at=new_expires_at
         )
+        if updated is None:
+            raise ValueError(f"Failed to update session {session_id} in storage")
 
         self.logger.info(
-            "Extended session %s TTL by %d seconds, new expiration: %s",
-            session_id,
-            extend_by,
-            session.expires_at.isoformat()
+            "Refreshed session %s TTL to %d seconds, new expiration: %s",
+            session_id, ttl, updated.expires_at.isoformat()
         )
-
-        return session
+        return updated
 
     async def list_sessions(
             self,
             workspace_id: str,
-            context_id: Optional[str] = None,
+            context_id: str | None = None,
             include_expired: bool = False
-    ) -> List[Session]:
-        """
-        List sessions in a workspace.
+    ) -> list['Session']:
+        """List sessions for a workspace.
 
         Args:
-            workspace_id: Workspace to list sessions for
-            context_id: Optional filter by context
+            workspace_id: Workspace boundary
+            context_id: Optional context filter
             include_expired: Whether to include expired sessions
 
         Returns:
-            List of sessions matching criteria
+            List of sessions
         """
-        # Note: storage.list_sessions() not yet implemented
-        self.logger.warning("list_sessions not implemented in storage backend")
-        return []
+        return await self.storage.list_sessions(
+            workspace_id, context_id=context_id, include_expired=include_expired
+        )
 
 
 class PersistentSessionServicePlugin(SessionServicePluginBase):
     """Plugin for persistent session service."""
-    PROVIDER_NAME = 'default'
+    PROVIDER_NAME = 'persistent'
 
     def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND, EXT_EXTRACTION_SERVICE, EXT_DEDUPLICATION_SERVICE, EXT_MEMORY_SERVICE, EXT_CONTRADICTION_SERVICE)
+        from .._constants import EXT_TASK_SERVICE
+        return (EXT_STORAGE_BACKEND, EXT_EXTRACTION_SERVICE, EXT_DEDUPLICATION_SERVICE, EXT_MEMORY_SERVICE, EXT_CONTRADICTION_SERVICE, EXT_TASK_SERVICE)
 
     def initialize(self, v: Variables, logger: Logger) -> SessionService:
+        from ..tasks import TaskService
+        from .._constants import EXT_TASK_SERVICE
+        from ...config import MEMORYLAYER_SESSION_TOUCH_TTL, DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL
+
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
         extraction_service: ExtractionService = self.get_extension(EXT_EXTRACTION_SERVICE, v)
         deduplication_service: DeduplicationService = self.get_extension(EXT_DEDUPLICATION_SERVICE, v)
         memory_service: MemoryService = self.get_extension(EXT_MEMORY_SERVICE, v)
         contradiction_service: ContradictionService = self.get_extension(EXT_CONTRADICTION_SERVICE, v)
+        task_service: TaskService = self.get_extension(EXT_TASK_SERVICE, v)
+
+        default_touch_ttl: int = v.environ(
+            MEMORYLAYER_SESSION_TOUCH_TTL,
+            default=DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL,
+            type_fn=int,
+        )
 
         return PersistentSessionService(
             storage=storage,
@@ -494,5 +421,7 @@ class PersistentSessionServicePlugin(SessionServicePluginBase):
             deduplication_service=deduplication_service,
             memory_service=memory_service,
             contradiction_service=contradiction_service,
+            task_service=task_service,
+            default_touch_ttl=default_touch_ttl,
             v=v
         )

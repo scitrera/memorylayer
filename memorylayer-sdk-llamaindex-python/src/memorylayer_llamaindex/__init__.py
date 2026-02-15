@@ -11,7 +11,7 @@ from .chat_store import (
     string_to_message_role,
 )
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 __all__ = [
     # Main class

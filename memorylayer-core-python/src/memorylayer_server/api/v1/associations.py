@@ -9,19 +9,15 @@ Endpoints:
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
-from scitrera_app_framework import Plugin, Variables, get_extension
+from scitrera_app_framework import Plugin, Variables
 
 from .. import EXT_MULTI_API_ROUTERS
 
 from ...models.association import AssociateInput
 from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
 from ...services.association import AssociationService
-from ...services.authentication import (
-    AuthenticationService,
-    AuthenticationError,
-    EXT_AUTHENTICATION_SERVICE,
-)
-from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SERVICE
+from ...services.authentication import AuthenticationService
+from ...services.authorization import AuthorizationService
 from .schemas import (
     AssociationCreateRequest,
     MemoryTraverseRequest,
@@ -30,21 +26,12 @@ from .schemas import (
     GraphQueryResult,
     ErrorResponse,
 )
+from .deps import get_auth_service, get_authz_service
 
 router = APIRouter(prefix='/v1', tags=["associations"])
 
 
 # Dependencies for services
-async def get_auth_service(v: Variables = Depends(get_variables_dep)) -> AuthenticationService:
-    """Get authentication service instance."""
-    return get_extension(EXT_AUTHENTICATION_SERVICE, v)
-
-
-async def get_authz_service(v: Variables = Depends(get_variables_dep)) -> AuthorizationService:
-    """Get authorization service instance."""
-    return get_extension(EXT_AUTHORIZATION_SERVICE, v)
-
-
 async def get_association_service(v: Variables = Depends(get_variables_dep)) -> AssociationService:
     """Get association service instance from dependency injection."""
     from ...services.association import get_association_service as _get_association_service

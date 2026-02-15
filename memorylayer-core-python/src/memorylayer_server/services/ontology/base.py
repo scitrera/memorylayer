@@ -2,8 +2,7 @@ from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_ONTOLOGY_SERVICE, DEFAULT_MEMORYLAYER_ONTOLOGY_SERVICE
 
-# Extension point constant
-EXT_ONTOLOGY_SERVICE = 'memorylayer-ontology-service'
+from .._constants import EXT_ONTOLOGY_SERVICE
 
 # All valid relationship categories
 RELATIONSHIP_CATEGORIES = {

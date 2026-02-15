@@ -85,12 +85,21 @@ class MemoryStorageBackend(StorageBackend):
         return memory
 
     async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Optional[Memory]:
-        """Get memory by ID."""
+        """Get memory by ID within a workspace."""
         ws_memories = self._memories.get(workspace_id, {})
         memory = ws_memories.get(memory_id)
         if memory and memory_id in self._deleted_memories:
             return None
         return memory
+
+    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+        """Get memory by ID without workspace filter. Memory IDs are globally unique."""
+        if memory_id in self._deleted_memories:
+            return None
+        for ws_memories in self._memories.values():
+            if memory_id in ws_memories:
+                return ws_memories[memory_id]
+        return None
 
     async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Optional[Memory]:
         """Update memory fields."""
@@ -192,6 +201,80 @@ class MemoryStorageBackend(StorageBackend):
                 return memory
         return None
 
+    async def get_recent_memories(
+        self,
+        workspace_id: str,
+        created_after: datetime,
+        limit: int = 10,
+        detail_level: str = "abstract",
+        offset: int = 0,
+    ) -> list:
+        """Get recent memories ordered by creation time (newest first)."""
+        ws_memories = self._memories.get(workspace_id, {})
+        candidates = []
+
+        for memory in ws_memories.values():
+            # Filter: workspace_id matches, created_at > created_after, not deleted, status active
+            if memory.id in self._deleted_memories:
+                continue
+            # Check status
+            status = getattr(memory, 'status', None)
+            if status and str(status) != 'active':
+                continue
+            if memory.created_at > created_after:
+                candidates.append(memory)
+
+        # Sort by created_at descending (newest first)
+        candidates.sort(key=lambda m: m.created_at, reverse=True)
+
+        # Apply offset and limit
+        if limit > 0:
+            candidates = candidates[offset:offset + limit]
+        else:
+            candidates = candidates[offset:]
+
+        # Convert to dicts based on detail_level
+        results = []
+        for memory in candidates:
+            if detail_level == "abstract":
+                # Return only id, abstract, type, subtype, importance, tags, created_at
+                results.append({
+                    "id": memory.id,
+                    "abstract": getattr(memory, 'abstract', None),
+                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
+                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(memory.subtype) if memory.subtype else None,
+                    "importance": memory.importance,
+                    "tags": memory.tags if memory.tags else [],
+                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                })
+            elif detail_level == "overview":
+                # Add overview field
+                results.append({
+                    "id": memory.id,
+                    "abstract": getattr(memory, 'abstract', None),
+                    "overview": getattr(memory, 'overview', None),
+                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
+                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(memory.subtype) if memory.subtype else None,
+                    "importance": memory.importance,
+                    "tags": memory.tags if memory.tags else [],
+                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                })
+            else:  # "full"
+                # Return everything
+                results.append({
+                    "id": memory.id,
+                    "content": memory.content,
+                    "abstract": getattr(memory, 'abstract', None),
+                    "overview": getattr(memory, 'overview', None),
+                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
+                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(memory.subtype) if memory.subtype else None,
+                    "importance": memory.importance,
+                    "tags": memory.tags if memory.tags else [],
+                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                })
+
+        return results
+
     # ========== Association Operations ==========
 
     async def create_association(self, workspace_id: str, input: AssociateInput) -> Association:
@@ -291,6 +374,10 @@ class MemoryStorageBackend(StorageBackend):
     async def get_workspace(self, workspace_id: str) -> Optional[Workspace]:
         """Get workspace by ID."""
         return self._workspaces.get(workspace_id)
+
+    async def list_workspaces(self) -> list[Workspace]:
+        """List all workspaces."""
+        return list(self._workspaces.values())
 
     # ========== Context Operations ==========
 

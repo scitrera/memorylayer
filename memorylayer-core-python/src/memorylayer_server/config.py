@@ -67,7 +67,13 @@ DEFAULT_MEMORYLAYER_REFLECT_SERVICE = 'default'
 # Session Service
 # ============================================
 MEMORYLAYER_SESSION_SERVICE = 'MEMORYLAYER_SESSION_SERVICE'
-DEFAULT_MEMORYLAYER_SESSION_SERVICE = 'default'
+DEFAULT_MEMORYLAYER_SESSION_SERVICE = 'in-memory'
+
+MEMORYLAYER_SESSION_IMPLICIT_CREATE = 'MEMORYLAYER_SESSION_IMPLICIT_CREATE'
+DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE = True
+
+MEMORYLAYER_SESSION_TOUCH_TTL = 'MEMORYLAYER_SESSION_TOUCH_TTL'
+DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL = 3600
 
 # ============================================
 # Workspace Service
@@ -97,13 +103,14 @@ DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE = 'default'  # Open permissions (allow
 class RerankerProviderType(str, Enum):
     """Available reranker provider types."""
     LLM = "llm"  # Use LLM service for reranking
-    HYDE = "hyde"  # Hypothetical Document Embeddings (LLM + embedding) (default)
+    HYDE = "hyde"  # Hypothetical Document Embeddings (LLM + embedding)
+    RRF = "rrf"  # Reciprocal Rank Fusion (embedding-only multi-query) (default)
     LOCAL = "local"  # sentence-transformers CrossEncoder (self-hosted)
     NONE = "none"  # Disabled (no reranking)
 
 
 MEMORYLAYER_RERANKER_PROVIDER = 'MEMORYLAYER_RERANKER_PROVIDER'
-DEFAULT_MEMORYLAYER_RERANKER_PROVIDER = 'hyde'
+DEFAULT_MEMORYLAYER_RERANKER_PROVIDER = 'rrf'
 
 MEMORYLAYER_RERANKER_SERVICE = 'MEMORYLAYER_RERANKER_SERVICE'
 DEFAULT_MEMORYLAYER_RERANKER_SERVICE = 'default'
@@ -115,7 +122,7 @@ DEFAULT_MEMORYLAYER_RERANKER_PRELOAD_ENABLED = True
 # Cache Service
 # ============================================
 MEMORYLAYER_CACHE_SERVICE = 'MEMORYLAYER_CACHE_SERVICE'
-DEFAULT_MEMORYLAYER_CACHE_SERVICE = 'default'
+DEFAULT_MEMORYLAYER_CACHE_SERVICE = 'lru'
 
 # Default tenant and workspace constants
 # Use underscore prefix for all reserved/system entities

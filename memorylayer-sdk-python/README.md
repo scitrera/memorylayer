@@ -5,7 +5,7 @@ Python SDK for [MemoryLayer.ai](https://memorylayer.ai) - Memory infrastructure 
 ## Installation
 
 ```bash
-pip install memorylayer
+pip install memorylayer-client
 ```
 
 ## Quick Start
@@ -177,7 +177,7 @@ await client.delete_session(session.id)
 ### Session Briefing
 
 ```python
-briefing = await client.get_briefing(lookback_hours=24)
+briefing = await client.get_briefing(lookback_minutes=1440)
 print(briefing.recent_activity)
 ```
 
@@ -427,7 +427,7 @@ ruff format src/memorylayer
 
 ## License
 
-Apache 2.0 License
+Apache 2.0 License -- see [LICENSE](../LICENSE) for details.
 
 ## Links
 

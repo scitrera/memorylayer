@@ -32,7 +32,7 @@ class NoOpCacheService(CacheService):
 
 class NoOpCacheServicePlugin(CacheServicePluginBase):
     """Plugin for no cache service."""
-    PROVIDER_NAME = 'default'
+    PROVIDER_NAME = 'noop'
 
     def initialize(self, v: Variables, logger: Logger) -> Optional[CacheService]:
         return NoOpCacheService()

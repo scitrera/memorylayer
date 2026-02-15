@@ -7,10 +7,8 @@ from typing import Optional
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_CONTRADICTION_PROVIDER, DEFAULT_MEMORYLAYER_CONTRADICTION_PROVIDER
-from ..storage import EXT_STORAGE_BACKEND
+from .._constants import EXT_STORAGE_BACKEND, EXT_CONTRADICTION_SERVICE
 from ...utils import generate_id
-
-EXT_CONTRADICTION_SERVICE = 'memorylayer-contradiction-service'
 
 
 @dataclass

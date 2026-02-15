@@ -40,15 +40,16 @@ with sync_client() as memory:
 
 ## Packages
 
-| Package | Install | Description |
-|---------|---------|-------------|
-| **[memorylayer-core-python](./memorylayer-core-python)** | `pip install memorylayer-server` | FastAPI server with SQLite + sqlite-vec storage |
-| **[memorylayer-sdk-python](./memorylayer-sdk-python)** | `pip install memorylayer-client` | Python client SDK (async/sync) |
-| **[memorylayer-sdk-typescript](./memorylayer-sdk-typescript)** | `npm i @scitrera/memorylayer-sdk` | TypeScript/JavaScript client SDK |
-| **[memorylayer-mcp-typescript](./memorylayer-mcp-typescript)** | `npm i @scitrera/memorylayer-mcp-server` | MCP server -- 21 tools for LLM agents |
-| **[memorylayer-sdk-langchain-python](./memorylayer-sdk-langchain-python)** | `pip install memorylayer-langchain` | LangChain integration |
-| **[memorylayer-sdk-llamaindex-python](./memorylayer-sdk-llamaindex-python)** | `pip install memorylayer-llamaindex` | LlamaIndex integration |
-| **[memorylayer-cc-plugin](./memorylayer-cc-plugin)** | see README | Claude Code plugin -- captures memory before compaction |
+| Package                                                                      | Install | Description                                             |
+|------------------------------------------------------------------------------|---------|---------------------------------------------------------|
+| **[memorylayer-core-python](./memorylayer-core-python)**                     | `pip install memorylayer-server` | FastAPI server with SQLite + sqlite-vec storage         |
+| **[memorylayer-sdk-python](./memorylayer-sdk-python)**                       | `pip install memorylayer-client` | Python client SDK (async/sync)                          |
+| **[memorylayer-sdk-typescript](./memorylayer-sdk-typescript)**               | `npm i @scitrera/memorylayer-sdk` | TypeScript/JavaScript client SDK                        |
+| **[memorylayer-mcp-typescript](./memorylayer-mcp-typescript)**               | `npm i @scitrera/memorylayer-mcp-server` | MCP server -- 21 tools for LLM agents                   |
+| **[memorylayer-sdk-langchain-python](./memorylayer-sdk-langchain-python)**   | `pip install memorylayer-langchain` | LangChain integration                                   |
+| **[memorylayer-sdk-llamaindex-python](./memorylayer-sdk-llamaindex-python)** | `pip install memorylayer-llamaindex` | LlamaIndex integration                                  |
+| **[memorylayer-cc-plugin](./memorylayer-cc-plugin)**                         | see README | Claude Code plugin -- captures memory before compaction |
+| **[memorylayer-explorer](./memorylayer-explorer)**                          | see README | (Work in Progress) WebUI                                |
 
 ## Quick Start
 
@@ -128,7 +129,7 @@ For the full Claude Code experience, also install the **[MemoryLayer plugin](./m
 
 ```bash
 # Add the marketplace (one-time setup)
-claude plugin marketplace add https://github.com/scitrera/memorylayer.git
+claude plugin marketplace add scitrera/memorylayer
 
 # Install the plugin
 claude plugin install memorylayer@memorylayer.ai

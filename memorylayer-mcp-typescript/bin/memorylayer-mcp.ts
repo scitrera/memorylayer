@@ -13,6 +13,9 @@
  *   MEMORYLAYER_SESSION_MODE - Set to "false" to disable session/working memory (default: true)
  */
 
+import { existsSync, unlinkSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { MemoryLayerClient } from "../src/client.js";
 import { createServer } from "../src/server.js";
 import { detectWorkspaceId } from "../src/workspace.js";
@@ -55,14 +58,30 @@ async function main() {
   await server.run();
 }
 
+/**
+ * Clean up session handoff file on shutdown
+ */
+function cleanupHandoff(): void {
+  try {
+    const handoffFile = join(tmpdir(), "memorylayer", `session-${process.ppid}.json`);
+    if (existsSync(handoffFile)) {
+      unlinkSync(handoffFile);
+    }
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+
 // Handle errors and signals
 process.on("SIGINT", () => {
   console.error("Received SIGINT, shutting down gracefully");
+  cleanupHandoff();
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
   console.error("Received SIGTERM, shutting down gracefully");
+  cleanupHandoff();
   process.exit(0);
 });
 

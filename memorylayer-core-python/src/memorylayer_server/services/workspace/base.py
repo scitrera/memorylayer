@@ -10,10 +10,7 @@ Operations:
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import MEMORYLAYER_WORKSPACE_SERVICE, DEFAULT_MEMORYLAYER_WORKSPACE_SERVICE
-from ..storage import EXT_STORAGE_BACKEND
-
-# Extension point constant
-EXT_WORKSPACE_SERVICE = 'memorylayer-workspace-service'
+from .._constants import EXT_STORAGE_BACKEND, EXT_WORKSPACE_SERVICE
 
 
 # noinspection PyAbstractClass

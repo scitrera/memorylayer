@@ -106,35 +106,35 @@ class SQLiteStorageBackend(StorageBackend):
                                        CREATE TABLE IF NOT EXISTS workspaces
                                        (
                                            id
-                                           TEXT
-                                           PRIMARY
-                                           KEY,
+                                                      TEXT
+                                               PRIMARY
+                                                   KEY,
                                            tenant_id
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                                      TEXT
+                                               NOT
+                                                   NULL,
                                            name
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                                      TEXT
+                                               NOT
+                                                   NULL,
                                            settings
-                                           TEXT
-                                           DEFAULT
-                                           '{}',
+                                                      TEXT
+                                                           DEFAULT
+                                                               '{}',
                                            created_at
-                                           TEXT
-                                           DEFAULT (
-                                           datetime
-                                       (
-                                           'now'
-                                       )),
+                                                      TEXT
+                                                           DEFAULT (
+                                                               datetime
+                                                               (
+                                                                       'now'
+                                                               )),
                                            updated_at TEXT DEFAULT
-                                       (
-                                           datetime
-                                       (
-                                           'now'
-                                       ))
-                                           )
+                                                               (
+                                                                   datetime
+                                                                   (
+                                                                           'now'
+                                                                   ))
+                                       )
                                        """)
 
         # Contexts (formerly memory_spaces)
@@ -142,39 +142,39 @@ class SQLiteStorageBackend(StorageBackend):
                                        CREATE TABLE IF NOT EXISTS contexts
                                        (
                                            id
-                                           TEXT
-                                           PRIMARY
-                                           KEY,
+                                                       TEXT
+                                               PRIMARY
+                                                   KEY,
                                            workspace_id
-                                           TEXT
-                                           NOT
-                                           NULL
-                                           REFERENCES
-                                           workspaces
-                                       (
-                                           id
-                                       ),
-                                           name TEXT NOT NULL,
+                                                       TEXT
+                                                            NOT
+                                                                NULL
+                                               REFERENCES
+                                                   workspaces
+                                                       (
+                                                        id
+                                                           ),
+                                           name        TEXT NOT NULL,
                                            description TEXT,
-                                           settings TEXT DEFAULT '{}',
-                                           created_at TEXT DEFAULT
-                                       (
-                                           datetime
-                                       (
-                                           'now'
-                                       )),
-                                           updated_at TEXT DEFAULT
-                                       (
-                                           datetime
-                                       (
-                                           'now'
-                                       )),
+                                           settings    TEXT DEFAULT '{}',
+                                           created_at  TEXT DEFAULT
+                                                                (
+                                                                    datetime
+                                                                    (
+                                                                            'now'
+                                                                    )),
+                                           updated_at  TEXT DEFAULT
+                                                                (
+                                                                    datetime
+                                                                    (
+                                                                            'now'
+                                                                    )),
                                            UNIQUE
-                                       (
-                                           workspace_id,
-                                           name
+                                               (
+                                                workspace_id,
+                                                name
+                                                   )
                                        )
-                                           )
                                        """)
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_contexts_workspace ON contexts(workspace_id)"
@@ -185,64 +185,64 @@ class SQLiteStorageBackend(StorageBackend):
                                        CREATE TABLE IF NOT EXISTS memories
                                        (
                                            id
-                                           TEXT
-                                           PRIMARY
-                                           KEY,
+                                                            TEXT
+                                               PRIMARY
+                                                   KEY,
                                            tenant_id
-                                           TEXT
-                                           NOT
-                                           NULL
-                                           DEFAULT
-                                           '_default',
+                                                            TEXT
+                                                                 NOT
+                                                                     NULL
+                                                                    DEFAULT
+                                                                        '_default',
                                            workspace_id
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                                            TEXT
+                                                                 NOT
+                                                                     NULL,
                                            context_id
-                                           TEXT
-                                           NOT
-                                           NULL
-                                           DEFAULT
-                                           '_default',
-                                           session_id TEXT,
-                                           user_id TEXT,
-                                           content TEXT NOT NULL,
-                                           content_hash TEXT NOT NULL,
-                                           type TEXT NOT NULL CHECK
-                                       (
-                                           type
-                                           IN
-                                       (
-                                           'episodic',
-                                           'semantic',
-                                           'procedural',
-                                           'working'
-                                       )),
-                                           subtype TEXT,
-                                           category TEXT,
-                                           importance REAL DEFAULT 0.5,
-                                           tags TEXT DEFAULT '[]',
-                                           metadata TEXT DEFAULT '{}',
-                                           embedding BLOB,
-                                           abstract TEXT,
-                                           overview TEXT,
-                                           access_count INTEGER DEFAULT 0,
+                                                            TEXT
+                                                                 NOT
+                                                                     NULL
+                                                                    DEFAULT
+                                                                        '_default',
+                                           session_id       TEXT,
+                                           user_id          TEXT,
+                                           content          TEXT NOT NULL,
+                                           content_hash     TEXT NOT NULL,
+                                           type             TEXT NOT NULL CHECK
+                                               (
+                                               type
+                                                   IN
+                                               (
+                                                'episodic',
+                                                'semantic',
+                                                'procedural',
+                                                'working'
+                                                   )),
+                                           subtype          TEXT,
+                                           category         TEXT,
+                                           importance       REAL    DEFAULT 0.5,
+                                           tags             TEXT    DEFAULT '[]',
+                                           metadata         TEXT    DEFAULT '{}',
+                                           embedding        BLOB,
+                                           abstract         TEXT,
+                                           overview         TEXT,
+                                           access_count     INTEGER DEFAULT 0,
                                            last_accessed_at TEXT,
-                                           decay_factor REAL DEFAULT 1.0,
-                                           deleted_at TEXT,
-                                           created_at TEXT DEFAULT
-                                       (
-                                           datetime
-                                       (
-                                           'now'
-                                       )),
-                                           updated_at TEXT DEFAULT
-                                       (
-                                           datetime
-                                       (
-                                           'now'
-                                       ))
-                                           )
+                                           decay_factor     REAL    DEFAULT 1.0,
+                                           deleted_at       TEXT,
+                                           created_at       TEXT    DEFAULT
+                                                                        (
+                                                                            datetime
+                                                                            (
+                                                                                    'now'
+                                                                            )),
+                                           updated_at       TEXT    DEFAULT
+                                                                        (
+                                                                            datetime
+                                                                            (
+                                                                                    'now'
+                                                                            ))
+                                       )
                                        """)
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_id) WHERE deleted_at IS NULL"
@@ -293,42 +293,42 @@ class SQLiteStorageBackend(StorageBackend):
                                        CREATE TABLE IF NOT EXISTS memory_associations
                                        (
                                            id
-                                           TEXT
-                                           PRIMARY
-                                           KEY,
+                                                        TEXT
+                                               PRIMARY
+                                                   KEY,
                                            workspace_id
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                                        TEXT
+                                                             NOT
+                                                                 NULL,
                                            source_id
-                                           TEXT
-                                           NOT
-                                           NULL
-                                           REFERENCES
-                                           memories
-                                       (
-                                           id
-                                       ),
-                                           target_id TEXT NOT NULL REFERENCES memories
-                                       (
-                                           id
-                                       ),
+                                                        TEXT
+                                                             NOT
+                                                                 NULL
+                                               REFERENCES
+                                                   memories
+                                                       (
+                                                        id
+                                                           ),
+                                           target_id    TEXT NOT NULL REFERENCES memories
+                                               (
+                                                id
+                                                   ),
                                            relationship TEXT NOT NULL,
-                                           strength REAL DEFAULT 0.5,
-                                           metadata TEXT DEFAULT '{}',
-                                           created_at TEXT DEFAULT
-                                       (
-                                           datetime
-                                       (
-                                           'now'
-                                       )),
+                                           strength     REAL DEFAULT 0.5,
+                                           metadata     TEXT DEFAULT '{}',
+                                           created_at   TEXT DEFAULT
+                                                                 (
+                                                                     datetime
+                                                                     (
+                                                                             'now'
+                                                                     )),
                                            UNIQUE
-                                       (
-                                           source_id,
-                                           target_id,
-                                           relationship
+                                               (
+                                                source_id,
+                                                target_id,
+                                                relationship
+                                                   )
                                        )
-                                           )
                                        """)
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_associations_workspace ON memory_associations(workspace_id)"
@@ -345,56 +345,56 @@ class SQLiteStorageBackend(StorageBackend):
                                        CREATE TABLE IF NOT EXISTS sessions
                                        (
                                            id
-                                           TEXT
-                                           PRIMARY
-                                           KEY,
+                                               TEXT
+                                               PRIMARY
+                                                   KEY,
                                            tenant_id
-                                           TEXT
-                                           NOT
-                                           NULL
-                                           DEFAULT
-                                           '_default',
+                                               TEXT
+                                               NOT
+                                                   NULL
+                                               DEFAULT
+                                                   '_default',
                                            workspace_id
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                               TEXT
+                                               NOT
+                                                   NULL,
                                            context_id
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                               TEXT
+                                               NOT
+                                                   NULL,
                                            user_id
-                                           TEXT,
+                                               TEXT,
                                            metadata
-                                           TEXT
-                                           NOT
-                                           NULL
-                                           DEFAULT
-                                           '{}',
+                                               TEXT
+                                               NOT
+                                                   NULL
+                                               DEFAULT
+                                                   '{}',
                                            auto_commit
-                                           INTEGER
-                                           DEFAULT
-                                           1,
+                                               INTEGER
+                                               DEFAULT
+                                                   1,
                                            expires_at
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                               TEXT
+                                               NOT
+                                                   NULL,
                                            committed_at
-                                           TEXT,
+                                               TEXT,
                                            created_at
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                               TEXT
+                                               NOT
+                                                   NULL,
                                            last_accessed_at
-                                           TEXT,
+                                               TEXT,
                                            FOREIGN
-                                           KEY
-                                       (
-                                           workspace_id
-                                       ) REFERENCES workspaces
-                                       (
-                                           id
+                                               KEY
+                                               (
+                                                workspace_id
+                                                   ) REFERENCES workspaces
+                                               (
+                                                id
+                                                   )
                                        )
-                                           )
                                        """)
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)"
@@ -411,45 +411,45 @@ class SQLiteStorageBackend(StorageBackend):
                                        CREATE TABLE IF NOT EXISTS working_memory
                                        (
                                            session_id
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                                      TEXT
+                                               NOT
+                                                   NULL,
                                            key
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                                      TEXT
+                                               NOT
+                                                   NULL,
                                            value
-                                           TEXT
-                                           NOT
-                                           NULL,
+                                                      TEXT
+                                               NOT
+                                                   NULL,
                                            ttl_seconds
-                                           INTEGER,
+                                                      INTEGER,
                                            created_at
-                                           TEXT
-                                           DEFAULT (
-                                           datetime
-                                       (
-                                           'now'
-                                       )),
+                                                      TEXT
+                                                           DEFAULT (
+                                                               datetime
+                                                               (
+                                                                       'now'
+                                                               )),
                                            updated_at TEXT DEFAULT
-                                       (
-                                           datetime
-                                       (
-                                           'now'
-                                       )),
+                                                               (
+                                                                   datetime
+                                                                   (
+                                                                           'now'
+                                                                   )),
                                            PRIMARY KEY
-                                       (
-                                           session_id,
-                                           key
-                                       ),
+                                               (
+                                                session_id,
+                                                key
+                                                   ),
                                            FOREIGN KEY
-                                       (
-                                           session_id
-                                       ) REFERENCES sessions
-                                       (
-                                           id
-                                       ) ON DELETE CASCADE
-                                           )
+                                               (
+                                                session_id
+                                                   ) REFERENCES sessions
+                                               (
+                                                id
+                                                   ) ON DELETE CASCADE
+                                       )
                                        """)
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_working_memory_session ON working_memory(session_id)"
@@ -457,22 +457,23 @@ class SQLiteStorageBackend(StorageBackend):
 
         # Contradictions table
         await self._connection.execute("""
-            CREATE TABLE IF NOT EXISTS contradictions (
-                id TEXT PRIMARY KEY,
-                workspace_id TEXT NOT NULL,
-                memory_a_id TEXT NOT NULL,
-                memory_b_id TEXT NOT NULL,
-                contradiction_type TEXT,
-                confidence REAL DEFAULT 0.0,
-                detection_method TEXT,
-                detected_at TEXT DEFAULT (datetime('now')),
-                resolved_at TEXT,
-                resolution TEXT,
-                merged_content TEXT,
-                FOREIGN KEY (memory_a_id) REFERENCES memories(id),
-                FOREIGN KEY (memory_b_id) REFERENCES memories(id)
-            )
-        """)
+                                       CREATE TABLE IF NOT EXISTS contradictions
+                                       (
+                                           id                 TEXT PRIMARY KEY,
+                                           workspace_id       TEXT NOT NULL,
+                                           memory_a_id        TEXT NOT NULL,
+                                           memory_b_id        TEXT NOT NULL,
+                                           contradiction_type TEXT,
+                                           confidence         REAL DEFAULT 0.0,
+                                           detection_method   TEXT,
+                                           detected_at        TEXT DEFAULT (datetime('now')),
+                                           resolved_at        TEXT,
+                                           resolution         TEXT,
+                                           merged_content     TEXT,
+                                           FOREIGN KEY (memory_a_id) REFERENCES memories (id),
+                                           FOREIGN KEY (memory_b_id) REFERENCES memories (id)
+                                       )
+                                       """)
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_contradictions_workspace ON contradictions(workspace_id)"
         )
@@ -491,15 +492,17 @@ class SQLiteStorageBackend(StorageBackend):
         # Create _default workspace (main default for auto-discovery)
         await self._connection.execute("""
                                        INSERT
-                                       OR IGNORE INTO workspaces (id, tenant_id, name, settings, created_at, updated_at)
-            VALUES (?, ?, 'Default Workspace', '{}', ?, ?)
+                                           OR IGNORE
+                                       INTO workspaces (id, tenant_id, name, settings, created_at, updated_at)
+                                       VALUES (?, ?, 'Default Workspace', '{}', ?, ?)
                                        """, (DEFAULT_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now))
 
         # Create _global workspace (cross-workspace shared storage)
         await self._connection.execute("""
                                        INSERT
-                                       OR IGNORE INTO workspaces (id, tenant_id, name, settings, created_at, updated_at)
-            VALUES (?, ?, 'Global Workspace', '{}', ?, ?)
+                                           OR IGNORE
+                                       INTO workspaces (id, tenant_id, name, settings, created_at, updated_at)
+                                       VALUES (?, ?, 'Global Workspace', '{}', ?, ?)
                                        """, (GLOBAL_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now))
 
         # Get all workspaces
@@ -511,8 +514,9 @@ class SQLiteStorageBackend(StorageBackend):
             workspace_id = workspace["id"]
             await self._connection.execute("""
                                            INSERT
-                                           OR IGNORE INTO contexts (id, workspace_id, name, description, settings, created_at, updated_at)
-                VALUES ('_default', ?, '_default', 'Default context', '{}', ?, ?)
+                                               OR IGNORE
+                                           INTO contexts (id, workspace_id, name, description, settings, created_at, updated_at)
+                                           VALUES ('_default', ?, '_default', 'Default context', '{}', ?, ?)
                                            """, (workspace_id, now, now))
 
         await self._connection.commit()
@@ -573,7 +577,7 @@ class SQLiteStorageBackend(StorageBackend):
         return await self.get_memory(workspace_id, memory_id, track_access=False)
 
     async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Optional[Memory]:
-        """Get memory by ID. Set track_access=False for internal reads that should not affect decay tracking."""
+        """Get memory by ID within a workspace. Set track_access=False for internal reads that should not affect decay tracking."""
         cursor = await self._connection.execute(
             """
             SELECT *
@@ -593,6 +597,40 @@ class SQLiteStorageBackend(StorageBackend):
 
         if track_access:
             # Update access tracking
+            await self._connection.execute(
+                """
+                UPDATE memories
+                SET access_count     = access_count + 1,
+                    last_accessed_at = datetime('now')
+                WHERE id = ?
+                """,
+                (memory_id,),
+            )
+            await self._connection.commit()
+            memory.access_count = (memory.access_count or 0) + 1
+            memory.last_accessed_at = datetime.now(timezone.utc)
+
+        return memory
+
+    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+        """Get memory by ID without workspace filter. Memory IDs are globally unique."""
+        cursor = await self._connection.execute(
+            """
+            SELECT *
+            FROM memories
+            WHERE id = ?
+              AND deleted_at IS NULL
+            """,
+            (memory_id,),
+        )
+        row = await cursor.fetchone()
+
+        if not row:
+            return None
+
+        memory = self._row_to_memory(row)
+
+        if track_access:
             await self._connection.execute(
                 """
                 UPDATE memories
@@ -663,7 +701,7 @@ class SQLiteStorageBackend(StorageBackend):
                 """
                 UPDATE memories
                 SET deleted_at = datetime('now'),
-                    status = 'deleted'
+                    status     = 'deleted'
                 WHERE id = ?
                   AND workspace_id = ?
                 """,
@@ -674,10 +712,10 @@ class SQLiteStorageBackend(StorageBackend):
         return cursor.rowcount > 0
 
     async def get_memories_for_decay(
-        self,
-        workspace_id: str,
-        min_age_days: int = 7,
-        exclude_pinned: bool = True,
+            self,
+            workspace_id: str,
+            min_age_days: int = 7,
+            exclude_pinned: bool = True,
     ) -> list[Memory]:
         """Get memories eligible for importance decay."""
         where_parts = [
@@ -701,24 +739,25 @@ class SQLiteStorageBackend(StorageBackend):
         return [self._row_to_memory(row) for row in rows]
 
     async def get_archival_candidates(
-        self,
-        workspace_id: str,
-        max_importance: float = 0.2,
-        max_access_count: int = 3,
-        min_age_days: int = 90,
+            self,
+            workspace_id: str,
+            max_importance: float = 0.2,
+            max_access_count: int = 3,
+            min_age_days: int = 90,
     ) -> list[Memory]:
         """Get memories eligible for archival."""
         query = """
-            SELECT * FROM memories
-            WHERE workspace_id = ?
-              AND deleted_at IS NULL
-              AND (status IS NULL OR status = 'active')
-              AND (pinned IS NULL OR pinned = 0)
-              AND importance <= ?
-              AND access_count <= ?
-              AND julianday('now') - julianday(created_at) >= ?
-            ORDER BY importance ASC
-        """
+                SELECT *
+                FROM memories
+                WHERE workspace_id = ?
+                  AND deleted_at IS NULL
+                  AND (status IS NULL OR status = 'active')
+                  AND (pinned IS NULL OR pinned = 0)
+                  AND importance <= ?
+                  AND access_count <= ?
+                  AND julianday('now') - julianday(created_at) >= ?
+                ORDER BY importance ASC \
+                """
         cursor = await self._connection.execute(
             query, (workspace_id, max_importance, max_access_count, min_age_days)
         )
@@ -890,8 +929,8 @@ class SQLiteStorageBackend(StorageBackend):
                      INNER JOIN memories_fts fts ON m.id = fts.id
             WHERE fts.workspace_id = ?
               AND fts.content MATCH ?
-              AND m.deleted_at IS NULL LIMIT ?
-            OFFSET ?
+              AND m.deleted_at IS NULL
+            LIMIT ? OFFSET ?
             """,
             (workspace_id, query, limit, offset),
         )
@@ -907,12 +946,81 @@ class SQLiteStorageBackend(StorageBackend):
             FROM memories
             WHERE workspace_id = ?
               AND content_hash = ?
-              AND deleted_at IS NULL LIMIT 1
+              AND deleted_at IS NULL
+            LIMIT 1
             """,
             (workspace_id, content_hash),
         )
         row = await cursor.fetchone()
         return self._row_to_memory(row) if row else None
+
+    async def get_recent_memories(
+            self,
+            workspace_id: str,
+            created_after: datetime,
+            limit: int = 10,
+            detail_level: str = "abstract",
+            offset: int = 0,
+    ) -> list:
+        """Get recent memories ordered by creation time (newest first)."""
+        cursor = await self._connection.execute(
+            """
+            SELECT *
+            FROM memories
+            WHERE workspace_id = ?
+              AND created_at > ?
+              AND (status IS NULL OR status = 'active')
+              AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (workspace_id, created_after.isoformat(), limit, offset),
+        )
+        rows = await cursor.fetchall()
+
+        # Convert rows to dicts based on detail_level
+        results = []
+        for row in rows:
+            if detail_level == "abstract":
+                # Return only id, abstract, type, subtype, importance, tags, created_at
+                results.append({
+                    "id": row["id"],
+                    "abstract": row["abstract"] if row["abstract"] else None,
+                    "type": row["type"],
+                    "subtype": row["subtype"] if row["subtype"] else None,
+                    "importance": row["importance"],
+                    "tags": json.loads(row["tags"]) if row["tags"] else [],
+                    "created_at": row["created_at"],
+                })
+            elif detail_level == "overview":
+                # Add overview field (and exclude abstract field)
+                results.append({
+                    "id": row["id"],
+                    # "abstract": row["abstract"] if row["abstract"] else None,
+                    "overview": row["overview"] if row["overview"] else None,
+                    "type": row["type"],
+                    "subtype": row["subtype"] if row["subtype"] else None,
+                    "importance": row["importance"],
+                    "tags": json.loads(row["tags"]) if row["tags"] else [],
+                    "created_at": row["created_at"],
+                })
+            else:  # "full" -- full detail will return the content and doesn't need to return the abstract and overview fields
+                # Return everything as dict
+                memory = self._row_to_memory(row)
+                results.append({
+                    "id": memory.id,
+                    "content": memory.content,
+                    # "abstract": memory.abstract,
+                    # "overview": memory.overview,
+                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
+                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(
+                        memory.subtype) if memory.subtype else None,
+                    "importance": memory.importance,
+                    "tags": memory.tags,
+                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                })
+
+        return results
 
     # Association operations
     async def create_association(self, workspace_id: str, input: AssociateInput) -> Association:
@@ -1145,6 +1253,14 @@ class SQLiteStorageBackend(StorageBackend):
 
         return self._row_to_workspace(row)
 
+    async def list_workspaces(self) -> list[Workspace]:
+        """List all workspaces."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM workspaces ORDER BY name",
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_workspace(row) for row in rows]
+
     # Context operations (formerly Memory Space)
     async def create_context(self, workspace_id: str, context: Context) -> Context:
         """Create a context within a workspace."""
@@ -1198,7 +1314,8 @@ class SQLiteStorageBackend(StorageBackend):
             """
             SELECT type, COUNT(*) as count
             FROM memories
-            WHERE workspace_id = ? AND deleted_at IS NULL
+            WHERE workspace_id = ?
+              AND deleted_at IS NULL
             GROUP BY type
             """,
             (workspace_id,),
@@ -1227,7 +1344,8 @@ class SQLiteStorageBackend(StorageBackend):
         await self._connection.execute(
             """
             INSERT
-            OR IGNORE INTO workspaces (id, tenant_id, name, created_at, updated_at)
+                OR IGNORE
+            INTO workspaces (id, tenant_id, name, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (workspace_id, "default", workspace_id, now, now)
@@ -1301,11 +1419,6 @@ class SQLiteStorageBackend(StorageBackend):
         # FIX: do not delete expired sessions on get/check BECAUSE we have background task
         #       for deleting expired sessions (that may trigger auto-commit but commit will fail
         #       if we deleted the session while looking it up here!)
-        # Check expiration
-        if session.is_expired:
-            self.logger.info("Session expired: %s, cleaning up", session_id)
-            await self.delete_session(session.workspace_id, session_id)
-            return None
 
         return session
 
@@ -1337,11 +1450,10 @@ class SQLiteStorageBackend(StorageBackend):
         await self._connection.execute(
             """
             INSERT INTO working_memory (session_id, key, value, ttl_seconds, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id, key) DO
-            UPDATE SET
-                value = excluded.value,
-                ttl_seconds = excluded.ttl_seconds,
-                updated_at = excluded.updated_at
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, key) DO UPDATE SET value       = excluded.value,
+                                                       ttl_seconds = excluded.ttl_seconds,
+                                                       updated_at  = excluded.updated_at
             """,
             (
                 session_id,
@@ -1438,7 +1550,8 @@ class SQLiteStorageBackend(StorageBackend):
             SELECT *
             FROM sessions
             WHERE expires_at < ?
-            ORDER BY expires_at ASC LIMIT ?
+            ORDER BY expires_at ASC
+            LIMIT ?
             """,
             (now, limit),
         )
@@ -1495,6 +1608,29 @@ class SQLiteStorageBackend(StorageBackend):
 
         return await self.get_session(workspace_id, session_id)
 
+    async def list_sessions(
+            self,
+            workspace_id: str,
+            context_id: str | None = None,
+            include_expired: bool = False,
+    ) -> list[Session]:
+        """List sessions for a workspace."""
+        conditions = ["workspace_id = ?"]
+        values: list = [workspace_id]
+
+        if context_id is not None:
+            conditions.append("context_id = ?")
+            values.append(context_id)
+
+        if not include_expired:
+            conditions.append("expires_at >= ?")
+            values.append(utc_now_iso())
+
+        query = f"SELECT * FROM sessions WHERE {' AND '.join(conditions)} ORDER BY created_at DESC"
+        cursor = await self._connection.execute(query, values)
+        rows = await cursor.fetchall()
+        return [self._row_to_session(row) for row in rows]
+
     # Contradiction operations
     async def create_contradiction(self, contradiction: ContradictionRecord) -> ContradictionRecord:
         """Store a contradiction record."""
@@ -1538,8 +1674,10 @@ class SQLiteStorageBackend(StorageBackend):
         """Get unresolved contradictions for a workspace."""
         cursor = await self._connection.execute(
             """
-            SELECT * FROM contradictions
-            WHERE workspace_id = ? AND resolved_at IS NULL
+            SELECT *
+            FROM contradictions
+            WHERE workspace_id = ?
+              AND resolved_at IS NULL
             ORDER BY detected_at DESC
             LIMIT ?
             """,
@@ -1549,21 +1687,22 @@ class SQLiteStorageBackend(StorageBackend):
         return [self._row_to_contradiction(row) for row in rows]
 
     async def resolve_contradiction(
-        self,
-        workspace_id: str,
-        contradiction_id: str,
-        resolution: str,
-        merged_content: Optional[str] = None,
+            self,
+            workspace_id: str,
+            contradiction_id: str,
+            resolution: str,
+            merged_content: Optional[str] = None,
     ) -> Optional[ContradictionRecord]:
         """Resolve a contradiction."""
         now = utc_now_iso()
         cursor = await self._connection.execute(
             """
             UPDATE contradictions
-            SET resolved_at = ?,
-                resolution = ?,
+            SET resolved_at    = ?,
+                resolution     = ?,
                 merged_content = ?
-            WHERE id = ? AND workspace_id = ?
+            WHERE id = ?
+              AND workspace_id = ?
             """,
             (now, resolution, merged_content, contradiction_id, workspace_id),
         )

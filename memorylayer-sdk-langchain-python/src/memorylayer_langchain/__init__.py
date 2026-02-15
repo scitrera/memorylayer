@@ -6,7 +6,7 @@ from .memory import MemoryLayerConversationSummaryMemory, MemoryLayerMemory
 # Re-export SDK's sync client for backwards compatibility
 from memorylayer import SyncMemoryLayerClient, sync_client
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 __all__ = [
     # LangChain Chat History (LCEL compatible)
