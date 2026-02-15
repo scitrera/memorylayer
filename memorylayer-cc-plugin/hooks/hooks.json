@@ -104,6 +104,16 @@
     ],
     "UserPromptSubmit": [
       {
+        "matcher": ".*\\b(which\\s+\\w+\\s+should|should\\s+we\\s+use|what\\s+do\\s+we\\s+use|how\\s+do\\s+we|what'?s\\s+our|preferred|convention|do\\s+we\\s+have\\s+a|what'?s\\s+the\\s+(default|standard|preferred))\\b.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memorylayer-hook UserPromptSubmit",
+            "timeout": 8000
+          }
+        ]
+      },
+      {
         "matcher": ".*\\b(remember|recall|what did we|how did we|remind me|what was the|what were the|what do you (know|remember))\\b.*",
         "hooks": [
           {

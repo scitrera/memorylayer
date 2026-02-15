@@ -110,7 +110,9 @@ export function formatBriefing(briefing: ToolResponse): string {
  * Format directive memories specially (high importance user instructions)
  */
 export function formatDirectives(memories: Memory[]): string {
-  const directives = memories.filter(m => m.subtype === "directive");
+  const directives = memories.filter(
+    m => m.subtype === "directive" || (m.subtype === "preference" && (m.importance ?? 0) >= 0.9)
+  );
 
   if (directives.length === 0) {
     return "";
@@ -122,7 +124,7 @@ export function formatDirectives(memories: Memory[]): string {
   ];
 
   for (const directive of directives) {
-    lines.push(`\u2022 ${directive.content}`);
+    lines.push(`• ${directive.content}`);
   }
 
   return lines.join("\n");
@@ -189,16 +191,21 @@ export function formatSessionStart(
   // Add session guidance
   const guidance = `=== Session Guidance ===
 
+Recalling Memories:
+- Before answering questions about preferences, setup, conventions, or past decisions, call \`memory_recall\` first
+- For broad context gathering, use \`memory_recall\` with relevant keywords
+- Directives (subtype: directive) and preferences (subtype: preference) represent explicit user instructions — prioritize these
+
 Storing Memories:
 - \`memory_remember\`: store to long-term memory with type, subtype, and importance
 - \`memory_session_commit\`: checkpoint working memory mid-session (without ending it)
 
-Importance Guide: directives/preferences \u2192 0.9 | decisions/architecture \u2192 0.7-0.8 | fixes/solutions \u2192 0.7 | patterns \u2192 0.5-0.6
+Importance Guide: directives/preferences → 0.9 | decisions/architecture → 0.7-0.8 | fixes/solutions → 0.7 | patterns → 0.5-0.6
 Types: semantic (facts), procedural (how-to), episodic (events), working (current context, auto-expires)
 Subtypes: directive, decision, fix, solution, code_pattern, error, workflow, preference, problem
 
 Context Environment (sandbox survives compaction):
-- Load + analyze memories server-side: \`memory_context_load\` \u2192 \`memory_context_query\` or \`memory_context_rlm\`
+- Load + analyze memories server-side: \`memory_context_load\` → \`memory_context_query\` or \`memory_context_rlm\`
 - Run computations on loaded data: \`memory_context_exec\` (Python sandbox)
 - After compaction, call \`memory_context_inspect\` to re-orient with existing sandbox variables`;
   sections.push(guidance);
