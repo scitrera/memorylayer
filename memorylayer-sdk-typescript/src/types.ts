@@ -650,3 +650,125 @@ export interface DecomposeResponse {
   from_index: number;
   to_index: number;
 }
+
+// ------------------------------------------------------------------ //
+// Dataset types (Enterprise)
+// ------------------------------------------------------------------ //
+
+export interface DatasetColumn {
+  name: string;
+  dtype: string;
+  column_type: string;
+  nullable: boolean;
+  null_count: number;
+  null_percent: number;
+  unique_count: number;
+  // Numeric stats
+  min_value?: number;
+  max_value?: number;
+  mean_value?: number;
+  median_value?: number;
+  std_value?: number;
+  p25_value?: number;
+  p75_value?: number;
+  // String stats
+  min_length?: number;
+  max_length?: number;
+  avg_length?: number;
+  // Categorical stats
+  top_values?: Array<Record<string, unknown>>;
+  // Time series detection
+  is_temporal: boolean;
+  temporal_resolution?: string;
+  temporal_range_start?: string;
+  temporal_range_end?: string;
+  // Distribution
+  histogram?: Record<string, unknown>;
+}
+
+export interface DatasetInfo {
+  id: string;
+  workspace_id: string;
+  name: string;
+  filename: string;
+  format: string;
+  content_hash: string;
+  size_bytes: number;
+  status: string;
+  target_context_id: string;
+  row_count: number;
+  column_count: number;
+  columns: DatasetColumn[];
+  memory_ids: string[];
+  profile_summary?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  profiling_started_at?: string;
+  profiling_completed_at?: string;
+}
+
+export interface DatasetJobInfo {
+  id: string;
+  workspace_id: string;
+  dataset_ids: string[];
+  status: string;
+  progress_percent: number;
+  datasets_processed: number;
+  total_memories_created: number;
+  errors: Array<Record<string, unknown>>;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface DatasetUploadOptions {
+  name?: string;
+  targetContextId?: string;
+  importance?: number;
+  sampleRows?: number;
+  detectTimeSeries?: boolean;
+  generateSummaries?: boolean;
+}
+
+export interface DatasetUploadResponse {
+  dataset: DatasetInfo;
+  job: DatasetJobInfo;
+}
+
+export interface DatasetListResponse {
+  datasets: DatasetInfo[];
+  total_count: number;
+}
+
+export interface DatasetSliceOptions {
+  sql?: string;
+  columns?: string[];
+  filters?: Array<Record<string, unknown>>;
+  orderBy?: string;
+  descending?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface DatasetSliceResult {
+  dataset_id: string;
+  columns: string[];
+  dtypes: string[];
+  rows: unknown[][];
+  total_matching: number;
+  returned_count: number;
+  sql_executed?: string;
+}
+
+export interface DatasetMemoriesResponse {
+  dataset_id: string;
+  memories: Array<{
+    id: string;
+    content: string;
+    type: string;
+    importance: number;
+    tags: string[];
+    created_at: string;
+  }>;
+  total_count: number;
+}

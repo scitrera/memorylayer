@@ -260,3 +260,97 @@ class PageSearchResult(BaseModel):
     pages: list[DocumentPage]
     total_count: int
     query: str
+
+
+# ------------------------------------------------------------------ #
+# Dataset models (Enterprise)
+# ------------------------------------------------------------------ #
+
+
+class DatasetColumn(BaseModel):
+    """Column-level schema and statistics from dataset profiling (Enterprise)."""
+
+    name: str
+    dtype: str
+    column_type: str = "unknown"
+    nullable: bool = False
+    null_count: int = 0
+    null_percent: float = 0.0
+    unique_count: int = 0
+
+    # Numeric stats
+    min_value: float | None = None
+    max_value: float | None = None
+    mean_value: float | None = None
+    median_value: float | None = None
+    std_value: float | None = None
+    p25_value: float | None = None
+    p75_value: float | None = None
+
+    # String stats
+    min_length: int | None = None
+    max_length: int | None = None
+    avg_length: float | None = None
+
+    # Categorical stats
+    top_values: list[dict[str, Any]] | None = None
+
+    # Time series detection
+    is_temporal: bool = False
+    temporal_resolution: str | None = None
+    temporal_range_start: str | None = None
+    temporal_range_end: str | None = None
+
+    # Distribution
+    histogram: dict[str, Any] | None = None
+
+
+class DatasetInfo(BaseModel):
+    """Dataset metadata returned from the API (Enterprise)."""
+
+    id: str
+    workspace_id: str
+    name: str
+    filename: str
+    format: str
+    content_hash: str
+    size_bytes: int
+    status: str
+    target_context_id: str = "_default"
+    row_count: int = 0
+    column_count: int = 0
+    columns: list[DatasetColumn] = Field(default_factory=list)
+    memory_ids: list[str] = Field(default_factory=list)
+    profile_summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    profiling_started_at: datetime | None = None
+    profiling_completed_at: datetime | None = None
+
+
+class DatasetJobInfo(BaseModel):
+    """Dataset processing job status (Enterprise)."""
+
+    id: str
+    workspace_id: str
+    dataset_ids: list[str] = Field(default_factory=list)
+    status: str
+    progress_percent: int = 0
+    datasets_processed: int = 0
+    total_memories_created: int = 0
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class DatasetSliceResult(BaseModel):
+    """Result of a dataset slice query (Enterprise)."""
+
+    dataset_id: str
+    columns: list[str]
+    dtypes: list[str] = Field(default_factory=list)
+    rows: list[list[Any]]
+    total_matching: int
+    returned_count: int
+    sql_executed: str | None = None

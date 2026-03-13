@@ -22,6 +22,10 @@ from .models import (
     ChatMessage,
     ChatThread,
     ChatThreadWithMessages,
+    DatasetColumn,
+    DatasetInfo,
+    DatasetJobInfo,
+    DatasetSliceResult,
     DecompositionResult,
     DocumentInfo,
     DocumentPage,
@@ -205,9 +209,11 @@ class SyncMemoryLayerClient:
             if response.status_code == 401:
                 raise AuthenticationError(response.json().get("detail", "Authentication failed"))
             elif response.status_code == 404:
+                raise NotFoundError(response.json().get("detail", "Resource not found"))
+            elif response.status_code == 501:
                 if enterprise_feature:
                     raise EnterpriseRequiredError(feature=enterprise_feature)
-                raise NotFoundError(response.json().get("detail", "Resource not found"))
+                raise NotFoundError(response.json().get("detail", "Not implemented"))
             elif response.status_code == 422:
                 raise ValidationError(response.json().get("detail", "Validation error"))
             elif response.status_code == 429:
@@ -1427,7 +1433,7 @@ class SyncMemoryLayerClient:
                 },
             )
 
-            if response.status_code == 404:
+            if response.status_code == 501:
                 raise EnterpriseRequiredError(feature="Document ingestion")
             response.raise_for_status()
 
@@ -1518,7 +1524,7 @@ class SyncMemoryLayerClient:
             response = client.get(
                 f"/documents/{document_id}/pages/{page_id}/image",
             )
-            if response.status_code == 404:
+            if response.status_code == 501:
                 raise EnterpriseRequiredError(feature="Document page images")
             response.raise_for_status()
             return response.content
@@ -1590,6 +1596,171 @@ class SyncMemoryLayerClient:
             enterprise_feature="Document reprocessing",
         )
         return JobInfo(**data)
+
+    # ------------------------------------------------------------------ #
+    # Dataset operations (Enterprise)
+    # ------------------------------------------------------------------ #
+
+    def upload_dataset(
+        self,
+        file_data: bytes,
+        filename: str,
+        *,
+        name: Optional[str] = None,
+        target_context_id: str = "_default",
+        importance: float = 0.5,
+        sample_rows: int = 1000,
+        detect_time_series: bool = True,
+        generate_summaries: bool = True,
+    ) -> tuple[DatasetInfo, DatasetJobInfo]:
+        """Upload a dataset for profiling and memory extraction (Enterprise)."""
+        client = self._ensure_client()
+
+        form_data: dict[str, str] = {
+            "target_context_id": target_context_id,
+            "importance": str(importance),
+            "sample_rows": str(sample_rows),
+            "detect_time_series": str(detect_time_series).lower(),
+            "generate_summaries": str(generate_summaries).lower(),
+        }
+        if name is not None:
+            form_data["name"] = name
+
+        try:
+            response = client.post(
+                "/datasets",
+                files={"file": (filename, file_data)},
+                data=form_data,
+            )
+
+            if response.status_code == 501:
+                raise EnterpriseRequiredError(feature="Dataset management")
+            response.raise_for_status()
+
+            data = response.json()
+            return (
+                DatasetInfo(**data["dataset"]),
+                DatasetJobInfo(**data["job"]),
+            )
+        except EnterpriseRequiredError:
+            raise
+        except httpx.HTTPStatusError as exc:
+            raise MemoryLayerError(
+                str(exc), status_code=exc.response.status_code,
+            )
+
+    def list_datasets(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[DatasetInfo], int]:
+        """List datasets in the workspace."""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
+
+        data = self._request(
+            "GET", "/datasets", params=params,
+            enterprise_feature="Dataset management",
+        )
+        datasets = [DatasetInfo(**d) for d in data.get("datasets", [])]
+        return datasets, data.get("total_count", len(datasets))
+
+    def get_dataset(self, dataset_id: str) -> DatasetInfo:
+        """Get dataset metadata, schema, and profile."""
+        data = self._request(
+            "GET", f"/datasets/{dataset_id}",
+            enterprise_feature="Dataset management",
+        )
+        return DatasetInfo(**data)
+
+    def delete_dataset(
+        self, dataset_id: str, *, delete_memories: bool = False,
+    ) -> None:
+        """Delete a dataset and optionally its extracted memories."""
+        self._request(
+            "DELETE", f"/datasets/{dataset_id}",
+            params={"delete_memories": str(delete_memories).lower()},
+            enterprise_feature="Dataset management",
+        )
+
+    def get_dataset_memories(
+        self, dataset_id: str,
+    ) -> list[dict[str, Any]]:
+        """Get memories extracted from a dataset."""
+        data = self._request(
+            "GET", f"/datasets/{dataset_id}/memories",
+            enterprise_feature="Dataset management",
+        )
+        return data.get("memories", [])
+
+    def query_dataset_slice(
+        self,
+        dataset_id: str,
+        *,
+        sql: Optional[str] = None,
+        columns: Optional[list[str]] = None,
+        filters: Optional[list[dict[str, Any]]] = None,
+        order_by: Optional[str] = None,
+        descending: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> DatasetSliceResult:
+        """Query a slice of dataset data using DuckDB (Enterprise)."""
+        payload: dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "descending": descending,
+        }
+        if sql is not None:
+            payload["sql"] = sql
+        if columns is not None:
+            payload["columns"] = columns
+        if filters is not None:
+            payload["filters"] = filters
+        if order_by is not None:
+            payload["order_by"] = order_by
+
+        data = self._request(
+            "POST", f"/datasets/{dataset_id}/slice",
+            json=payload,
+            enterprise_feature="Dataset management",
+        )
+        return DatasetSliceResult(**data)
+
+    def get_dataset_job(self, job_id: str) -> DatasetJobInfo:
+        """Get dataset processing job status and progress."""
+        data = self._request(
+            "GET", f"/datasets/jobs/{job_id}",
+            enterprise_feature="Dataset processing jobs",
+        )
+        return DatasetJobInfo(**data)
+
+    def list_dataset_jobs(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[DatasetJobInfo]:
+        """List dataset processing jobs in the workspace."""
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+
+        data = self._request(
+            "GET", "/datasets/jobs", params=params,
+            enterprise_feature="Dataset processing jobs",
+        )
+        return [DatasetJobInfo(**j) for j in data.get("jobs", [])]
+
+    def cancel_dataset_job(self, job_id: str) -> None:
+        """Cancel a queued or running dataset processing job."""
+        self._request(
+            "POST", f"/datasets/jobs/{job_id}/cancel",
+            enterprise_feature="Dataset processing jobs",
+        )
 
     def export_workspace(
         self,

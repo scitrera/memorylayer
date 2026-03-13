@@ -12,6 +12,8 @@ import type {
   PageSearchOptions, PageSearchResponse, PageListResponse, DocumentListResponse,
   ChatThread, ThreadCreateOptions, ThreadListOptions, MessageAppendInput,
   ThreadWithMessagesResponse, MessageListResponse, MessagesAppendResponse, DecomposeResponse,
+  DatasetInfo, DatasetJobInfo, DatasetUploadOptions, DatasetUploadResponse,
+  DatasetListResponse, DatasetSliceOptions, DatasetSliceResult, DatasetMemoriesResponse,
 } from "./types.js";
 import { RelationshipType } from "./types.js";
 import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError, EnterpriseRequiredError } from "./errors.js";
@@ -115,13 +117,15 @@ export class MemoryLayerClient {
       case 403:
         throw new AuthorizationError(message);
       case 404:
-        if (enterpriseFeature) {
-          throw new EnterpriseRequiredError(enterpriseFeature);
-        }
         throw new NotFoundError(message);
       case 400:
       case 422:
         throw new ValidationError(message, body.details);
+      case 501:
+        if (enterpriseFeature) {
+          throw new EnterpriseRequiredError(enterpriseFeature);
+        }
+        throw new NotFoundError(message);
       default:
         throw new MemoryLayerError(message, response.status);
     }
@@ -1066,6 +1070,179 @@ export class MemoryLayerClient {
     return this.request<DecomposeResponse>(
       "POST",
       `/v1/threads/${threadId}/decompose${query ? `?${query}` : ""}`
+    );
+  }
+
+  // ------------------------------------------------------------------ //
+  // Dataset operations (Enterprise)
+  // ------------------------------------------------------------------ //
+
+  /**
+   * Upload a dataset for profiling and memory extraction.
+   *
+   * Requires MemoryLayer Enterprise. On OSS servers this throws
+   * `EnterpriseRequiredError`.
+   */
+  async uploadDataset(
+    file: Blob | File,
+    filename: string,
+    options: DatasetUploadOptions = {},
+  ): Promise<DatasetUploadResponse> {
+    const formData = new FormData();
+    formData.append("file", file, filename);
+    if (options.name) formData.append("name", options.name);
+    if (options.targetContextId) formData.append("target_context_id", options.targetContextId);
+    if (options.importance !== undefined) formData.append("importance", String(options.importance));
+    if (options.sampleRows !== undefined) formData.append("sample_rows", String(options.sampleRows));
+    if (options.detectTimeSeries !== undefined) formData.append("detect_time_series", String(options.detectTimeSeries));
+    if (options.generateSummaries !== undefined) formData.append("generate_summaries", String(options.generateSummaries));
+
+    const headers: Record<string, string> = {};
+    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
+    if (this.sessionId) headers["X-Session-ID"] = this.sessionId;
+    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+
+    const url = `${this.baseUrl}/v1/datasets`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        await this.handleError(response, "Dataset management");
+      }
+      return await response.json() as DatasetUploadResponse;
+    } catch (error) {
+      if (error instanceof MemoryLayerError) throw error;
+      throw new MemoryLayerError(`Dataset upload failed: ${error}`);
+    }
+  }
+
+  /**
+   * List datasets in the workspace.
+   */
+  async listDatasets(options?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<DatasetListResponse> {
+    const params = new URLSearchParams();
+    if (options?.status) params.set("status", options.status);
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.request<DatasetListResponse>(
+      "GET",
+      `/v1/datasets${query ? `?${query}` : ""}`,
+      undefined,
+      "Dataset management",
+    );
+  }
+
+  /**
+   * Get dataset metadata, schema, and profile.
+   */
+  async getDataset(datasetId: string): Promise<DatasetInfo> {
+    return this.request<DatasetInfo>(
+      "GET",
+      `/v1/datasets/${datasetId}`,
+      undefined,
+      "Dataset management",
+    );
+  }
+
+  /**
+   * Delete a dataset and optionally its extracted memories.
+   */
+  async deleteDataset(datasetId: string, deleteMemories = false): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/v1/datasets/${datasetId}?delete_memories=${deleteMemories}`,
+      undefined,
+      "Dataset management",
+    );
+  }
+
+  /**
+   * Get memories extracted from a dataset.
+   */
+  async getDatasetMemories(datasetId: string): Promise<DatasetMemoriesResponse> {
+    return this.request<DatasetMemoriesResponse>(
+      "GET",
+      `/v1/datasets/${datasetId}/memories`,
+      undefined,
+      "Dataset management",
+    );
+  }
+
+  /**
+   * Query a slice of dataset data using DuckDB.
+   *
+   * Supports both structured filters and raw SQL (SELECT only).
+   * The dataset is queried as a table named 'data'.
+   */
+  async queryDatasetSlice(datasetId: string, options: DatasetSliceOptions = {}): Promise<DatasetSliceResult> {
+    const body: Record<string, unknown> = {
+      limit: options.limit ?? 100,
+      offset: options.offset ?? 0,
+      descending: options.descending ?? false,
+    };
+    if (options.sql !== undefined) body.sql = options.sql;
+    if (options.columns !== undefined) body.columns = options.columns;
+    if (options.filters !== undefined) body.filters = options.filters;
+    if (options.orderBy !== undefined) body.order_by = options.orderBy;
+
+    return this.request<DatasetSliceResult>(
+      "POST",
+      `/v1/datasets/${datasetId}/slice`,
+      body,
+      "Dataset management",
+    );
+  }
+
+  /**
+   * Get dataset processing job status.
+   */
+  async getDatasetJob(jobId: string): Promise<DatasetJobInfo> {
+    return this.request<DatasetJobInfo>(
+      "GET",
+      `/v1/datasets/jobs/${jobId}`,
+      undefined,
+      "Dataset processing jobs",
+    );
+  }
+
+  /**
+   * List dataset processing jobs in the workspace.
+   */
+  async listDatasetJobs(options?: { status?: string; limit?: number }): Promise<{ jobs: DatasetJobInfo[] }> {
+    const params = new URLSearchParams();
+    if (options?.status) params.set("status", options.status);
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return this.request<{ jobs: DatasetJobInfo[] }>(
+      "GET",
+      `/v1/datasets/jobs${query ? `?${query}` : ""}`,
+      undefined,
+      "Dataset processing jobs",
+    );
+  }
+
+  /**
+   * Cancel a running dataset processing job.
+   */
+  async cancelDatasetJob(jobId: string): Promise<void> {
+    await this.request<void>(
+      "POST",
+      `/v1/datasets/jobs/${jobId}/cancel`,
+      undefined,
+      "Dataset processing jobs",
     );
   }
 }

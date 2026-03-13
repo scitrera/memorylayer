@@ -16,6 +16,10 @@ from .models import (
     ChatMessageContent,
     ChatThread,
     ChatThreadWithMessages,
+    DatasetColumn,
+    DatasetInfo,
+    DatasetJobInfo,
+    DatasetSliceResult,
     DecompositionResult,
     DocumentInfo,
     DocumentPage,
@@ -64,6 +68,11 @@ __all__ = [
     "DocumentPage",
     "JobInfo",
     "PageSearchResult",
+    # Dataset models (Enterprise)
+    "DatasetColumn",
+    "DatasetInfo",
+    "DatasetJobInfo",
+    "DatasetSliceResult",
     # Types
     "MemoryType",
     "MemorySubtype",
