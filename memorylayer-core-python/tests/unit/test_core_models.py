@@ -86,6 +86,9 @@ class TestMemoryEnums:
         assert MemorySubtype.EVENT.value == "event"
         assert MemorySubtype.DIRECTIVE.value == "directive"
 
+        # v3: inference subtype
+        assert MemorySubtype.INFERENCE.value == "inference"
+
         # Verify all expected values exist
         assert set(MemorySubtype) == {
             MemorySubtype.SOLUTION,
@@ -100,6 +103,7 @@ class TestMemoryEnums:
             MemorySubtype.ENTITY,
             MemorySubtype.EVENT,
             MemorySubtype.DIRECTIVE,
+            MemorySubtype.INFERENCE,
         }
 
     def test_recall_mode_enum_values(self):

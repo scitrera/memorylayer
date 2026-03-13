@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 
 from .exceptions import (
     AuthenticationError,
+    EnterpriseRequiredError,
     MemoryLayerError,
     NotFoundError,
     RateLimitError,
@@ -18,7 +19,15 @@ from .exceptions import (
 )
 from .models import (
     Association,
+    ChatMessage,
+    ChatThread,
+    ChatThreadWithMessages,
+    DecompositionResult,
+    DocumentInfo,
+    DocumentPage,
+    JobInfo,
     Memory,
+    PageSearchResult,
     RecallResult,
     ReflectResult,
     Session,
@@ -162,6 +171,7 @@ class SyncMemoryLayerClient:
         *,
         json: Optional[dict[str, Any]] = None,
         params: Optional[dict[str, Any]] = None,
+        enterprise_feature: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Make HTTP request with error handling.
@@ -171,12 +181,15 @@ class SyncMemoryLayerClient:
             path: API path
             json: JSON body
             params: Query parameters
+            enterprise_feature: If set, a 404 raises EnterpriseRequiredError
+                instead of NotFoundError.
 
         Returns:
             Response JSON
 
         Raises:
             AuthenticationError: Authentication failed (401)
+            EnterpriseRequiredError: Enterprise-only endpoint (404 + enterprise_feature)
             NotFoundError: Resource not found (404)
             ValidationError: Validation failed (422)
             RateLimitError: Rate limit exceeded (429)
@@ -192,6 +205,8 @@ class SyncMemoryLayerClient:
             if response.status_code == 401:
                 raise AuthenticationError(response.json().get("detail", "Authentication failed"))
             elif response.status_code == 404:
+                if enterprise_feature:
+                    raise EnterpriseRequiredError(feature=enterprise_feature)
                 raise NotFoundError(response.json().get("detail", "Resource not found"))
             elif response.status_code == 422:
                 raise ValidationError(response.json().get("detail", "Validation error"))
@@ -1094,6 +1109,487 @@ class SyncMemoryLayerClient:
     def context_cleanup(self) -> None:
         """Clean up and remove the session's sandbox environment."""
         self._request("DELETE", "/context/cleanup")
+
+    # ------------------------------------------------------------------ #
+    # Chat history operations
+    # ------------------------------------------------------------------ #
+
+    def create_thread(
+        self,
+        *,
+        workspace_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        context_id: Optional[str] = None,
+        observer_id: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        title: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        expires_at: Optional[str] = None,
+    ) -> ChatThread:
+        """
+        Create a new chat thread.
+
+        Args:
+            workspace_id: Workspace ID (uses default if not provided)
+            thread_id: Optional explicit thread ID
+            user_id: Optional user ID to associate with the thread
+            context_id: Optional context ID (default: "_default")
+            observer_id: Optional observer ID
+            subject_id: Optional subject ID
+            title: Optional thread title
+            metadata: Additional metadata
+            expires_at: Optional expiry timestamp (ISO 8601 string)
+
+        Returns:
+            Created ChatThread
+
+        Example:
+            thread = client.create_thread(user_id="user_123", title="My Chat")
+        """
+        payload: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            payload["workspace_id"] = ws_id
+        if thread_id is not None:
+            payload["id"] = thread_id
+        if user_id is not None:
+            payload["user_id"] = user_id
+        if context_id is not None:
+            payload["context_id"] = context_id
+        if observer_id is not None:
+            payload["observer_id"] = observer_id
+        if subject_id is not None:
+            payload["subject_id"] = subject_id
+        if title is not None:
+            payload["title"] = title
+        if metadata is not None:
+            payload["metadata"] = metadata
+        if expires_at is not None:
+            payload["expires_at"] = expires_at
+
+        data = self._request("POST", "/threads", json=payload)
+        return ChatThread(**data)
+
+    def list_threads(
+        self,
+        *,
+        workspace_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ChatThread]:
+        """
+        List chat threads.
+
+        Args:
+            workspace_id: Workspace ID (uses default if not provided)
+            user_id: Optional filter by user ID
+            limit: Maximum threads to return (default: 50)
+            offset: Pagination offset (default: 0)
+
+        Returns:
+            List of ChatThread objects
+
+        Example:
+            threads = client.list_threads(limit=20)
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+        if user_id is not None:
+            params["user_id"] = user_id
+
+        data = self._request("GET", "/threads", params=params)
+        threads_adapter = TypeAdapter(list[ChatThread])
+        return threads_adapter.validate_python(data.get("threads", data if isinstance(data, list) else []))
+
+    def get_thread(
+        self,
+        thread_id: str,
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> ChatThread:
+        """
+        Get thread metadata.
+
+        Args:
+            thread_id: Thread ID
+            workspace_id: Workspace ID (uses default if not provided)
+
+        Returns:
+            ChatThread object
+
+        Example:
+            thread = client.get_thread("thread_123")
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = self._request("GET", f"/threads/{thread_id}", params=params or None)
+        return ChatThread(**data)
+
+    def get_thread_full(
+        self,
+        thread_id: str,
+        *,
+        workspace_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "asc",
+    ) -> ChatThreadWithMessages:
+        """
+        Get thread with messages inlined.
+
+        Args:
+            thread_id: Thread ID
+            workspace_id: Workspace ID (uses default if not provided)
+            limit: Maximum messages to return (default: 100)
+            offset: Pagination offset (default: 0)
+            order: Message order "asc" or "desc" (default: "asc")
+
+        Returns:
+            ChatThreadWithMessages object
+
+        Example:
+            full = client.get_thread_full("thread_123")
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset, "order": order}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = self._request("GET", f"/threads/{thread_id}/full", params=params)
+        return ChatThreadWithMessages(**data)
+
+    def delete_thread(
+        self,
+        thread_id: str,
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a thread and its messages.
+
+        Args:
+            thread_id: Thread ID
+            workspace_id: Workspace ID (uses default if not provided)
+
+        Example:
+            client.delete_thread("thread_123")
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        self._request("DELETE", f"/threads/{thread_id}", params=params or None)
+
+    def append_messages(
+        self,
+        thread_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> list[ChatMessage]:
+        """
+        Append messages to a thread.
+
+        Args:
+            thread_id: Thread ID
+            messages: List of message dicts, each with: role, content, metadata (optional)
+            workspace_id: Workspace ID (uses default if not provided)
+
+        Returns:
+            List of created ChatMessage objects
+
+        Example:
+            msgs = client.append_messages(
+                "thread_123",
+                [{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi!"}]
+            )
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        payload: dict[str, Any] = {"messages": messages}
+        data = self._request(
+            "POST", f"/threads/{thread_id}/messages",
+            json=payload, params=params or None,
+        )
+        messages_adapter = TypeAdapter(list[ChatMessage])
+        return messages_adapter.validate_python(data.get("messages", data if isinstance(data, list) else []))
+
+    def get_messages(
+        self,
+        thread_id: str,
+        *,
+        workspace_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        after_index: Optional[int] = None,
+        order: str = "asc",
+    ) -> list[ChatMessage]:
+        """
+        Get messages from a thread.
+
+        Args:
+            thread_id: Thread ID
+            workspace_id: Workspace ID (uses default if not provided)
+            limit: Maximum messages to return (default: 100)
+            offset: Pagination offset (default: 0)
+            after_index: Only return messages after this index (optional)
+            order: Message order "asc" or "desc" (default: "asc")
+
+        Returns:
+            List of ChatMessage objects
+
+        Example:
+            messages = client.get_messages("thread_123", limit=50)
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset, "order": order}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+        if after_index is not None:
+            params["after_index"] = after_index
+
+        data = self._request("GET", f"/threads/{thread_id}/messages", params=params)
+        messages_adapter = TypeAdapter(list[ChatMessage])
+        return messages_adapter.validate_python(data.get("messages", data if isinstance(data, list) else []))
+
+    def decompose_thread(
+        self,
+        thread_id: str,
+        *,
+        workspace_id: Optional[str] = None,
+    ) -> DecompositionResult:
+        """
+        Trigger memory decomposition for unprocessed messages.
+
+        Args:
+            thread_id: Thread ID
+            workspace_id: Workspace ID (uses default if not provided)
+
+        Returns:
+            DecompositionResult with processing statistics
+
+        Example:
+            result = client.decompose_thread("thread_123")
+            print(f"Processed {result.messages_processed} messages")
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = self._request(
+            "POST", f"/threads/{thread_id}/decompose",
+            params=params or None,
+        )
+        return DecompositionResult(**data)
+
+    # ------------------------------------------------------------------ #
+    # Document operations (Enterprise)
+    # ------------------------------------------------------------------ #
+
+    def upload_document(
+        self,
+        file_data: bytes,
+        filename: str,
+        *,
+        target_context_id: str = "_default",
+        chunking_strategy: str = "page",
+        chunk_size: int = 4096,
+        chunk_overlap: int = 200,
+        importance: float = 0.5,
+        retain_original: bool = True,
+    ) -> tuple[DocumentInfo, JobInfo]:
+        """Upload a document for ingestion (Enterprise)."""
+        client = self._ensure_client()
+
+        try:
+            response = client.post(
+                "/documents",
+                files={"file": (filename, file_data)},
+                data={
+                    "target_context_id": target_context_id,
+                    "chunking_strategy": chunking_strategy,
+                    "chunk_size": str(chunk_size),
+                    "chunk_overlap": str(chunk_overlap),
+                    "importance": str(importance),
+                    "retain_original": str(retain_original).lower(),
+                },
+            )
+
+            if response.status_code == 404:
+                raise EnterpriseRequiredError(feature="Document ingestion")
+            response.raise_for_status()
+
+            data = response.json()
+            return (
+                DocumentInfo(**data["document"]),
+                JobInfo(**data["job"]),
+            )
+        except EnterpriseRequiredError:
+            raise
+        except httpx.HTTPStatusError as exc:
+            raise MemoryLayerError(
+                str(exc), status_code=exc.response.status_code,
+            )
+
+    def list_documents(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[DocumentInfo], int]:
+        """List documents in the workspace."""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
+
+        data = self._request(
+            "GET", "/documents", params=params,
+            enterprise_feature="Document management",
+        )
+        docs = [DocumentInfo(**d) for d in data.get("documents", [])]
+        return docs, data.get("total_count", len(docs))
+
+    def get_document(self, document_id: str) -> DocumentInfo:
+        """Get document metadata and processing status."""
+        data = self._request(
+            "GET", f"/documents/{document_id}",
+            enterprise_feature="Document management",
+        )
+        return DocumentInfo(**data)
+
+    def delete_document(
+        self, document_id: str, *, delete_memories: bool = False,
+    ) -> None:
+        """Delete a document and optionally its extracted memories."""
+        self._request(
+            "DELETE", f"/documents/{document_id}",
+            params={"delete_memories": str(delete_memories).lower()},
+            enterprise_feature="Document management",
+        )
+
+    def search_document_pages(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        doc_ids: Optional[list[str]] = None,
+    ) -> PageSearchResult:
+        """Search document pages using ColPali MaxSim (Enterprise)."""
+        payload: dict[str, Any] = {"query": query, "limit": limit}
+        if doc_ids:
+            payload["doc_ids"] = doc_ids
+
+        data = self._request(
+            "POST", "/documents/search", json=payload,
+            enterprise_feature="Document page search",
+        )
+        return PageSearchResult(
+            pages=[DocumentPage(**p) for p in data.get("pages", [])],
+            total_count=data.get("total_count", 0),
+            query=data.get("query", query),
+        )
+
+    def get_document_pages(self, document_id: str) -> list[DocumentPage]:
+        """Get all pages for a document."""
+        data = self._request(
+            "GET", f"/documents/{document_id}/pages",
+            enterprise_feature="Document pages",
+        )
+        return [DocumentPage(**p) for p in data.get("pages", [])]
+
+    def get_page_image(self, document_id: str, page_id: str) -> bytes:
+        """Get a page image as raw PNG bytes (Enterprise)."""
+        client = self._ensure_client()
+
+        try:
+            response = client.get(
+                f"/documents/{document_id}/pages/{page_id}/image",
+            )
+            if response.status_code == 404:
+                raise EnterpriseRequiredError(feature="Document page images")
+            response.raise_for_status()
+            return response.content
+        except EnterpriseRequiredError:
+            raise
+        except httpx.HTTPStatusError as exc:
+            raise MemoryLayerError(
+                str(exc), status_code=exc.response.status_code,
+            )
+
+    def get_job(self, job_id: str) -> JobInfo:
+        """Get ingestion job status and progress."""
+        data = self._request(
+            "GET", f"/documents/jobs/{job_id}",
+            enterprise_feature="Document ingestion jobs",
+        )
+        return JobInfo(**data)
+
+    def list_jobs(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[JobInfo]:
+        """List ingestion jobs in the workspace."""
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+
+        data = self._request(
+            "GET", "/documents/jobs", params=params,
+            enterprise_feature="Document ingestion jobs",
+        )
+        return [JobInfo(**j) for j in data.get("jobs", [])]
+
+    def cancel_job(self, job_id: str) -> None:
+        """Cancel a queued or running ingestion job."""
+        self._request(
+            "POST", f"/documents/jobs/{job_id}/cancel",
+            enterprise_feature="Document ingestion jobs",
+        )
+
+    def reprocess_document(
+        self,
+        document_id: str,
+        *,
+        target_context_id: Optional[str] = None,
+        chunking_strategy: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
+        importance: Optional[float] = None,
+    ) -> JobInfo:
+        """Reprocess a document with different extraction options."""
+        payload: dict[str, Any] = {}
+        if target_context_id is not None:
+            payload["target_context_id"] = target_context_id
+        if chunking_strategy is not None:
+            payload["chunking_strategy"] = chunking_strategy
+        if chunk_size is not None:
+            payload["chunk_size"] = chunk_size
+        if chunk_overlap is not None:
+            payload["chunk_overlap"] = chunk_overlap
+        if importance is not None:
+            payload["importance"] = importance
+
+        data = self._request(
+            "POST", f"/documents/{document_id}/reprocess",
+            json=payload if payload else None,
+            enterprise_feature="Document reprocessing",
+        )
+        return JobInfo(**data)
 
     def export_workspace(
         self,

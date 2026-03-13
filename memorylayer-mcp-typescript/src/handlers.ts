@@ -557,4 +557,77 @@ export class MCPToolHandlers {
             message: "Checkpoint completed"
         }, null, 2);
     }
+
+    // ============================================================================
+    // Chat History Handlers
+    // ============================================================================
+
+    async handleChatThreadCreate(args: Record<string, unknown>): Promise<string> {
+        const result = await this.client.chatThreadCreate({
+            thread_id: args.thread_id as string | undefined,
+            user_id: args.user_id as string | undefined,
+            observer_id: args.observer_id as string | undefined,
+            subject_id: args.subject_id as string | undefined,
+            title: args.title as string | undefined,
+            metadata: args.metadata as Record<string, unknown> | undefined,
+        });
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleChatThreadAppend(args: Record<string, unknown>): Promise<string> {
+        const threadId = args.thread_id as string;
+        if (!threadId) {
+            throw new Error("thread_id is required");
+        }
+        const messages = args.messages as Array<{ role: string; content: unknown; metadata?: Record<string, unknown> }>;
+        if (!messages || !Array.isArray(messages)) {
+            throw new Error("messages is required and must be an array");
+        }
+
+        const result = await this.client.chatThreadAppend(threadId, messages);
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleChatThreadGet(args: Record<string, unknown>): Promise<string> {
+        const threadId = args.thread_id as string;
+        if (!threadId) {
+            throw new Error("thread_id is required");
+        }
+
+        const result = await this.client.chatThreadGet(threadId, {
+            limit: args.limit as number | undefined,
+            offset: args.offset as number | undefined,
+            order: args.order as "asc" | "desc" | undefined,
+        });
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleChatThreadList(args: Record<string, unknown>): Promise<string> {
+        const result = await this.client.chatThreadList({
+            user_id: args.user_id as string | undefined,
+            limit: args.limit as number | undefined,
+            offset: args.offset as number | undefined,
+        });
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleChatThreadDecompose(args: Record<string, unknown>): Promise<string> {
+        const threadId = args.thread_id as string;
+        if (!threadId) {
+            throw new Error("thread_id is required");
+        }
+
+        const result = await this.client.chatThreadDecompose(threadId);
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleChatThreadDelete(args: Record<string, unknown>): Promise<string> {
+        const threadId = args.thread_id as string;
+        if (!threadId) {
+            throw new Error("thread_id is required");
+        }
+
+        const result = await this.client.chatThreadDelete(threadId);
+        return JSON.stringify(result, null, 2);
+    }
 }

@@ -7,10 +7,14 @@ import type {
   ContextExecOptions, ContextExecResult, ContextInspectOptions, ContextInspectResult,
   ContextLoadOptions, ContextLoadResult, ContextInjectOptions, ContextInjectResult,
   ContextQueryOptions, ContextQueryResult, ContextRlmOptions, ContextRlmResult,
-  ContextStatusResult, WorkspaceExportData, WorkspaceImportResult
+  ContextStatusResult, WorkspaceExportData, WorkspaceImportResult,
+  DocumentInfo, JobInfo, DocumentUploadOptions, DocumentUploadResponse,
+  PageSearchOptions, PageSearchResponse, PageListResponse, DocumentListResponse,
+  ChatThread, ThreadCreateOptions, ThreadListOptions, MessageAppendInput,
+  ThreadWithMessagesResponse, MessageListResponse, MessagesAppendResponse, DecomposeResponse,
 } from "./types.js";
 import { RelationshipType } from "./types.js";
-import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError } from "./errors.js";
+import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError, EnterpriseRequiredError } from "./errors.js";
 
 export class MemoryLayerClient {
   private baseUrl: string;
@@ -53,7 +57,8 @@ export class MemoryLayerClient {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    enterpriseFeature?: string,
   ): Promise<T> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -83,7 +88,7 @@ export class MemoryLayerClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        await this.handleError(response);
+        await this.handleError(response, enterpriseFeature);
       }
 
       if (response.status === 204) {
@@ -97,7 +102,7 @@ export class MemoryLayerClient {
     }
   }
 
-  private async handleError(response: Response): Promise<never> {
+  private async handleError(response: Response, enterpriseFeature?: string): Promise<never> {
     const body = await response.json().catch(() => ({})) as any;
     const rawDetail = body.message ?? body.detail ?? response.statusText;
     const message = typeof rawDetail === 'string'
@@ -110,6 +115,9 @@ export class MemoryLayerClient {
       case 403:
         throw new AuthorizationError(message);
       case 404:
+        if (enterpriseFeature) {
+          throw new EnterpriseRequiredError(enterpriseFeature);
+        }
         throw new NotFoundError(message);
       case 400:
       case 422:
@@ -727,5 +735,337 @@ export class MemoryLayerClient {
 
   async contextCheckpoint(): Promise<void> {
     await this.request<void>("POST", "/v1/context/checkpoint");
+  }
+
+  // ------------------------------------------------------------------ //
+  // Document operations (Enterprise)
+  // ------------------------------------------------------------------ //
+
+  /**
+   * Upload a document for ingestion.
+   *
+   * Requires MemoryLayer Enterprise. On OSS servers this throws
+   * `EnterpriseRequiredError`.
+   */
+  async uploadDocument(
+    file: Blob | File,
+    filename: string,
+    options: DocumentUploadOptions = {},
+  ): Promise<DocumentUploadResponse> {
+    const formData = new FormData();
+    formData.append("file", file, filename);
+    if (options.targetContextId) formData.append("target_context_id", options.targetContextId);
+    if (options.chunkingStrategy) formData.append("chunking_strategy", options.chunkingStrategy);
+    if (options.chunkSize !== undefined) formData.append("chunk_size", String(options.chunkSize));
+    if (options.chunkOverlap !== undefined) formData.append("chunk_overlap", String(options.chunkOverlap));
+    if (options.importance !== undefined) formData.append("importance", String(options.importance));
+    if (options.retainOriginal !== undefined) formData.append("retain_original", String(options.retainOriginal));
+
+    const headers: Record<string, string> = {};
+    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
+    if (this.sessionId) headers["X-Session-ID"] = this.sessionId;
+    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+
+    const url = `${this.baseUrl}/v1/documents`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        await this.handleError(response, "Document ingestion");
+      }
+      return await response.json() as DocumentUploadResponse;
+    } catch (error) {
+      if (error instanceof MemoryLayerError) throw error;
+      throw new MemoryLayerError(`Document upload failed: ${error}`);
+    }
+  }
+
+  /**
+   * List documents in the workspace.
+   */
+  async listDocuments(options?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<DocumentListResponse> {
+    const params = new URLSearchParams();
+    if (options?.status) params.set("status", options.status);
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.request<DocumentListResponse>(
+      "GET",
+      `/v1/documents${query ? `?${query}` : ""}`,
+      undefined,
+      "Document management",
+    );
+  }
+
+  /**
+   * Get document metadata and processing status.
+   */
+  async getDocument(documentId: string): Promise<DocumentInfo> {
+    const response = await this.request<{ document: DocumentInfo } & DocumentInfo>(
+      "GET",
+      `/v1/documents/${documentId}`,
+      undefined,
+      "Document management",
+    );
+    return response;
+  }
+
+  /**
+   * Delete a document and optionally its extracted memories.
+   */
+  async deleteDocument(documentId: string, deleteMemories = false): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/v1/documents/${documentId}?delete_memories=${deleteMemories}`,
+      undefined,
+      "Document management",
+    );
+  }
+
+  /**
+   * Search document pages using ColPali MaxSim visual similarity.
+   *
+   * Requires MemoryLayer Enterprise.
+   */
+  async searchDocumentPages(query: string, options: PageSearchOptions = {}): Promise<PageSearchResponse> {
+    const body = {
+      query,
+      limit: options.limit ?? 10,
+      doc_ids: options.docIds,
+    };
+    return this.request<PageSearchResponse>(
+      "POST",
+      "/v1/documents/search",
+      body,
+      "Document page search",
+    );
+  }
+
+  /**
+   * Get all pages for a document.
+   */
+  async getDocumentPages(documentId: string): Promise<PageListResponse> {
+    return this.request<PageListResponse>(
+      "GET",
+      `/v1/documents/${documentId}/pages`,
+      undefined,
+      "Document pages",
+    );
+  }
+
+  /**
+   * Get a page image as a Blob.
+   */
+  async getPageImage(documentId: string, pageId: string): Promise<Blob> {
+    const headers: Record<string, string> = {};
+    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
+    if (this.sessionId) headers["X-Session-ID"] = this.sessionId;
+    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+
+    const url = `${this.baseUrl}/v1/documents/${documentId}/pages/${pageId}/image`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, { method: "GET", headers, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        await this.handleError(response, "Document page images");
+      }
+      return await response.blob();
+    } catch (error) {
+      if (error instanceof MemoryLayerError) throw error;
+      throw new MemoryLayerError(`Page image request failed: ${error}`);
+    }
+  }
+
+  /**
+   * Get ingestion job status.
+   */
+  async getJob(jobId: string): Promise<JobInfo> {
+    return this.request<JobInfo>(
+      "GET",
+      `/v1/documents/jobs/${jobId}`,
+      undefined,
+      "Document ingestion jobs",
+    );
+  }
+
+  /**
+   * List ingestion jobs in the workspace.
+   */
+  async listJobs(options?: { status?: string; limit?: number }): Promise<{ jobs: JobInfo[] }> {
+    const params = new URLSearchParams();
+    if (options?.status) params.set("status", options.status);
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return this.request<{ jobs: JobInfo[] }>(
+      "GET",
+      `/v1/documents/jobs${query ? `?${query}` : ""}`,
+      undefined,
+      "Document ingestion jobs",
+    );
+  }
+
+  /**
+   * Cancel a running ingestion job.
+   */
+  async cancelJob(jobId: string): Promise<void> {
+    await this.request<void>(
+      "POST",
+      `/v1/documents/jobs/${jobId}/cancel`,
+      undefined,
+      "Document ingestion jobs",
+    );
+  }
+
+  /**
+   * Reprocess a document with optionally different extraction options.
+   */
+  async reprocessDocument(documentId: string, options?: Partial<DocumentUploadOptions>): Promise<JobInfo> {
+    const body: Record<string, unknown> = {};
+    if (options?.targetContextId) body.target_context_id = options.targetContextId;
+    if (options?.chunkingStrategy) body.chunking_strategy = options.chunkingStrategy;
+    if (options?.chunkSize !== undefined) body.chunk_size = options.chunkSize;
+    if (options?.chunkOverlap !== undefined) body.chunk_overlap = options.chunkOverlap;
+    if (options?.importance !== undefined) body.importance = options.importance;
+    return this.request<JobInfo>(
+      "POST",
+      `/v1/documents/${documentId}/reprocess`,
+      Object.keys(body).length ? body : undefined,
+      "Document reprocessing",
+    );
+  }
+
+  // ------------------------------------------------------------------ //
+  // Chat History operations
+  // ------------------------------------------------------------------ //
+
+  async createThread(options: ThreadCreateOptions = {}): Promise<ChatThread> {
+    const body = {
+      thread_id: options.threadId,
+      workspace_id: options.workspaceId ?? this.workspaceId,
+      user_id: options.userId,
+      context_id: options.contextId,
+      observer_id: options.observerId,
+      subject_id: options.subjectId,
+      title: options.title,
+      metadata: options.metadata,
+      expires_at: options.expiresAt,
+    };
+    const response = await this.request<{ thread: ChatThread }>("POST", "/v1/threads", body);
+    return response.thread;
+  }
+
+  async listThreads(options: ThreadListOptions = {}): Promise<ChatThread[]> {
+    const params = new URLSearchParams();
+    const wsId = options.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    if (options.userId) params.set("user_id", options.userId);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    const response = await this.request<{ threads: ChatThread[]; total_count: number }>(
+      "GET",
+      `/v1/threads${query ? `?${query}` : ""}`
+    );
+    return response.threads;
+  }
+
+  async getThread(threadId: string, workspaceId?: string): Promise<ChatThread> {
+    const params = new URLSearchParams();
+    const wsId = workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    const response = await this.request<{ thread: ChatThread }>(
+      "GET",
+      `/v1/threads/${threadId}${query ? `?${query}` : ""}`
+    );
+    return response.thread;
+  }
+
+  async getThreadFull(
+    threadId: string,
+    options?: { workspaceId?: string; limit?: number; offset?: number; order?: "asc" | "desc" }
+  ): Promise<ThreadWithMessagesResponse> {
+    const params = new URLSearchParams();
+    const wsId = options?.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.offset !== undefined) params.set("offset", String(options.offset));
+    if (options?.order) params.set("order", options.order);
+    const query = params.toString();
+    return this.request<ThreadWithMessagesResponse>(
+      "GET",
+      `/v1/threads/${threadId}/full${query ? `?${query}` : ""}`
+    );
+  }
+
+  async deleteThread(threadId: string, workspaceId?: string): Promise<void> {
+    const params = new URLSearchParams();
+    const wsId = workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    await this.request<void>(
+      "DELETE",
+      `/v1/threads/${threadId}${query ? `?${query}` : ""}`
+    );
+  }
+
+  async appendMessages(
+    threadId: string,
+    messages: MessageAppendInput[],
+    workspaceId?: string
+  ): Promise<MessagesAppendResponse> {
+    const params = new URLSearchParams();
+    const wsId = workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    return this.request<MessagesAppendResponse>(
+      "POST",
+      `/v1/threads/${threadId}/messages${query ? `?${query}` : ""}`,
+      { messages }
+    );
+  }
+
+  async getMessages(
+    threadId: string,
+    options?: { workspaceId?: string; limit?: number; offset?: number; afterIndex?: number; order?: "asc" | "desc" }
+  ): Promise<MessageListResponse> {
+    const params = new URLSearchParams();
+    const wsId = options?.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.offset !== undefined) params.set("offset", String(options.offset));
+    if (options?.afterIndex !== undefined) params.set("after_index", String(options.afterIndex));
+    if (options?.order) params.set("order", options.order);
+    const query = params.toString();
+    return this.request<MessageListResponse>(
+      "GET",
+      `/v1/threads/${threadId}/messages${query ? `?${query}` : ""}`
+    );
+  }
+
+  async decomposeThread(threadId: string, workspaceId?: string): Promise<DecomposeResponse> {
+    const params = new URLSearchParams();
+    const wsId = workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    return this.request<DecomposeResponse>(
+      "POST",
+      `/v1/threads/${threadId}/decompose${query ? `?${query}` : ""}`
+    );
   }
 }

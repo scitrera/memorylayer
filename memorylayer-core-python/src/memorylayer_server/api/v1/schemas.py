@@ -32,6 +32,8 @@ class MemoryCreateRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
     associations: list[str] = Field(default_factory=list, description="Memory IDs to associate with")
     context_id: Optional[str] = Field(None, description="Target memory context")
+    observer_id: Optional[str] = Field(None, description="Entity doing the observing/remembering (agent ID, user ID, etc.)")
+    subject_id: Optional[str] = Field(None, description="Entity this memory is about")
 
 
 class MemoryUpdateRequest(BaseModel):
@@ -55,6 +57,8 @@ class MemoryRecallRequest(BaseModel):
     subtypes: list[MemorySubtype] = Field(default_factory=list, description="Filter by domain subtypes")
     tags: list[str] = Field(default_factory=list, description="Filter by tags (AND logic)")
     context_id: Optional[str] = Field(None, description="Filter by memory context")
+    observer_id: Optional[str] = Field(None, description="Filter by observer entity")
+    subject_id: Optional[str] = Field(None, description="Filter by subject entity")
     mode: Optional[RecallMode] = Field(None, description="Retrieval strategy (None = server default)")
     tolerance: Optional[SearchTolerance] = Field(None, description="Search precision (None = server default)")
     limit: int = Field(10, ge=1, le=100, description="Maximum memories to return")
@@ -84,6 +88,8 @@ class MemoryReflectRequest(BaseModel):
     subtypes: list[MemorySubtype] = Field(default_factory=list, description="Filter by subtypes")
     tags: list[str] = Field(default_factory=list, description="Filter by tags")
     context_id: Optional[str] = Field(None, description="Filter by memory context")
+    observer_id: Optional[str] = Field(None, description="Filter by observer entity")
+    subject_id: Optional[str] = Field(None, description="Filter by subject entity")
 
 
 class MemoryDecayRequest(BaseModel):
@@ -524,6 +530,8 @@ class MemoryExportItem(BaseModel):
     abstract: Optional[str] = None
     overview: Optional[str] = None
     session_id: Optional[str] = None
+    observer_id: Optional[str] = None
+    subject_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -561,3 +569,133 @@ class WorkspaceImportResult(BaseModel):
     skipped_duplicates: int = 0
     errors: int = 0
     details: list[str] = Field(default_factory=list)
+
+
+# ============================================
+# Entity API Schemas
+# ============================================
+
+class EntityDeriveRequest(BaseModel):
+    """Request to trigger inference derivation for an entity."""
+
+    workspace_id: Optional[str] = Field(None, description="Workspace override (defaults to _default)")
+    observer_id: Optional[str] = Field(None, description="Optional observer perspective filter")
+    force: bool = Field(False, description="Force re-derivation even if recent insights exist")
+
+
+class EntityDeriveResponse(BaseModel):
+    """Response from inference derivation."""
+
+    subject_id: str = Field(..., description="Entity that was analyzed")
+    workspace_id: str = Field(..., description="Workspace")
+    insights_created: int = Field(0, description="Number of new insights derived")
+    insights_updated: int = Field(0, description="Number of existing insights updated")
+    source_memory_count: int = Field(0, description="Number of source memories analyzed")
+    insights: list[Memory] = Field(default_factory=list, description="Derived insight memories")
+
+
+class EntityCardResponse(BaseModel):
+    """Cached entity profile card - synthesized view of an entity."""
+
+    entity_id: str = Field(..., description="Entity identifier")
+    workspace_id: str = Field(..., description="Workspace")
+    reflection: str = Field(..., description="Synthesized entity profile")
+    insights: list[Memory] = Field(default_factory=list, description="Derived insights about the entity")
+    source_memories: list[str] = Field(default_factory=list, description="Source memory IDs")
+    confidence: float = Field(0.0, description="Confidence in the profile")
+    cached: bool = Field(False, description="Whether this was served from cache")
+    generated_at: Optional[str] = Field(None, description="When this card was generated/last refreshed")
+
+
+class EntityInsightsResponse(BaseModel):
+    """Response for listing entity insights."""
+
+    entity_id: str = Field(..., description="Entity identifier")
+    workspace_id: str = Field(..., description="Workspace")
+    insights: list[Memory] = Field(default_factory=list, description="Derived insights")
+    total_count: int = Field(0, description="Total insights found")
+
+
+# ============================================
+# Chat History API Schemas
+# ============================================
+
+from memorylayer_server.models.chat import (
+    ChatThread, ChatMessage, ChatMessageContent, ChatThreadWithMessages,
+)
+
+
+class ThreadCreateRequest(BaseModel):
+    """Request schema for creating a chat thread."""
+
+    thread_id: Optional[str] = Field(None, description="Client-provided thread ID (auto-generated if omitted)")
+    workspace_id: Optional[str] = Field(None, description="Workspace override (defaults to session workspace or _default)")
+    user_id: Optional[str] = Field(None, description="User scope for this thread")
+    context_id: Optional[str] = Field(None, description="Context within workspace (defaults to _default)")
+    observer_id: Optional[str] = Field(None, description="Observer entity ID (typically the AI agent)")
+    subject_id: Optional[str] = Field(None, description="Subject entity ID (typically the human user)")
+    title: Optional[str] = Field(None, description="Optional display title")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
+    expires_at: Optional[datetime] = Field(None, description="Optional expiration (None = permanent)")
+
+
+class ThreadResponse(BaseModel):
+    """Response schema for a single chat thread."""
+
+    thread: ChatThread
+
+
+class ThreadListResponse(BaseModel):
+    """Response schema for listing chat threads."""
+
+    threads: list[ChatThread]
+    total_count: int
+
+
+class MessageCreateRequest(BaseModel):
+    """A single message in an append request."""
+
+    role: str = Field(..., description="Message role: user, assistant, system, tool")
+    content: Any = Field(..., description="Message content — string or structured content blocks")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
+
+
+class MessagesAppendRequest(BaseModel):
+    """Request schema for appending messages to a thread."""
+
+    messages: list[MessageCreateRequest] = Field(..., min_length=1, description="Messages to append")
+
+
+class MessagesAppendResponse(BaseModel):
+    """Response schema for appended messages."""
+
+    messages: list[ChatMessage]
+    thread_id: str
+    new_message_count: int = Field(..., description="Total message count after append")
+
+
+class MessageListResponse(BaseModel):
+    """Response schema for listing messages."""
+
+    messages: list[ChatMessage]
+    thread_id: str
+    total_count: int
+
+
+class ThreadWithMessagesResponse(BaseModel):
+    """Response schema for full thread retrieval with messages."""
+
+    thread: ChatThread
+    messages: list[ChatMessage]
+    total_messages: int
+
+
+class ThreadDecomposeResponse(BaseModel):
+    """Response schema for decomposition trigger."""
+
+    thread_id: str
+    workspace_id: str
+    messages_processed: int
+    memories_created: int
+    from_index: int
+    to_index: int

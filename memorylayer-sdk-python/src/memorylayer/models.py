@@ -129,3 +129,134 @@ class MemorySpace(BaseModel):
     description: str | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+
+
+# ------------------------------------------------------------------ #
+# Chat history models
+# ------------------------------------------------------------------ #
+
+
+class ChatMessageContent(BaseModel):
+    """Structured content block within a chat message."""
+
+    type: str
+    text: str | None = None
+    data: dict[str, Any] | None = None
+
+
+class ChatMessage(BaseModel):
+    """A single message in a chat thread."""
+
+    id: str
+    thread_id: str
+    message_index: int
+    role: str
+    content: str | list[ChatMessageContent]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ChatThread(BaseModel):
+    """A conversation thread."""
+
+    id: str
+    workspace_id: str
+    tenant_id: str = "_default"
+    user_id: str | None = None
+    context_id: str = "_default"
+    observer_id: str | None = None
+    subject_id: str | None = None
+    title: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    message_count: int = 0
+    last_decomposed_at: datetime | None = None
+    last_decomposed_index: int = 0
+    expires_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatThreadWithMessages(BaseModel):
+    """Thread with messages inlined."""
+
+    thread: ChatThread
+    messages: list[ChatMessage] = Field(default_factory=list)
+    total_messages: int = 0
+
+
+class DecompositionResult(BaseModel):
+    """Result from triggering decomposition."""
+
+    thread_id: str
+    workspace_id: str
+    messages_processed: int = 0
+    memories_created: int = 0
+    from_index: int = 0
+    to_index: int = 0
+
+
+# ------------------------------------------------------------------ #
+# Document models (Enterprise)
+# ------------------------------------------------------------------ #
+
+
+class DocumentPage(BaseModel):
+    """A page from an ingested document (Enterprise)."""
+
+    id: str
+    document_id: str
+    workspace_id: str
+    page_no: int
+    image_storage_path: str | None = None
+    transcript: str | None = None
+    transcript_model: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    relevance_score: float | None = None
+
+
+class DocumentInfo(BaseModel):
+    """Document metadata returned from the API (Enterprise)."""
+
+    id: str
+    workspace_id: str
+    filename: str
+    document_type: str
+    content_hash: str
+    size_bytes: int
+    mime_type: str | None = None
+    status: str
+    target_context_id: str = "_default"
+    page_count: int = 0
+    chunk_count: int = 0
+    memory_ids: list[str] = Field(default_factory=list)
+    storage_path: str | None = None
+    retain_original: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    processing_started_at: datetime | None = None
+    processing_completed_at: datetime | None = None
+
+
+class JobInfo(BaseModel):
+    """Ingestion job status (Enterprise)."""
+
+    id: str
+    workspace_id: str
+    document_ids: list[str] = Field(default_factory=list)
+    status: str
+    progress_percent: int = 0
+    documents_processed: int = 0
+    total_memories_created: int = 0
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class PageSearchResult(BaseModel):
+    """Result from a document page search (Enterprise)."""
+
+    pages: list[DocumentPage]
+    total_count: int
+    query: str

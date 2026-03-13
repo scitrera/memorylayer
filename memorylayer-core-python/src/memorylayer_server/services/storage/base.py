@@ -14,6 +14,7 @@ from ...models.association import Association, AssociateInput, GraphQueryInput, 
 from ...models.workspace import Workspace, Context
 if TYPE_CHECKING:
     from ...models import Session, WorkingMemory
+    from ...models.chat import ChatThread, ChatMessage, MessageInput
 
 from .._constants import EXT_STORAGE_BACKEND
 
@@ -79,6 +80,8 @@ class StorageBackend(ABC):
             subtypes: Optional[list[str]] = None,
             tags: Optional[list[str]] = None,
             include_archived: bool = False,
+            observer_id: Optional[str] = None,
+            subject_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search, returns (memory, relevance_score) tuples."""
         pass
@@ -355,6 +358,73 @@ class StorageBackend(ABC):
     ) -> Optional['ContradictionRecord']:
         """Resolve a contradiction. Override in subclasses."""
         return None
+
+    # Chat history operations (non-abstract with default no-op implementations)
+
+    async def create_thread(self, thread: 'ChatThread') -> 'ChatThread':
+        """Store a new chat thread. Override in subclasses."""
+        return thread
+
+    async def get_thread(self, workspace_id: str, thread_id: str) -> Optional['ChatThread']:
+        """Get chat thread by ID. Override in subclasses."""
+        return None
+
+    async def list_threads(
+        self,
+        workspace_id: str,
+        user_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list['ChatThread']:
+        """List chat threads in a workspace. Override in subclasses."""
+        return []
+
+    async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> Optional['ChatThread']:
+        """Update thread fields. Override in subclasses."""
+        return None
+
+    async def delete_thread(self, workspace_id: str, thread_id: str) -> bool:
+        """Delete a thread and all its messages. Override in subclasses."""
+        return False
+
+    async def append_messages(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        messages: list['MessageInput'],
+    ) -> list['ChatMessage']:
+        """Append messages to a thread. Override in subclasses."""
+        return []
+
+    async def get_messages(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        after_index: Optional[int] = None,
+        order: str = "asc",
+    ) -> list['ChatMessage']:
+        """Get messages from a thread. Override in subclasses."""
+        return []
+
+    async def get_message_count(self, workspace_id: str, thread_id: str) -> int:
+        """Get total message count for a thread. Override in subclasses."""
+        return 0
+
+    async def list_expired_threads(self, limit: int = 100) -> list['ChatThread']:
+        """List expired chat threads across all workspaces.
+
+        Enables efficient cleanup of expired threads via background tasks.
+
+        Args:
+            limit: Maximum number of threads to return
+
+        Returns:
+            List of expired ChatThread objects
+        """
+        # Default implementation: empty list (subclasses should override)
+        return []
 
 
 # noinspection PyAbstractClass

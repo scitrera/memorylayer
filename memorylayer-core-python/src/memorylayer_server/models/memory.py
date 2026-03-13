@@ -38,6 +38,9 @@ class MemorySubtype(str, Enum):
     EVENT = "event"  # Significant events or milestones
     DIRECTIVE = "directive"  # User instructions/constraints ("always do X", "never do Y")
 
+    # v3 additions for entity attribution and inference
+    INFERENCE = "inference"  # Derived insight/conclusion from patterns across memories
+
 
 class RecallMode(str, Enum):
     """Retrieval strategy for memory queries."""
@@ -83,6 +86,10 @@ class Memory(BaseModel):
     context_id: str = Field("_default", description="Context for logical grouping (default: _default)")
     user_id: Optional[str] = Field(None, description="Optional user scope")
 
+    # Entity attribution (v3) - "who remembers what about whom"
+    observer_id: Optional[str] = Field(None, description="Entity doing the observing/remembering (agent ID, user ID, etc.)")
+    subject_id: Optional[str] = Field(None, description="Entity the memory is about")
+
     # Content
     content: str = Field(..., description="The memory content")
     content_hash: str = Field(..., description="SHA-256 hash for deduplication")
@@ -104,6 +111,11 @@ class Memory(BaseModel):
     overview: Optional[str] = Field(None, description="High-level overview (tier 3)")
     session_id: Optional[str] = Field(None, description="Associated session ID")
     source_memory_id: Optional[str] = Field(None, description="Parent memory this fact was decomposed from")
+
+    # Document provenance - traces memory back to source document/page
+    source_document_id: Optional[str] = Field(None, description="Document this memory was derived from")
+    source_page_id: Optional[str] = Field(None, description="Document page this memory was extracted from")
+
     category: Optional[str] = Field(None, description="User-defined category")
 
     # Vector embedding (optional - computed async or stored separately)
@@ -160,6 +172,14 @@ class RememberInput(BaseModel):
     context_id: Optional[str] = Field(None, description="Target context (default: _default)")
     user_id: Optional[str] = Field(None, description="User scope override")
 
+    # Entity attribution (v3)
+    observer_id: Optional[str] = Field(None, description="Entity doing the observing/remembering")
+    subject_id: Optional[str] = Field(None, description="Entity this memory is about")
+
+    # Document provenance
+    source_document_id: Optional[str] = Field(None, description="Source document ID for provenance tracking")
+    source_page_id: Optional[str] = Field(None, description="Source page ID for provenance tracking")
+
 
 class RecallInput(BaseModel):
     """Request model for querying memories."""
@@ -172,6 +192,8 @@ class RecallInput(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Filter by tags (AND logic)")
     context_id: Optional[str] = Field(None, description="Filter by context")
     user_id: Optional[str] = Field(None, description="Filter by user")
+    observer_id: Optional[str] = Field(None, description="Filter by observer entity")
+    subject_id: Optional[str] = Field(None, description="Filter by subject entity")
     include_global: bool = Field(True, description="Include _global workspace in search")
 
     # Retrieval settings
@@ -253,6 +275,8 @@ class ReflectInput(BaseModel):
     tags: list[str] = Field(default_factory=list)
     context_id: Optional[str] = None
     user_id: Optional[str] = None
+    observer_id: Optional[str] = None
+    subject_id: Optional[str] = None
 
 
 class ReflectResult(BaseModel):

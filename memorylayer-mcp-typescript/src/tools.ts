@@ -562,6 +562,99 @@ export const CONTEXT_ENVIRONMENT_TOOLS = [
 ];
 
 /**
+ * Chat history tools for storing and managing conversation threads.
+ */
+export const CHAT_TOOLS = [
+  {
+    name: "chat_thread_create",
+    description: "Create a new chat thread for storing conversation history. Threads persist messages over time and can auto-decompose into memories.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        thread_id: { type: "string", description: "Client-provided thread ID (auto-generated if omitted)" },
+        user_id: { type: "string", description: "User who owns this conversation" },
+        observer_id: { type: "string", description: "Observer entity ID (typically the AI agent)" },
+        subject_id: { type: "string", description: "Subject entity ID (typically the human user)" },
+        title: { type: "string", description: "Optional display title" },
+        metadata: { type: "object", description: "Arbitrary metadata" }
+      }
+    }
+  },
+  {
+    name: "chat_thread_append",
+    description: "Append messages to a chat thread. Messages are stored persistently and will be decomposed into memories when threshold is reached.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        thread_id: { type: "string", description: "Thread to append to" },
+        messages: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              role: { type: "string", description: "Message role: user, assistant, system, tool" },
+              content: { description: "Message content (string or structured blocks)" },
+              metadata: { type: "object", description: "Optional metadata" }
+            },
+            required: ["role", "content"]
+          },
+          description: "Messages to append"
+        }
+      },
+      required: ["thread_id", "messages"]
+    }
+  },
+  {
+    name: "chat_thread_get",
+    description: "Get a chat thread with its messages. Returns thread metadata and paginated messages.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        thread_id: { type: "string", description: "Thread ID to retrieve" },
+        limit: { type: "integer", default: 100, description: "Max messages to return" },
+        offset: { type: "integer", default: 0, description: "Message pagination offset" },
+        order: { type: "string", enum: ["asc", "desc"], default: "asc", description: "Message order" }
+      },
+      required: ["thread_id"]
+    }
+  },
+  {
+    name: "chat_thread_list",
+    description: "List chat threads in the workspace, optionally filtered by user.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        user_id: { type: "string", description: "Filter by user ID" },
+        limit: { type: "integer", default: 50, description: "Max threads to return" },
+        offset: { type: "integer", default: 0, description: "Pagination offset" }
+      }
+    }
+  },
+  {
+    name: "chat_thread_decompose",
+    description: "Trigger memory decomposition for a thread's unprocessed messages. Extracts memories from chat history.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        thread_id: { type: "string", description: "Thread to decompose" }
+      },
+      required: ["thread_id"]
+    }
+  },
+  {
+    name: "chat_thread_delete",
+    description: "Delete a chat thread and all its messages.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        thread_id: { type: "string", description: "Thread to delete" }
+      },
+      required: ["thread_id"]
+    }
+  },
+];
+
+/**
  * Tool profiles for different use cases.
  *
  * The "cc" (Claude Code) profile is the recommended default - it provides
@@ -598,6 +691,14 @@ export const TOOL_NAMES = {
   contextRlm: "memory_context_rlm",
   contextStatus: "memory_context_status",
   contextCheckpoint: "memory_context_checkpoint",
+
+  // Chat history
+  chatThreadCreate: "chat_thread_create",
+  chatThreadAppend: "chat_thread_append",
+  chatThreadGet: "chat_thread_get",
+  chatThreadList: "chat_thread_list",
+  chatThreadDecompose: "chat_thread_decompose",
+  chatThreadDelete: "chat_thread_delete",
 } as const;
 
 /**
@@ -644,6 +745,11 @@ export const TOOL_PROFILES: Record<ToolProfile, string[]> = {
     TOOL_NAMES.contextRlm,
     TOOL_NAMES.contextStatus,
     TOOL_NAMES.contextCheckpoint,
+    // Chat history
+    TOOL_NAMES.chatThreadCreate,
+    TOOL_NAMES.chatThreadAppend,
+    TOOL_NAMES.chatThreadGet,
+    TOOL_NAMES.chatThreadList,
   ],
 
   /**
@@ -676,6 +782,13 @@ export const TOOL_PROFILES: Record<ToolProfile, string[]> = {
     TOOL_NAMES.contextRlm,
     TOOL_NAMES.contextStatus,
     TOOL_NAMES.contextCheckpoint,
+    // Chat history
+    TOOL_NAMES.chatThreadCreate,
+    TOOL_NAMES.chatThreadAppend,
+    TOOL_NAMES.chatThreadGet,
+    TOOL_NAMES.chatThreadList,
+    TOOL_NAMES.chatThreadDecompose,
+    TOOL_NAMES.chatThreadDelete,
   ],
 
   /**
@@ -706,7 +819,7 @@ export interface ToolDefinition {
  * Get tools for a given profile.
  */
 export function getToolsForProfile(profile: ToolProfile): ToolDefinition[] {
-  const allTools: ToolDefinition[] = [...TOOLS, ...SESSION_TOOLS, ...CONTEXT_ENVIRONMENT_TOOLS];
+  const allTools: ToolDefinition[] = [...TOOLS, ...SESSION_TOOLS, ...CONTEXT_ENVIRONMENT_TOOLS, ...CHAT_TOOLS];
   const enabledNames = TOOL_PROFILES[profile];
   return allTools.filter(tool => enabledNames.includes(tool.name));
 }

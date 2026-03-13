@@ -311,6 +311,8 @@ class MemoryService:
             associations=input.associations,
             context_id=input.context_id,
             user_id=user_id or input.user_id,
+            observer_id=input.observer_id,
+            subject_id=input.subject_id,
         )
 
         # Store in backend (backend will create Memory object)
@@ -887,6 +889,12 @@ class MemoryService:
 
         # Search memories in current workspace
         include_archived = getattr(input, 'include_archived', False)
+        entity_filters = {}
+        if getattr(input, 'observer_id', None) is not None:
+            entity_filters['observer_id'] = input.observer_id
+        if getattr(input, 'subject_id', None) is not None:
+            entity_filters['subject_id'] = input.subject_id
+
         results = await self.storage.search_memories(
             workspace_id=workspace_id,
             query_embedding=query_embedding,
@@ -897,6 +905,7 @@ class MemoryService:
             subtypes=[s.value for s in input.subtypes] if input.subtypes else None,
             tags=input.tags if input.tags else None,
             include_archived=include_archived,
+            **entity_filters,
         )
 
         # Search _global workspace if enabled and not already searching it
@@ -912,6 +921,7 @@ class MemoryService:
                 subtypes=[s.value for s in input.subtypes] if input.subtypes else None,
                 tags=input.tags if input.tags else None,
                 include_archived=include_archived,
+                **entity_filters,
             )
 
         # Combine results
@@ -1727,6 +1737,12 @@ Top {limit} indices (comma-separated):"""
         # Generate query embedding once
         query_embedding = await self.embedding.embed(query)
 
+        entity_filters = {}
+        if kwargs.get('observer_id') is not None:
+            entity_filters['observer_id'] = kwargs['observer_id']
+        if kwargs.get('subject_id') is not None:
+            entity_filters['subject_id'] = kwargs['subject_id']
+
         # Get memories from current workspace
         workspace_results = await self.storage.search_memories(
             workspace_id=workspace_id,
@@ -1736,6 +1752,7 @@ Top {limit} indices (comma-separated):"""
             types=[t.value for t in recall_input.types] if recall_input.types else None,
             subtypes=[s.value for s in recall_input.subtypes] if recall_input.subtypes else None,
             tags=recall_input.tags if recall_input.tags else None,
+            **entity_filters,
         )
 
         # Get memories from _global if enabled
@@ -1749,6 +1766,7 @@ Top {limit} indices (comma-separated):"""
                 types=[t.value for t in recall_input.types] if recall_input.types else None,
                 subtypes=[s.value for s in recall_input.subtypes] if recall_input.subtypes else None,
                 tags=recall_input.tags if recall_input.tags else None,
+                **entity_filters,
             )
 
         # Combine results

@@ -97,6 +97,11 @@ EXT_ONTOLOGY_SERVICE = 'memorylayer-ontology-service'
 EXT_REFLECT_SERVICE = 'memorylayer-reflect-service'
 
 # ============================================
+# Inference (entity insight derivation)
+# ============================================
+EXT_INFERENCE_SERVICE = 'memorylayer-inference-service'
+
+# ============================================
 # Context Environment
 # ============================================
 EXT_CONTEXT_ENVIRONMENT_SERVICE = 'memorylayer-context-environment-service'
@@ -106,3 +111,8 @@ EXT_CONTEXT_ENVIRONMENT_SERVICE = 'memorylayer-context-environment-service'
 # ============================================
 EXT_TASK_SERVICE = 'memorylayer-task-service'
 EXT_MULTI_TASK_HANDLERS = 'memorylayer-multi-task-handlers'
+
+# ============================================
+# Chat History
+# ============================================
+EXT_CHAT_SERVICE = 'memorylayer-chat-service'

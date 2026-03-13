@@ -433,6 +433,94 @@ export interface ContextInjectResult {
   type: string;
 }
 
+// ------------------------------------------------------------------ //
+// Document types (Enterprise)
+// ------------------------------------------------------------------ //
+
+export interface DocumentPage {
+  id: string;
+  document_id: string;
+  workspace_id: string;
+  page_no: number;
+  image_storage_path?: string;
+  transcript?: string;
+  transcript_model?: string;
+  metadata: Record<string, unknown>;
+  created_at?: string;
+  relevance_score?: number;
+}
+
+export interface DocumentInfo {
+  id: string;
+  workspace_id: string;
+  filename: string;
+  document_type: string;
+  content_hash: string;
+  size_bytes: number;
+  mime_type?: string;
+  status: string;
+  target_context_id: string;
+  page_count: number;
+  chunk_count: number;
+  memory_ids: string[];
+  storage_path?: string;
+  retain_original: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  processing_started_at?: string;
+  processing_completed_at?: string;
+}
+
+export interface JobInfo {
+  id: string;
+  workspace_id: string;
+  document_ids: string[];
+  status: string;
+  progress_percent: number;
+  documents_processed: number;
+  total_memories_created: number;
+  errors: Array<Record<string, unknown>>;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface DocumentUploadOptions {
+  targetContextId?: string;
+  chunkingStrategy?: string;
+  chunkSize?: number;
+  chunkOverlap?: number;
+  importance?: number;
+  retainOriginal?: boolean;
+}
+
+export interface DocumentUploadResponse {
+  document: DocumentInfo;
+  job: JobInfo;
+}
+
+export interface PageSearchOptions {
+  limit?: number;
+  docIds?: string[];
+}
+
+export interface PageSearchResponse {
+  pages: DocumentPage[];
+  total_count: number;
+  query: string;
+}
+
+export interface PageListResponse {
+  document_id: string;
+  pages: DocumentPage[];
+  total_count: number;
+}
+
+export interface DocumentListResponse {
+  documents: DocumentInfo[];
+  total_count: number;
+}
+
 export interface ContextQueryOptions {
   maxContextChars?: number;
   resultVar?: string;
@@ -466,4 +554,99 @@ export interface ContextStatusResult {
   variables: Record<string, string>;
   execution_count: number;
   memory_bytes?: number;
+}
+
+// ------------------------------------------------------------------ //
+// Chat History types
+// ------------------------------------------------------------------ //
+
+export interface ChatMessageContent {
+  type: string;
+  text?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface ChatMessage {
+  id: string;
+  thread_id: string;
+  message_index: number;
+  role: string;
+  content: string | ChatMessageContent[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ChatThread {
+  id: string;
+  workspace_id: string;
+  tenant_id: string;
+  user_id?: string;
+  context_id: string;
+  observer_id?: string;
+  subject_id?: string;
+  title?: string;
+  metadata: Record<string, unknown>;
+  message_count: number;
+  last_decomposed_at?: string;
+  last_decomposed_index: number;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThreadCreateOptions {
+  threadId?: string;
+  workspaceId?: string;
+  userId?: string;
+  contextId?: string;
+  observerId?: string;
+  subjectId?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+  expiresAt?: string;
+}
+
+export interface ThreadListOptions {
+  workspaceId?: string;
+  userId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface MessageAppendInput {
+  role: string;
+  content: string | ChatMessageContent[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ThreadWithMessagesResponse {
+  thread: ChatThread;
+  messages: ChatMessage[];
+  total_messages: number;
+}
+
+export interface ThreadListResponse {
+  threads: ChatThread[];
+  total_count: number;
+}
+
+export interface MessageListResponse {
+  messages: ChatMessage[];
+  thread_id: string;
+  total_count: number;
+}
+
+export interface MessagesAppendResponse {
+  messages: ChatMessage[];
+  thread_id: string;
+  new_message_count: number;
+}
+
+export interface DecomposeResponse {
+  thread_id: string;
+  workspace_id: string;
+  messages_processed: number;
+  memories_created: number;
+  from_index: number;
+  to_index: number;
 }

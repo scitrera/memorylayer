@@ -37,6 +37,16 @@ from .session import (
     WorkspaceSummary,
 )
 from .auth import AuthIdentity, RequestContext
+from .chat import (
+    ChatMessage,
+    ChatMessageContent,
+    ChatThread,
+    ChatThreadWithMessages,
+    CreateThreadInput,
+    AppendMessagesInput,
+    MessageInput,
+    DecompositionResult,
+)
 from .workspace import (
     Context,
     ContextSettings,
@@ -86,4 +96,13 @@ __all__ = [
     # Auth models
     "AuthIdentity",
     "RequestContext",
+    # Chat history models
+    "ChatMessage",
+    "ChatMessageContent",
+    "ChatThread",
+    "ChatThreadWithMessages",
+    "CreateThreadInput",
+    "AppendMessagesInput",
+    "MessageInput",
+    "DecompositionResult",
 ]

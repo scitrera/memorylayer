@@ -31,6 +31,26 @@ class NotFoundError(MemoryLayerError):
         super().__init__(message, status_code=404)
 
 
+class EnterpriseRequiredError(MemoryLayerError):
+    """Raised when an enterprise-only endpoint returns 404.
+
+    This indicates the server is running MemoryLayer OSS which does not
+    include the requested feature (e.g. document ingestion, page search).
+    """
+
+    def __init__(
+        self,
+        feature: str = "This feature",
+        message: str | None = None,
+    ) -> None:
+        msg = message or (
+            f"{feature} requires MemoryLayer Enterprise. "
+            "See https://memorylayer.ai for upgrade options."
+        )
+        super().__init__(msg, status_code=404)
+        self.feature = feature
+
+
 class ValidationError(MemoryLayerError):
     """Raised when request validation fails (422)."""
 

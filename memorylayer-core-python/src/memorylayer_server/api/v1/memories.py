@@ -112,6 +112,8 @@ async def create_memory(
             metadata=request.metadata,
             associations=request.associations,
             context_id=request.context_id or ctx.context_id,
+            observer_id=request.observer_id,
+            subject_id=request.subject_id,
         )
 
         # Store memory
@@ -385,6 +387,8 @@ async def recall_memories(
             subtypes=request.subtypes,
             tags=request.tags,
             context_id=request.context_id or ctx.context_id,
+            observer_id=request.observer_id,
+            subject_id=request.subject_id,
             mode=request.mode,
             tolerance=request.tolerance,
             limit=request.limit,
@@ -480,6 +484,8 @@ async def reflect_memories(
             subtypes=request.subtypes,
             tags=request.tags,
             context_id=request.context_id or ctx.context_id,
+            observer_id=request.observer_id,
+            subject_id=request.subject_id,
         )
 
         # Perform reflection

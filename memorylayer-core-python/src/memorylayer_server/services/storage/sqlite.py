@@ -265,6 +265,9 @@ class SQLiteStorageBackend(StorageBackend):
             "ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'",
             "ALTER TABLE memories ADD COLUMN pinned INTEGER DEFAULT 0",
             "ALTER TABLE memories ADD COLUMN source_memory_id TEXT",
+            # v3: Entity attribution columns
+            "ALTER TABLE memories ADD COLUMN observer_id TEXT",
+            "ALTER TABLE memories ADD COLUMN subject_id TEXT",
         ]:
             try:
                 await self._connection.execute(col_sql)
@@ -276,6 +279,13 @@ class SQLiteStorageBackend(StorageBackend):
         )
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source_memory_id) WHERE source_memory_id IS NOT NULL"
+        )
+        # v3: Entity attribution indexes
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_observer ON memories(workspace_id, observer_id) WHERE observer_id IS NOT NULL AND deleted_at IS NULL"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_subject ON memories(workspace_id, subject_id) WHERE subject_id IS NOT NULL AND deleted_at IS NULL"
         )
 
         # Create FTS5 virtual table for full-text search
@@ -481,6 +491,55 @@ class SQLiteStorageBackend(StorageBackend):
             "CREATE INDEX IF NOT EXISTS idx_contradictions_unresolved ON contradictions(workspace_id) WHERE resolved_at IS NULL"
         )
 
+        # Chat threads
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS chat_threads (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL DEFAULT '_default',
+                user_id TEXT,
+                context_id TEXT NOT NULL DEFAULT '_default',
+                observer_id TEXT,
+                subject_id TEXT,
+                title TEXT,
+                metadata TEXT DEFAULT '{}',
+                message_count INTEGER DEFAULT 0,
+                last_decomposed_at TEXT,
+                last_decomposed_index INTEGER DEFAULT 0,
+                expires_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces (id)
+            )
+        """)
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_threads_workspace ON chat_threads(workspace_id)"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_threads_user ON chat_threads(workspace_id, user_id) WHERE user_id IS NOT NULL"
+        )
+
+        # Chat messages
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                message_index INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (thread_id) REFERENCES chat_threads (id) ON DELETE CASCADE
+            )
+        """)
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, message_index)"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_workspace ON chat_messages(workspace_id, thread_id)"
+        )
+
         await self._connection.commit()
 
     async def _ensure_reserved_entities(self) -> None:
@@ -538,8 +597,10 @@ class SQLiteStorageBackend(StorageBackend):
             INSERT INTO memories (id, tenant_id, workspace_id, context_id, session_id, user_id,
                                   content, content_hash, type, subtype, category,
                                   importance, tags, metadata, abstract, overview,
-                                  source_memory_id, status, pinned, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  source_memory_id, status, pinned,
+                                  observer_id, subject_id,
+                                  created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 memory_id,
@@ -561,6 +622,8 @@ class SQLiteStorageBackend(StorageBackend):
                 getattr(input, 'source_memory_id', None),
                 MemoryStatus.ACTIVE.value,
                 0,
+                getattr(input, 'observer_id', None),
+                getattr(input, 'subject_id', None),
                 now,
                 now,
             ),
@@ -781,17 +844,19 @@ class SQLiteStorageBackend(StorageBackend):
             subtypes: Optional[list[str]] = None,
             tags: Optional[list[str]] = None,
             include_archived: bool = False,
+            observer_id: Optional[str] = None,
+            subject_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search using sqlite-vec or fallback."""
         if self._has_vec_extension:
             return await self._search_with_vec(
                 workspace_id, query_embedding, limit, offset, min_relevance, types, subtypes, tags,
-                include_archived=include_archived,
+                include_archived=include_archived, observer_id=observer_id, subject_id=subject_id,
             )
         else:
             return await self._search_with_fallback(
                 workspace_id, query_embedding, limit, offset, min_relevance, types, subtypes, tags,
-                include_archived=include_archived,
+                include_archived=include_archived, observer_id=observer_id, subject_id=subject_id,
             )
 
     async def _search_with_vec(
@@ -805,6 +870,8 @@ class SQLiteStorageBackend(StorageBackend):
             subtypes: Optional[list[str]],
             tags: Optional[list[str]],
             include_archived: bool = False,
+            observer_id: Optional[str] = None,
+            subject_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Search using sqlite-vec extension."""
         # Build WHERE clause
@@ -827,6 +894,14 @@ class SQLiteStorageBackend(StorageBackend):
             for tag in tags:
                 where_parts.append("tags LIKE ?")
                 params.append(f'%"{tag}"%')
+
+        if observer_id is not None:
+            where_parts.append("observer_id = ?")
+            params.append(observer_id)
+
+        if subject_id is not None:
+            where_parts.append("subject_id = ?")
+            params.append(subject_id)
 
         where_clause = " AND ".join(where_parts)
 
@@ -870,6 +945,8 @@ class SQLiteStorageBackend(StorageBackend):
             subtypes: Optional[list[str]],
             tags: Optional[list[str]],
             include_archived: bool = False,
+            observer_id: Optional[str] = None,
+            subject_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Fallback: compute cosine similarity in Python."""
         # Build WHERE clause
@@ -892,6 +969,14 @@ class SQLiteStorageBackend(StorageBackend):
             for tag in tags:
                 where_parts.append("tags LIKE ?")
                 params.append(f'%"{tag}"%')
+
+        if observer_id is not None:
+            where_parts.append("observer_id = ?")
+            params.append(observer_id)
+
+        if subject_id is not None:
+            where_parts.append("subject_id = ?")
+            params.append(subject_id)
 
         where_clause = " AND ".join(where_parts)
 
@@ -1740,6 +1825,8 @@ class SQLiteStorageBackend(StorageBackend):
             session_id=row["session_id"] if "session_id" in row.keys() and row["session_id"] else None,
             source_memory_id=row["source_memory_id"] if "source_memory_id" in row.keys() and row["source_memory_id"] else None,
             user_id=row["user_id"],
+            observer_id=row["observer_id"] if "observer_id" in row.keys() and row["observer_id"] else None,
+            subject_id=row["subject_id"] if "subject_id" in row.keys() and row["subject_id"] else None,
             content=row["content"],
             content_hash=row["content_hash"],
             type=MemoryType(row["type"]),
@@ -1831,6 +1918,276 @@ class SQLiteStorageBackend(StorageBackend):
         import struct
         num_floats = len(blob) // 4
         return list(struct.unpack(f'{num_floats}f', blob))
+
+
+    # ============================================
+    # Chat History Operations
+    # ============================================
+
+    async def create_thread(self, thread: 'ChatThread') -> 'ChatThread':
+        from ...models.chat import ChatThread as ChatThreadModel
+        await self._connection.execute(
+            """INSERT INTO chat_threads
+               (id, workspace_id, tenant_id, user_id, context_id,
+                observer_id, subject_id, title, metadata,
+                message_count, last_decomposed_at, last_decomposed_index,
+                expires_at, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                thread.id, thread.workspace_id, thread.tenant_id,
+                thread.user_id, thread.context_id,
+                thread.observer_id, thread.subject_id, thread.title,
+                json.dumps(thread.metadata),
+                thread.message_count,
+                thread.last_decomposed_at.isoformat() if thread.last_decomposed_at else None,
+                thread.last_decomposed_index,
+                thread.expires_at.isoformat() if thread.expires_at else None,
+                thread.created_at.isoformat(),
+                thread.updated_at.isoformat(),
+            ),
+        )
+        await self._connection.commit()
+        return thread
+
+    async def get_thread(self, workspace_id: str, thread_id: str) -> 'Optional[ChatThread]':
+        from ...models.chat import ChatThread as ChatThreadModel
+        cursor = await self._connection.execute(
+            "SELECT * FROM chat_threads WHERE id = ? AND workspace_id = ?",
+            (thread_id, workspace_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return self._row_to_chat_thread(row)
+
+    async def list_threads(
+        self,
+        workspace_id: str,
+        user_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list:
+        now = utc_now_iso()
+        if user_id:
+            cursor = await self._connection.execute(
+                """SELECT * FROM chat_threads
+                   WHERE workspace_id = ? AND user_id = ?
+                     AND (expires_at IS NULL OR expires_at > ?)
+                   ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
+                (workspace_id, user_id, now, limit, offset),
+            )
+        else:
+            cursor = await self._connection.execute(
+                """SELECT * FROM chat_threads
+                   WHERE workspace_id = ?
+                     AND (expires_at IS NULL OR expires_at > ?)
+                   ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
+                (workspace_id, now, limit, offset),
+            )
+        rows = await cursor.fetchall()
+        return [self._row_to_chat_thread(row) for row in rows]
+
+    async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> 'Optional[ChatThread]':
+        if not updates:
+            return await self.get_thread(workspace_id, thread_id)
+
+        set_clauses = []
+        values = []
+        for key, value in updates.items():
+            if key == "metadata":
+                value = json.dumps(value)
+            elif isinstance(value, datetime):
+                value = value.isoformat()
+            set_clauses.append(f"{key} = ?")
+            values.append(value)
+
+        # Always update updated_at
+        set_clauses.append("updated_at = ?")
+        values.append(utc_now_iso())
+
+        values.extend([thread_id, workspace_id])
+        sql = f"UPDATE chat_threads SET {', '.join(set_clauses)} WHERE id = ? AND workspace_id = ?"
+        await self._connection.execute(sql, values)
+        await self._connection.commit()
+        return await self.get_thread(workspace_id, thread_id)
+
+    async def delete_thread(self, workspace_id: str, thread_id: str) -> bool:
+        # Delete messages first (FK cascade may handle this, but be explicit)
+        await self._connection.execute(
+            "DELETE FROM chat_messages WHERE thread_id = ? AND workspace_id = ?",
+            (thread_id, workspace_id),
+        )
+        cursor = await self._connection.execute(
+            "DELETE FROM chat_threads WHERE id = ? AND workspace_id = ?",
+            (thread_id, workspace_id),
+        )
+        await self._connection.commit()
+        return cursor.rowcount > 0
+
+    async def list_expired_threads(self, limit: int = 100) -> list['ChatThread']:
+        """List expired chat threads across all workspaces.
+
+        Queries for threads where expires_at is set and in the past.
+
+        Args:
+            limit: Maximum number of threads to return
+
+        Returns:
+            List of expired ChatThread objects
+        """
+        now = utc_now_iso()
+
+        cursor = await self._connection.execute(
+            """
+            SELECT *
+            FROM chat_threads
+            WHERE expires_at IS NOT NULL AND expires_at < ?
+            ORDER BY expires_at ASC
+            LIMIT ?
+            """,
+            (now, limit),
+        )
+        rows = await cursor.fetchall()
+
+        return [self._row_to_chat_thread(row) for row in rows]
+
+    async def append_messages(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        messages: list,
+    ) -> list:
+        from ...models.chat import ChatMessage
+
+        # Get current message count for indexing
+        cursor = await self._connection.execute(
+            "SELECT message_count FROM chat_threads WHERE id = ? AND workspace_id = ?",
+            (thread_id, workspace_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise ValueError(f"Thread {thread_id} not found in workspace {workspace_id}")
+
+        current_count = row["message_count"]
+        created_messages = []
+        now = utc_now_iso()
+
+        for i, msg_input in enumerate(messages):
+            msg_id = generate_id("msg")
+            msg_index = current_count + i
+            content = msg_input.content
+            if not isinstance(content, str):
+                # Structured content — serialize as JSON array
+                content = json.dumps([block.model_dump() for block in content])
+
+            await self._connection.execute(
+                """INSERT INTO chat_messages
+                   (id, thread_id, workspace_id, message_index, role, content, metadata, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    msg_id, thread_id, workspace_id, msg_index,
+                    msg_input.role, content,
+                    json.dumps(msg_input.metadata or {}), now,
+                ),
+            )
+            created_messages.append(ChatMessage(
+                id=msg_id,
+                thread_id=thread_id,
+                message_index=msg_index,
+                role=msg_input.role,
+                content=msg_input.content,
+                metadata=msg_input.metadata or {},
+                created_at=parse_datetime_utc(now),
+            ))
+
+        # Update thread message count and updated_at
+        new_count = current_count + len(messages)
+        await self._connection.execute(
+            "UPDATE chat_threads SET message_count = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+            (new_count, now, thread_id, workspace_id),
+        )
+        await self._connection.commit()
+        return created_messages
+
+    async def get_messages(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        after_index: Optional[int] = None,
+        order: str = "asc",
+    ) -> list:
+        order_clause = "ASC" if order.lower() == "asc" else "DESC"
+
+        if after_index is not None:
+            cursor = await self._connection.execute(
+                f"""SELECT * FROM chat_messages
+                    WHERE thread_id = ? AND workspace_id = ? AND message_index > ?
+                    ORDER BY message_index {order_clause} LIMIT ? OFFSET ?""",
+                (thread_id, workspace_id, after_index, limit, offset),
+            )
+        else:
+            cursor = await self._connection.execute(
+                f"""SELECT * FROM chat_messages
+                    WHERE thread_id = ? AND workspace_id = ?
+                    ORDER BY message_index {order_clause} LIMIT ? OFFSET ?""",
+                (thread_id, workspace_id, limit, offset),
+            )
+
+        rows = await cursor.fetchall()
+        return [self._row_to_chat_message(row) for row in rows]
+
+    async def get_message_count(self, workspace_id: str, thread_id: str) -> int:
+        cursor = await self._connection.execute(
+            "SELECT message_count FROM chat_threads WHERE id = ? AND workspace_id = ?",
+            (thread_id, workspace_id),
+        )
+        row = await cursor.fetchone()
+        return row["message_count"] if row else 0
+
+    def _row_to_chat_thread(self, row: aiosqlite.Row) -> 'ChatThread':
+        from ...models.chat import ChatThread
+        return ChatThread(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            tenant_id=row["tenant_id"],
+            user_id=row["user_id"],
+            context_id=row["context_id"],
+            observer_id=row["observer_id"],
+            subject_id=row["subject_id"],
+            title=row["title"],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            message_count=row["message_count"],
+            last_decomposed_at=parse_datetime_utc(row["last_decomposed_at"]) if row["last_decomposed_at"] else None,
+            last_decomposed_index=row["last_decomposed_index"],
+            expires_at=parse_datetime_utc(row["expires_at"]) if row["expires_at"] else None,
+            created_at=parse_datetime_utc(row["created_at"]),
+            updated_at=parse_datetime_utc(row["updated_at"]),
+        )
+
+    def _row_to_chat_message(self, row: aiosqlite.Row) -> 'ChatMessage':
+        from ...models.chat import ChatMessage, ChatMessageContent
+        raw_content = row["content"]
+        # Try to parse as structured content (JSON array)
+        try:
+            parsed = json.loads(raw_content)
+            if isinstance(parsed, list):
+                content = [ChatMessageContent(**block) for block in parsed]
+            else:
+                content = raw_content
+        except (json.JSONDecodeError, TypeError):
+            content = raw_content
+
+        return ChatMessage(
+            id=row["id"],
+            thread_id=row["thread_id"],
+            message_index=row["message_index"],
+            role=row["role"],
+            content=content,
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=parse_datetime_utc(row["created_at"]),
+        )
 
 
 class SqliteStorageBackendPlugin(StoragePluginBase):
