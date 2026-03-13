@@ -91,6 +91,12 @@ MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD = 'MEMORYLAYER_ASSOCIATION_SIMILARI
 DEFAULT_MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD = 0.85
 
 # ============================================
+# Authentication Service
+# ============================================
+MEMORYLAYER_AUTHENTICATION_SERVICE = 'MEMORYLAYER_AUTHENTICATION_SERVICE'
+DEFAULT_MEMORYLAYER_AUTHENTICATION_SERVICE = 'default'  # Open authentication (allow all)
+
+# ============================================
 # Authorization Service
 # ============================================
 MEMORYLAYER_AUTHORIZATION_SERVICE = 'MEMORYLAYER_AUTHORIZATION_SERVICE'

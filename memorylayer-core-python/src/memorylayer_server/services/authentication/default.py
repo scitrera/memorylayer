@@ -9,10 +9,11 @@ This implementation provides:
 import logging
 from typing import Optional, Iterable
 
-from scitrera_app_framework import Plugin, Variables, get_extension
+from scitrera_app_framework import Variables, get_extension
 
 from .base import (
     AuthenticationService,
+    AuthenticationServicePluginBase,
     EXT_AUTHENTICATION_SERVICE,
 )
 from ...models.auth import AuthIdentity
@@ -148,11 +149,9 @@ class OpenAuthenticationService(AuthenticationService):
             return None
 
 
-class OpenAuthenticationServicePlugin(Plugin):
+class OpenAuthenticationServicePlugin(AuthenticationServicePluginBase):
     """Plugin to register the OSS authentication service."""
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_AUTHENTICATION_SERVICE
+    PROVIDER_NAME = 'default'
 
     def initialize(self, v: Variables, logger: logging.Logger) -> OpenAuthenticationService:
         session_service = get_extension(EXT_SESSION_SERVICE, v)

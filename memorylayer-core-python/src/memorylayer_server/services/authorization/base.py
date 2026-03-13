@@ -58,6 +58,7 @@ class AuthorizationService(ABC):
             resource=resource,
             action=action,
             resource_id=resource_id,
+            metadata=getattr(ctx, 'metadata', None) or {},
         )
 
         decision = await self.authorize(authz_ctx)
