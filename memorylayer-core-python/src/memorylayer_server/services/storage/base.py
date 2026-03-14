@@ -324,9 +324,10 @@ class StorageBackend(ABC):
     async def get_archival_candidates(
         self,
         workspace_id: str,
-        max_importance: float = 0.2,
-        max_access_count: int = 3,
-        min_age_days: int = 90,
+        max_importance: float = 0.3,
+        max_access_count: int = 5,
+        older_than_days: int = 90,
+        limit: int = 100,
     ) -> list[Memory]:
         """Get memories eligible for archival. Override in subclasses."""
         return []

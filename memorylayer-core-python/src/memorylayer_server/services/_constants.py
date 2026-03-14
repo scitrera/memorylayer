@@ -116,3 +116,18 @@ EXT_MULTI_TASK_HANDLERS = 'memorylayer-multi-task-handlers'
 # Chat History
 # ============================================
 EXT_CHAT_SERVICE = 'memorylayer-chat-service'
+
+# ============================================
+# Audit
+# ============================================
+EXT_AUDIT_SERVICE = 'memorylayer-audit-service'
+
+# ============================================
+# Rate Limiting
+# ============================================
+EXT_RATE_LIMIT_SERVICE = 'memorylayer-rate-limit-service'
+
+# ============================================
+# Metrics / Observability
+# ============================================
+EXT_METRICS_SERVICE = 'memorylayer-metrics-service'

@@ -226,6 +226,10 @@ class SQLiteStorageBackend(StorageBackend):
                                            embedding        BLOB,
                                            abstract         TEXT,
                                            overview         TEXT,
+                                           source_document_id TEXT,
+                                           source_page_id   TEXT,
+                                           source_dataset_id TEXT,
+                                           source_thread_id TEXT,
                                            access_count     INTEGER DEFAULT 0,
                                            last_accessed_at TEXT,
                                            decay_factor     REAL    DEFAULT 1.0,
@@ -268,6 +272,10 @@ class SQLiteStorageBackend(StorageBackend):
             # v3: Entity attribution columns
             "ALTER TABLE memories ADD COLUMN observer_id TEXT",
             "ALTER TABLE memories ADD COLUMN subject_id TEXT",
+            "ALTER TABLE memories ADD COLUMN source_document_id TEXT",
+            "ALTER TABLE memories ADD COLUMN source_page_id TEXT",
+            "ALTER TABLE memories ADD COLUMN source_dataset_id TEXT",
+            "ALTER TABLE memories ADD COLUMN source_thread_id TEXT",
         ]:
             try:
                 await self._connection.execute(col_sql)
@@ -286,6 +294,12 @@ class SQLiteStorageBackend(StorageBackend):
         )
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_subject ON memories(workspace_id, subject_id) WHERE subject_id IS NOT NULL AND deleted_at IS NULL"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_source_dataset ON memories(source_dataset_id) WHERE source_dataset_id IS NOT NULL"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_source_thread ON memories(source_thread_id) WHERE source_thread_id IS NOT NULL"
         )
 
         # Create FTS5 virtual table for full-text search
@@ -599,8 +613,10 @@ class SQLiteStorageBackend(StorageBackend):
                                   importance, tags, metadata, abstract, overview,
                                   source_memory_id, status, pinned,
                                   observer_id, subject_id,
+                                  source_document_id, source_page_id,
+                                  source_dataset_id, source_thread_id,
                                   created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 memory_id,
@@ -624,6 +640,10 @@ class SQLiteStorageBackend(StorageBackend):
                 0,
                 getattr(input, 'observer_id', None),
                 getattr(input, 'subject_id', None),
+                getattr(input, 'source_document_id', None),
+                getattr(input, 'source_page_id', None),
+                getattr(input, 'source_dataset_id', None),
+                getattr(input, 'source_thread_id', None),
                 now,
                 now,
             ),
@@ -804,9 +824,10 @@ class SQLiteStorageBackend(StorageBackend):
     async def get_archival_candidates(
             self,
             workspace_id: str,
-            max_importance: float = 0.2,
-            max_access_count: int = 3,
-            min_age_days: int = 90,
+            max_importance: float = 0.3,
+            max_access_count: int = 5,
+            older_than_days: int = 90,
+            limit: int = 100,
     ) -> list[Memory]:
         """Get memories eligible for archival."""
         query = """
@@ -819,10 +840,11 @@ class SQLiteStorageBackend(StorageBackend):
                   AND importance <= ?
                   AND access_count <= ?
                   AND julianday('now') - julianday(created_at) >= ?
-                ORDER BY importance ASC \
+                ORDER BY importance ASC
+                LIMIT ?
                 """
         cursor = await self._connection.execute(
-            query, (workspace_id, max_importance, max_access_count, min_age_days)
+            query, (workspace_id, max_importance, max_access_count, older_than_days, limit)
         )
         rows = await cursor.fetchall()
         return [self._row_to_memory(row) for row in rows]
@@ -1824,6 +1846,10 @@ class SQLiteStorageBackend(StorageBackend):
             context_id=row["context_id"] if "context_id" in row.keys() else DEFAULT_CONTEXT_ID,
             session_id=row["session_id"] if "session_id" in row.keys() and row["session_id"] else None,
             source_memory_id=row["source_memory_id"] if "source_memory_id" in row.keys() and row["source_memory_id"] else None,
+            source_document_id=row["source_document_id"] if "source_document_id" in row.keys() and row["source_document_id"] else None,
+            source_page_id=row["source_page_id"] if "source_page_id" in row.keys() and row["source_page_id"] else None,
+            source_dataset_id=row["source_dataset_id"] if "source_dataset_id" in row.keys() and row["source_dataset_id"] else None,
+            source_thread_id=row["source_thread_id"] if "source_thread_id" in row.keys() and row["source_thread_id"] else None,
             user_id=row["user_id"],
             observer_id=row["observer_id"] if "observer_id" in row.keys() and row["observer_id"] else None,
             subject_id=row["subject_id"] if "subject_id" in row.keys() and row["subject_id"] else None,

@@ -74,6 +74,16 @@ class MemoryStatus(str, Enum):
     DELETED = "deleted"  # Soft-deleted
 
 
+class SourceType(str, Enum):
+    """Types of sources that can produce memories."""
+    MEMORY = "memory"           # Fact decomposition
+    SESSION = "session"         # Working memory commit
+    DOCUMENT = "document"       # Document ingestion
+    PAGE = "page"               # Document page
+    THREAD = "thread"           # Chat history decomposition
+    DATASET = "dataset"         # Dataset profiling/summarization
+
+
 class Memory(BaseModel):
     """Core memory entity with content, metadata, and lifecycle tracking."""
 
@@ -115,6 +125,8 @@ class Memory(BaseModel):
     # Document provenance - traces memory back to source document/page
     source_document_id: Optional[str] = Field(None, description="Document this memory was derived from")
     source_page_id: Optional[str] = Field(None, description="Document page this memory was extracted from")
+    source_dataset_id: Optional[str] = Field(None, description="Dataset this memory was derived from")
+    source_thread_id: Optional[str] = Field(None, description="Chat thread this memory was decomposed from")
 
     category: Optional[str] = Field(None, description="User-defined category")
 
@@ -179,6 +191,8 @@ class RememberInput(BaseModel):
     # Document provenance
     source_document_id: Optional[str] = Field(None, description="Source document ID for provenance tracking")
     source_page_id: Optional[str] = Field(None, description="Source page ID for provenance tracking")
+    source_dataset_id: Optional[str] = Field(None, description="Source dataset ID for provenance tracking")
+    source_thread_id: Optional[str] = Field(None, description="Source thread ID for provenance tracking")
 
 
 class RecallInput(BaseModel):

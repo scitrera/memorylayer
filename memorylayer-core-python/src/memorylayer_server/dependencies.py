@@ -21,7 +21,7 @@ _preconfigure_hooks: list[Callable[[Variables], None]] = []
 def preconfigure(v: Variables = None, test_mode: bool = False, test_logger: Logger = None) -> (Variables, dict):
     """ Pre-configure the framework """
     from scitrera_app_framework import register_package_plugins
-    from . import api, services, lifecycle, tasks  # noqa: F401
+    from . import api, services, lifecycle, tasks, middleware  # noqa: F401
 
     # handle test mode
     additional_kwargs = {} if not test_mode else {
@@ -69,6 +69,9 @@ def preconfigure(v: Variables = None, test_mode: bool = False, test_logger: Logg
 
     logger.debug('Registering Task Handlers')
     register_package_plugins(tasks.__package__, v, recursive=True)
+
+    logger.debug('Registering Middleware')
+    register_package_plugins(middleware.__package__, v, recursive=True)
 
     # handle preconfiguration hooks
     logger.debug('Evaluating preconfigure hooks')

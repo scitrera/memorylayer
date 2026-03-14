@@ -254,6 +254,7 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
                     context_id=thread.context_id,
                     observer_id=thread.observer_id,
                     subject_id=thread.subject_id,
+                    source_thread_id=thread.id,
                 )
 
                 await memory_service.remember(workspace_id, remember_input)
