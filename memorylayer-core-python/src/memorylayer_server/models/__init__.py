@@ -77,9 +77,6 @@ __all__ = [
     "GraphQueryInput",
     "GraphQueryResult",
     "GraphPath",
-    # Tenant models (v2)
-    "Tenant",
-    "TenantSettings",
     # Workspace models
     "Workspace",
     "WorkspaceSettings",

@@ -4,7 +4,7 @@ API request/response schemas for MemoryLayer.ai endpoints.
 These schemas define the HTTP API interface separate from core domain models.
 """
 from datetime import datetime
-from typing import Any, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -98,12 +98,54 @@ class MemoryDecayRequest(BaseModel):
     decay_rate: float = Field(0.1, ge=0.0, le=1.0, description="Decay rate to apply")
 
 
+class BatchCreateOp(BaseModel):
+    """Batch create operation."""
+
+    op: Literal["create"] = Field(..., description="Operation type")
+    content: str = Field(..., description="Memory content", min_length=1)
+    type: Optional[MemoryType] = Field(None, description="Cognitive type")
+    subtype: Optional[MemorySubtype] = Field(None, description="Domain classification")
+    importance: float = Field(0.5, ge=0.0, le=1.0, description="Importance")
+    tags: list[str] = Field(default_factory=list, description="Tags")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Metadata")
+    observer_id: Optional[str] = Field(None, description="Observer entity")
+    subject_id: Optional[str] = Field(None, description="Subject entity")
+
+
+class BatchUpdateOp(BaseModel):
+    """Batch update operation."""
+
+    op: Literal["update"] = Field(..., description="Operation type")
+    memory_id: str = Field(..., description="Memory ID to update")
+    content: Optional[str] = Field(None, description="Updated content", min_length=1)
+    type: Optional[MemoryType] = Field(None, description="Updated type")
+    subtype: Optional[MemorySubtype] = Field(None, description="Updated subtype")
+    importance: Optional[float] = Field(None, ge=0.0, le=1.0, description="Updated importance")
+    tags: Optional[list[str]] = Field(None, description="Updated tags")
+    metadata: Optional[dict[str, Any]] = Field(None, description="Updated metadata")
+    pinned: Optional[bool] = Field(None, description="Pin/unpin memory")
+
+
+class BatchDeleteOp(BaseModel):
+    """Batch delete operation."""
+
+    op: Literal["delete"] = Field(..., description="Operation type")
+    memory_id: str = Field(..., description="Memory ID to delete")
+    hard: bool = Field(False, description="Hard delete (permanent)")
+
+
+BatchOperation = Annotated[
+    Union[BatchCreateOp, BatchUpdateOp, BatchDeleteOp],
+    Field(discriminator="op"),
+]
+
+
 class MemoryBatchRequest(BaseModel):
     """Request schema for batch memory operations."""
 
-    operations: list[dict[str, Any]] = Field(
+    operations: list[BatchOperation] = Field(
         ...,
-        description="List of operations with 'type' and 'data' fields"
+        description="List of typed batch operations (create, update, delete)"
     )
 
 

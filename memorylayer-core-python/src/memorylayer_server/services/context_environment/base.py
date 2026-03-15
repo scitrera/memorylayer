@@ -6,14 +6,13 @@ environments tied to sessions, with access to memory recall and LLM queries.
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import (
     MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
     DEFAULT_MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
 )
 
 from .._constants import EXT_CONTEXT_ENVIRONMENT_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 class ContextEnvironmentService(ABC):
@@ -207,23 +206,8 @@ class ContextEnvironmentService(ABC):
 
 
 # noinspection PyAbstractClass
-class ContextEnvironmentServicePluginBase(Plugin):
-    """Base plugin for context environment service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_CONTEXT_ENVIRONMENT_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_CONTEXT_ENVIRONMENT_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(
-            self, v, MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE, self_attr='PROVIDER_NAME'
-        )
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(
-            MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
-            DEFAULT_MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
-        )
+ContextEnvironmentServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_CONTEXT_ENVIRONMENT_SERVICE,
+    config_key=MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
+)

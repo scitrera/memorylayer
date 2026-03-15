@@ -116,9 +116,10 @@ async def create_association(
     except Exception as e:
         # Check if it's a "not found" error
         if "not found" in str(e).lower():
+            logger.warning("Association source or target not found: %s -> %s: %s", memory_id, request.target_id, e)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e)
+                detail=f"Memory not found: {memory_id} or {request.target_id}"
             )
         logger.error("Failed to create association: %s", e, exc_info=True)
         raise HTTPException(

@@ -9,8 +9,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_INFERENCE_SERVICE, DEFAULT_MEMORYLAYER_INFERENCE_SERVICE
 from ...models.memory import Memory
 from .._constants import (
@@ -21,6 +19,7 @@ from .._constants import (
     EXT_ASSOCIATION_SERVICE,
     EXT_CACHE_SERVICE,
 )
+from .._plugin_factory import make_service_plugin_base
 
 
 @dataclass
@@ -85,21 +84,9 @@ class InferenceService(ABC):
 
 
 # noinspection PyAbstractClass
-class InferenceServicePluginBase(Plugin):
-    """Base plugin for inference service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_INFERENCE_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_INFERENCE_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_INFERENCE_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_INFERENCE_SERVICE, DEFAULT_MEMORYLAYER_INFERENCE_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE, EXT_LLM_SERVICE, EXT_ASSOCIATION_SERVICE, EXT_CACHE_SERVICE)
+InferenceServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_INFERENCE_SERVICE,
+    config_key=MEMORYLAYER_INFERENCE_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_INFERENCE_SERVICE,
+    dependencies=(EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE, EXT_LLM_SERVICE, EXT_ASSOCIATION_SERVICE, EXT_CACHE_SERVICE),
+)

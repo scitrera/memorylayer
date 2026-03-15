@@ -6,12 +6,11 @@ Provides the ABC interface and plugin base for tier generation services.
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_SEMANTIC_TIERING_SERVICE, DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_SERVICE
 from ...models.memory import Memory
 
 from .._constants import EXT_LLM_SERVICE, EXT_SEMANTIC_TIERING_SERVICE, EXT_STORAGE_BACKEND
+from .._plugin_factory import make_service_plugin_base
 
 
 class SemanticTieringService(ABC):
@@ -71,21 +70,9 @@ class SemanticTieringService(ABC):
 
 
 # noinspection PyAbstractClass
-class SemanticTieringServicePluginBase(Plugin):
-    """Base plugin for tier generation service - extensible for custom implementations."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_SEMANTIC_TIERING_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_SEMANTIC_TIERING_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_SEMANTIC_TIERING_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_SEMANTIC_TIERING_SERVICE, DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND, EXT_LLM_SERVICE,)
+SemanticTieringServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_SEMANTIC_TIERING_SERVICE,
+    config_key=MEMORYLAYER_SEMANTIC_TIERING_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_SERVICE,
+    dependencies=(EXT_STORAGE_BACKEND, EXT_LLM_SERVICE),
+)

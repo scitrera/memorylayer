@@ -8,8 +8,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_CHAT_SERVICE, DEFAULT_MEMORYLAYER_CHAT_SERVICE
 from ...models.chat import (
     ChatThread,
@@ -20,6 +18,7 @@ from ...models.chat import (
     DecompositionResult,
 )
 from .._constants import EXT_CHAT_SERVICE, EXT_STORAGE_BACKEND, EXT_TASK_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 class ChatService(ABC):
@@ -112,22 +111,9 @@ class ChatService(ABC):
 
 
 # noinspection PyAbstractClass
-class ChatServicePluginBase(Plugin):
-    """Base plugin for chat service."""
-
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_CHAT_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_CHAT_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_CHAT_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_CHAT_SERVICE, DEFAULT_MEMORYLAYER_CHAT_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND, EXT_TASK_SERVICE)
+ChatServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_CHAT_SERVICE,
+    config_key=MEMORYLAYER_CHAT_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_CHAT_SERVICE,
+    dependencies=(EXT_STORAGE_BACKEND, EXT_TASK_SERVICE),
+)

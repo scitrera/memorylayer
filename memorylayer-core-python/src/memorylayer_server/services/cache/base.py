@@ -2,11 +2,10 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_CACHE_SERVICE, DEFAULT_MEMORYLAYER_CACHE_SERVICE
 
 from .._constants import EXT_CACHE_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 class CacheService(ABC):
@@ -109,19 +108,8 @@ class CacheService(ABC):
 
 
 # noinspection PyAbstractClass
-class CacheServicePluginBase(Plugin):
-    """Base plugin for cache service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_CACHE_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_CACHE_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_CACHE_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        # Set a default value for MEMORYLAYER_CACHE_SERVICE; defaults are lower priority than .set(...) values
-        v.set_default_value(MEMORYLAYER_CACHE_SERVICE, DEFAULT_MEMORYLAYER_CACHE_SERVICE)
+CacheServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_CACHE_SERVICE,
+    config_key=MEMORYLAYER_CACHE_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_CACHE_SERVICE,
+)

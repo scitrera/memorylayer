@@ -37,6 +37,7 @@ class AsyncIOTaskService(TaskService):
         self._tasks_enabled = tasks_enabled
         self._tasks: dict[str, asyncio.Task] = {}
         self._recurring: dict[str, bool] = {}
+        self._recurring_tasks: dict[str, asyncio.Task] = {}
         self._handlers: dict[str, Callable[[dict], Awaitable[None]]] = {}
         self._v = v
         self.logger = get_logger(v, name=self.__class__.__name__)
@@ -126,7 +127,7 @@ class AsyncIOTaskService(TaskService):
 
                 await asyncio.sleep(interval_seconds)
 
-        asyncio.create_task(run_recurring())  # TODO: why don't we keep a ref of schedule_id --> task ??
+        self._recurring_tasks[schedule_id] = asyncio.create_task(run_recurring())
         self.logger.info(
             "Scheduled recurring task %s: type=%s, interval=%ss",
             schedule_id,
@@ -155,6 +156,9 @@ class AsyncIOTaskService(TaskService):
         # Check if it's a recurring schedule
         if task_id in self._recurring:
             self._recurring[task_id] = False
+            recurring_task = self._recurring_tasks.get(task_id)
+            if recurring_task and not recurring_task.done():
+                recurring_task.cancel()
             self.logger.info("Cancelled recurring schedule %s", task_id)
             return True
 
@@ -201,6 +205,26 @@ class AsyncIOTaskService(TaskService):
         """
         self._handlers[task_type] = handler
         self.logger.debug("Registered handler for task type: %s", task_type)
+
+    async def shutdown(self) -> None:
+        """
+        Cancel all pending one-time tasks and recurring schedules.
+
+        Should be called during application shutdown to avoid resource leaks.
+        """
+        for schedule_id in list(self._recurring):
+            self._recurring[schedule_id] = False
+            recurring_task = self._recurring_tasks.get(schedule_id)
+            if recurring_task and not recurring_task.done():
+                recurring_task.cancel()
+        self._recurring_tasks.clear()
+
+        for task_id, task in list(self._tasks.items()):
+            if not task.done():
+                task.cancel()
+        self._tasks.clear()
+
+        self.logger.info("AsyncIOTaskService shutdown complete")
 
 
 class AsyncIOTaskServicePlugin(TaskServicePluginBase):

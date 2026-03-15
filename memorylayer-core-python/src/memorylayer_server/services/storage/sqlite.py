@@ -27,6 +27,22 @@ from ...config import DEFAULT_TENANT_ID, DEFAULT_CONTEXT_ID
 from ..contradiction.base import ContradictionRecord
 
 
+_UPDATABLE_MEMORY_COLUMNS = frozenset({
+    "content", "content_hash", "type", "subtype", "importance",
+    "tags", "metadata", "embedding", "abstract", "overview",
+    "pinned", "category", "decay_factor", "status", "archived_at",
+    "observer_id", "subject_id", "source_scope",
+    "access_count", "last_accessed_at", "created_at", "updated_at",
+    "source_memory_id",
+})
+
+_UPDATABLE_THREAD_COLUMNS = frozenset({
+    "title", "metadata", "model", "system_prompt",
+    "max_messages", "ttl_seconds", "expires_at",
+    "last_decomposed_index",
+})
+
+
 class SQLiteStorageBackend(StorageBackend):
     """SQLite storage backend with optional sqlite-vec support."""
 
@@ -279,8 +295,9 @@ class SQLiteStorageBackend(StorageBackend):
         ]:
             try:
                 await self._connection.execute(col_sql)
-            except Exception:
-                pass  # Column already exists
+            except Exception as e:
+                # Column likely already exists (expected during migration)
+                self.logger.debug("Column migration note for '%s': %s", col_sql, e)
 
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(workspace_id, status) WHERE deleted_at IS NULL"
@@ -732,6 +749,9 @@ class SQLiteStorageBackend(StorageBackend):
 
     async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Optional[Memory]:
         """Update memory fields."""
+        invalid_keys = set(updates.keys()) - _UPDATABLE_MEMORY_COLUMNS
+        if invalid_keys:
+            raise ValueError(f"Invalid update fields: {invalid_keys}")
         # Build SET clause
         set_parts = []
         values = []
@@ -1212,10 +1232,12 @@ class SQLiteStorageBackend(StorageBackend):
         # Note: Use separate filters for base case (no table alias) and recursive case (with 'a.' prefix)
         base_rel_filter = ""
         recursive_rel_filter = ""
+        rel_params: tuple = ()
         if relationships:
-            rel_list = ", ".join([f"'{r}'" for r in relationships])
-            base_rel_filter = f"AND relationship IN ({rel_list})"
-            recursive_rel_filter = f"AND a.relationship IN ({rel_list})"
+            placeholders = ", ".join("?" * len(relationships))
+            base_rel_filter = f"AND relationship IN ({placeholders})"
+            recursive_rel_filter = f"AND a.relationship IN ({placeholders})"
+            rel_params = tuple(relationships)
 
         # Build direction condition for join and next node selection
         if direction == "outgoing":
@@ -1286,8 +1308,8 @@ class SQLiteStorageBackend(StorageBackend):
         SELECT * FROM graph_traverse;
         """
 
-        # Build final parameters: base_case_params + recursive_case_params
-        params = base_case_params + (workspace_id, max_depth)
+        # Build final parameters: base_case_params + rel_params (base filter) + recursive_case_params + rel_params (recursive filter)
+        params = base_case_params + rel_params + (workspace_id,) + rel_params + (max_depth,)
         cursor = await self._connection.execute(query, params)
         rows = await cursor.fetchall()
 
@@ -2016,6 +2038,10 @@ class SQLiteStorageBackend(StorageBackend):
     async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> 'Optional[ChatThread]':
         if not updates:
             return await self.get_thread(workspace_id, thread_id)
+
+        invalid_keys = set(updates.keys()) - _UPDATABLE_THREAD_COLUMNS
+        if invalid_keys:
+            raise ValueError(f"Invalid update fields: {invalid_keys}")
 
         set_clauses = []
         values = []

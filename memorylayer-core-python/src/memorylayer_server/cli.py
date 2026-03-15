@@ -1,8 +1,11 @@
 """MemoryLayer.ai CLI - Command line interface for memory infrastructure."""
 
+import logging
 import click
 
 from scitrera_app_framework import get_variables
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -48,7 +51,7 @@ def serve(host: str, port: int):
 @cli.command()
 def version():
     """Show version information."""
-    from memorylayer import __version__
+    from memorylayer_server import __version__
     click.echo(f"memorylayer.ai v{__version__}")
 
 
@@ -96,8 +99,8 @@ def export(workspace, output, offset, limit, include_associations, server_url, a
                                 if obj.get("type") == "footer":
                                     memories_count = obj.get("memories_exported", 0)
                                     associations_count = obj.get("associations_exported", 0)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("Skipped line during export footer parse: %s", e)
 
                     click.echo(f"Exported {memories_count} memories and {associations_count} associations to {output}")
                 else:
@@ -129,8 +132,8 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
         obj = json.loads(first_line)
         if obj.get("type") == "header":
             is_ndjson = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Skipped item during processing: %s", e)
 
     if is_ndjson:
         # NDJSON format
@@ -147,8 +150,8 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
                         memories.append(obj.get("data", {}))
                     elif obj_type == "association":
                         associations.append(obj.get("data", {}))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Skipped item during processing: %s", e)
     else:
         # JSON format
         with open(file, 'r') as f:
@@ -201,7 +204,7 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
 def info(output_format: str, reveal_secrets: bool):
     """Show system information and configuration."""
 
-    from memorylayer import __version__
+    from memorylayer_server import __version__
     from memorylayer_server.dependencies import _initialize_sync
     from datetime import datetime, timezone
     v = get_variables()

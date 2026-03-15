@@ -1288,6 +1288,36 @@ Top {limit} indices (comma-separated):"""
 
         return updated
 
+    async def update(
+            self,
+            workspace_id: str,
+            memory_id: str,
+            **updates,
+    ) -> Optional[Memory]:
+        """
+        Update a memory, recomputing content_hash and embedding when content changes.
+
+        Args:
+            workspace_id: Workspace the memory belongs to
+            memory_id: Memory identifier
+            **updates: Fields to update (content, type, importance, tags, etc.)
+
+        Returns:
+            Updated Memory object, or None if not found
+        """
+        self.logger.info("Updating memory: %s in workspace: %s", memory_id, workspace_id)
+
+        # If content changed, recompute content_hash and regenerate embedding
+        if "content" in updates:
+            updates["content_hash"] = compute_content_hash(updates["content"])
+            updates["embedding"] = await self.embedding.embed(updates["content"])
+
+        return await self.storage.update_memory(
+            workspace_id=workspace_id,
+            memory_id=memory_id,
+            **updates,
+        )
+
     async def get(
             self,
             workspace_id: str,

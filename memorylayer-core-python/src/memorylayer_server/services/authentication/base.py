@@ -19,8 +19,6 @@ from typing import Optional, TYPE_CHECKING
 
 from fastapi import Request
 from pydantic import BaseModel
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...models.auth import AuthIdentity, RequestContext
 from ...config import (
     MEMORYLAYER_AUTHENTICATION_SERVICE,
@@ -31,6 +29,7 @@ if TYPE_CHECKING:
     from ...models.session import Session
 
 from .._constants import EXT_AUTHENTICATION_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 # Header names
 HEADER_AUTHORIZATION = "Authorization"
@@ -219,27 +218,8 @@ class AuthenticationService(ABC):
 
 
 # noinspection PyAbstractClass
-class AuthenticationServicePluginBase(Plugin):
-    """Base plugin for authentication service with provider selection.
-
-    Subclasses set PROVIDER_NAME and are enabled when the
-    MEMORYLAYER_AUTHENTICATION_SERVICE env var matches that name.
-    """
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_AUTHENTICATION_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_AUTHENTICATION_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(
-            self, v, MEMORYLAYER_AUTHENTICATION_SERVICE, self_attr='PROVIDER_NAME',
-        )
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(
-            MEMORYLAYER_AUTHENTICATION_SERVICE,
-            DEFAULT_MEMORYLAYER_AUTHENTICATION_SERVICE,
-        )
+AuthenticationServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_AUTHENTICATION_SERVICE,
+    config_key=MEMORYLAYER_AUTHENTICATION_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_AUTHENTICATION_SERVICE,
+)

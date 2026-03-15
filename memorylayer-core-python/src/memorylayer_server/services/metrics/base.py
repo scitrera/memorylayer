@@ -4,10 +4,9 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Generator
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_METRICS_SERVICE, DEFAULT_MEMORYLAYER_METRICS_SERVICE
 from .._constants import EXT_METRICS_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 # Re-export for convenience
 __all__ = ["MetricsService", "MetricsServicePluginBase", "EXT_METRICS_SERVICE"]
@@ -77,19 +76,8 @@ class MetricsService(ABC):
 
 
 # noinspection PyAbstractClass
-class MetricsServicePluginBase(Plugin):
-    """Base plugin for metrics service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_METRICS_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_METRICS_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_METRICS_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        # Set a default value for MEMORYLAYER_METRICS_SERVICE; defaults are lower priority than .set(...) values
-        v.set_default_value(MEMORYLAYER_METRICS_SERVICE, DEFAULT_MEMORYLAYER_METRICS_SERVICE)
+MetricsServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_METRICS_SERVICE,
+    config_key=MEMORYLAYER_METRICS_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_METRICS_SERVICE,
+)

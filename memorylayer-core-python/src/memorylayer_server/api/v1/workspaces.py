@@ -34,7 +34,8 @@ from ...services.ontology import get_ontology_service as _get_ontology_service
 from ...services.memory import MemoryService
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
-from .deps import get_auth_service, get_authz_service, get_workspace_service, get_memory_service
+from .deps import get_auth_service, get_authz_service, get_workspace_service, get_memory_service, get_audit_service
+from ...services.audit import AuditService, AuditEvent
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 
@@ -56,6 +57,7 @@ async def create_workspace(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         workspace_service: WorkspaceService = Depends(get_workspace_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceResponse:
     """
@@ -104,6 +106,18 @@ async def create_workspace(
         workspace = await workspace_service.create_workspace(workspace)
 
         logger.info("Created workspace: %s", workspace_id)
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="workspace",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace.id,
+                user_id=ctx.user_id,
+                resource_type="workspace",
+                resource_id=workspace.id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for workspace create")
         return WorkspaceResponse(workspace=workspace)
 
     except ValueError as e:
@@ -177,6 +191,7 @@ async def get_workspace(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         workspace_service: WorkspaceService = Depends(get_workspace_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceResponse:
     """
@@ -213,6 +228,18 @@ async def get_workspace(
                 detail=f"Workspace not found: {workspace_id}"
             )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="workspace",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="workspace",
+                resource_id=workspace_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for workspace read")
         return WorkspaceResponse(workspace=workspace)
 
     except HTTPException:

@@ -4,10 +4,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_CONTRADICTION_PROVIDER, DEFAULT_MEMORYLAYER_CONTRADICTION_PROVIDER
 from .._constants import EXT_STORAGE_BACKEND, EXT_CONTRADICTION_SERVICE
+from .._plugin_factory import make_service_plugin_base
 from ...utils import generate_id
 
 
@@ -79,21 +78,9 @@ class ContradictionService(ABC):
 
 
 # noinspection PyAbstractClass
-class ContradictionServicePluginBase(Plugin):
-    """Base plugin for contradiction service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_CONTRADICTION_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_CONTRADICTION_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_CONTRADICTION_PROVIDER, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_CONTRADICTION_PROVIDER, DEFAULT_MEMORYLAYER_CONTRADICTION_PROVIDER)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND,)
+ContradictionServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_CONTRADICTION_SERVICE,
+    config_key=MEMORYLAYER_CONTRADICTION_PROVIDER,
+    default_value=DEFAULT_MEMORYLAYER_CONTRADICTION_PROVIDER,
+    dependencies=(EXT_STORAGE_BACKEND,),
+)
