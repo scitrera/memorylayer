@@ -3,6 +3,7 @@
 from .client import MemoryLayerClient
 from .exceptions import (
     AuthenticationError,
+    AuthorizationError,
     EnterpriseRequiredError,
     MemoryLayerError,
     NotFoundError,
@@ -83,6 +84,7 @@ __all__ = [
     # Exceptions
     "MemoryLayerError",
     "AuthenticationError",
+    "AuthorizationError",
     "EnterpriseRequiredError",
     "NotFoundError",
     "ValidationError",

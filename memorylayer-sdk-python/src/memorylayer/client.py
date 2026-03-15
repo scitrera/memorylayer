@@ -249,7 +249,7 @@ class MemoryLayerClient:
         importance: float = 0.5,
         tags: Optional[list[str]] = None,
         metadata: Optional[dict[str, Any]] = None,
-        space_id: Optional[str] = None,
+        context_id: Optional[str] = None,
     ) -> Memory:
         """
         Store a new memory.
@@ -261,7 +261,7 @@ class MemoryLayerClient:
             importance: Importance score 0.0-1.0 (default: 0.5)
             tags: Tags for categorization
             metadata: Additional metadata
-            space_id: Optional memory space ID
+            context_id: Optional context ID
 
         Returns:
             Created memory
@@ -287,8 +287,8 @@ class MemoryLayerClient:
             payload["tags"] = tags
         if metadata:
             payload["metadata"] = metadata
-        if space_id:
-            payload["space_id"] = space_id
+        if context_id:
+            payload["context_id"] = context_id
 
         data = await self._request("POST", "/memories", json=payload)
         return Memory(**data)

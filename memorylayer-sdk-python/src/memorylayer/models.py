@@ -27,6 +27,24 @@ class Memory(BaseModel):
     last_accessed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    # Additional server fields
+    content_hash: str | None = None
+    context_id: str | None = None
+    tenant_id: str = "_default"
+    decay_factor: float = 1.0
+    pinned: bool = False
+    status: str = "active"
+    abstract: str | None = None
+    overview: str | None = None
+    session_id: str | None = None
+    source_memory_id: str | None = None
+    observer_id: str | None = None
+    subject_id: str | None = None
+    relevance_score: float | None = None
+    boosted_score: float | None = None
+    source_scope: str | None = None
+    embedding: list[float] | None = None
+    archived_at: datetime | None = None
 
 
 class Association(BaseModel):
