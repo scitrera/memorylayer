@@ -176,18 +176,19 @@ export class MemoryLayerClient {
     success: boolean;
     total_memories: number;
     total_associations: number;
+    implemented: boolean;
+    message?: string;
     breakdown?: {
       by_type: Record<string, number>;
       by_subtype: Record<string, number>;
     };
   }> {
-    // SDK doesn't have a dedicated statistics endpoint yet
-    // For now, we'll return a basic response
-    // TODO: Implement when SDK adds statistics endpoint
     return {
       success: true,
       total_memories: 0,
       total_associations: 0,
+      implemented: false,
+      message: "Statistics endpoint not yet implemented in SDK. Values are placeholders.",
       breakdown: includeBreakdown ? {
         by_type: {},
         by_subtype: {}
@@ -207,11 +208,9 @@ export class MemoryLayerClient {
   }
 
   async auditMemories(_memoryId?: string, _autoResolve: boolean = false): Promise<ToolResponse> {
-    // SDK doesn't have audit endpoint yet
-    // TODO: Implement when SDK adds audit endpoint
     return {
-      success: true,
-      message: "Audit functionality not yet available in SDK"
+      success: false,
+      message: "Audit endpoint not yet implemented. This is a placeholder — no audit was performed."
     };
   }
 

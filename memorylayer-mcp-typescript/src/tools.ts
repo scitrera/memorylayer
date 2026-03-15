@@ -205,7 +205,7 @@ export const TOOLS = [
   // Advanced tools
   {
     name: "memory_statistics",
-    description: "Get memory statistics and analytics for the workspace. Use to understand memory usage patterns.",
+    description: "Get memory statistics and analytics for the workspace. Use to understand memory usage patterns. (placeholder — not yet implemented; returns zero values)",
     inputSchema: {
       type: "object",
       properties: {
@@ -256,7 +256,7 @@ export const TOOLS = [
   },
   {
     name: "memory_audit",
-    description: "Audit memories for contradictions and inconsistencies. Use to maintain knowledge base health.",
+    description: "Audit memories for contradictions and inconsistencies. Use to maintain knowledge base health. (placeholder — not yet implemented; no audit is performed)",
     inputSchema: {
       type: "object",
       properties: {
