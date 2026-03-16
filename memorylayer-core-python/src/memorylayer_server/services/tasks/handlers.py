@@ -94,7 +94,7 @@ class TaskHandlersSetupPlugin(Plugin):
         # Register task service handlers
         for handler_plugin in get_extensions(EXT_MULTI_TASK_HANDLERS, v).values():  # type: TaskHandlerPlugin
             task_type: str = handler_plugin.get_task_type()
-            handler: Callable[[dict], Awaitable[None]] = handler_plugin.handle
+            handler: Callable[[Variables, dict], Awaitable[None]] = handler_plugin.handle
             task_service.register_handler(task_type, handler)
 
         return task_service  # not really **critial** but we can pass through the task_service for convenience

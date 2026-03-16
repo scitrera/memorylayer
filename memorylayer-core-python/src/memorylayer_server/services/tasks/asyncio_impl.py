@@ -4,7 +4,7 @@ AsyncIO Task Service implementation.
 Simple in-memory task service using asyncio for local development and single-node deployments.
 """
 import asyncio
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Optional
 from uuid import uuid4
 from logging import Logger
 
@@ -49,7 +49,7 @@ class AsyncIOTaskService(TaskService):
             payload: dict,
             delay_seconds: int = 0,
             priority: int = 5
-    ) -> str:
+    ) -> Optional[str]:
         """
         Schedule a task for background execution.
 
@@ -90,7 +90,7 @@ class AsyncIOTaskService(TaskService):
             task_type: str,
             interval_seconds: int,
             payload: dict
-    ) -> str:
+    ) -> Optional[str]:
         """
         Schedule a recurring task.
 

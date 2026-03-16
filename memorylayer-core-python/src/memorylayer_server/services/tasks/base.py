@@ -6,7 +6,7 @@ Provides background task scheduling abstraction for memory lifecycle operations.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Optional
 
 from scitrera_app_framework.api import Variables
 
@@ -54,7 +54,7 @@ class TaskService(ABC):
             payload: dict,
             delay_seconds: int = 0,
             priority: int = 5
-    ) -> str:
+    ) -> Optional[str]:
         """
         Schedule a task for background execution.
 
@@ -65,7 +65,7 @@ class TaskService(ABC):
             priority: Task priority (1-10, lower is higher priority)
 
         Returns:
-            Task ID for tracking
+            Task ID for tracking, or None if tasks are disabled.
         """
         pass
 
@@ -75,7 +75,7 @@ class TaskService(ABC):
             task_type: str,
             interval_seconds: int,
             payload: dict
-    ) -> str:
+    ) -> Optional[str]:
         """
         Schedule a recurring task.
 
@@ -85,7 +85,7 @@ class TaskService(ABC):
             payload: Task payload data
 
         Returns:
-            Schedule ID for tracking/cancellation
+            Schedule ID for tracking/cancellation, or None if tasks are disabled.
         """
         pass
 
