@@ -33,7 +33,9 @@ from ...config import DEFAULT_TENANT_ID
 from .deps import (
     get_auth_service, get_authz_service,
     get_inference_service, get_reflect_service, get_cache_service,
+    get_audit_service,
 )
+from ...services.audit import AuditService, AuditEvent
 
 router = APIRouter(prefix="/v1/entities", tags=["entities"])
 
@@ -63,6 +65,7 @@ async def derive_entity_insights(
         authz_service: AuthorizationService = Depends(get_authz_service),
         inference_service: DefaultInferenceService = Depends(get_inference_service),
         cache_service: CacheService = Depends(get_cache_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> EntityDeriveResponse:
     """
@@ -94,6 +97,18 @@ async def derive_entity_insights(
         card_key = _card_cache_key(workspace_id, entity_id)
         await cache_service.delete(card_key)
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="entity",
+                action="update",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="entity",
+                resource_id=entity_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for entity derive")
         return EntityDeriveResponse(
             subject_id=entity_id,
             workspace_id=workspace_id,
@@ -132,6 +147,7 @@ async def get_entity_card(
         reflect_service: ReflectService = Depends(get_reflect_service),
         inference_service: DefaultInferenceService = Depends(get_inference_service),
         cache_service: CacheService = Depends(get_cache_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> EntityCardResponse:
     """
@@ -196,6 +212,18 @@ async def get_entity_card(
         # Cache the card
         await cache_service.set(card_key, card_data, ttl_seconds=ENTITY_CARD_CACHE_TTL)
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="entity",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="entity",
+                resource_id=entity_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for entity card read")
         return EntityCardResponse(**card_data)
 
     except HTTPException:
@@ -226,6 +254,7 @@ async def get_entity_insights(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         inference_service: DefaultInferenceService = Depends(get_inference_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> EntityInsightsResponse:
     """
@@ -250,6 +279,18 @@ async def get_entity_insights(
             limit=limit,
         )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="entity",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="entity",
+                resource_id=entity_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for entity insights read")
         return EntityInsightsResponse(
             entity_id=entity_id,
             workspace_id=workspace_id,

@@ -21,7 +21,8 @@ from .schemas import (
     ContradictionResponse,
     ErrorResponse,
 )
-from .deps import get_auth_service, get_authz_service
+from .deps import get_auth_service, get_authz_service, get_audit_service
+from ...services.audit import AuditService, AuditEvent
 
 router = APIRouter(prefix='/v1', tags=["contradictions"])
 
@@ -48,6 +49,7 @@ async def list_contradictions(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         contradiction_service: ContradictionService = Depends(get_contradiction_svc),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> ContradictionListResponse:
     """List unresolved contradictions for a workspace."""
@@ -82,6 +84,17 @@ async def list_contradictions(
             )
             for r in records
         ]
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="contradiction",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="contradiction",
+            ))
+        except Exception:
+            logger.debug("Audit record failed for contradiction list")
         return ContradictionListResponse(contradictions=contradictions, count=len(contradictions))
     except Exception as e:
         logger.error("Failed to list contradictions: %s", e, exc_info=True)
@@ -110,6 +123,7 @@ async def resolve_contradiction(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         contradiction_service: ContradictionService = Depends(get_contradiction_svc),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> ContradictionResponse:
     """Resolve a contradiction with a chosen strategy."""
@@ -156,6 +170,18 @@ async def resolve_contradiction(
                 detail=f"Contradiction {contradiction_id} not found"
             )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="contradiction",
+                action="resolve",
+                tenant_id=ctx.tenant_id,
+                workspace_id=effective_workspace_id,
+                user_id=ctx.user_id,
+                resource_type="contradiction",
+                resource_id=contradiction_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for contradiction resolve")
         return ContradictionResponse(
             id=record.id,
             workspace_id=record.workspace_id,

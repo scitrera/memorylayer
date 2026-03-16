@@ -39,7 +39,8 @@ from ...models.chat import (
 from ...services.chat import ChatService
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
-from .deps import get_auth_service, get_authz_service, get_chat_service
+from .deps import get_auth_service, get_authz_service, get_chat_service, get_audit_service
+from ...services.audit import AuditService, AuditEvent
 
 router = APIRouter(prefix="/v1/threads", tags=["chat"])
 
@@ -60,6 +61,7 @@ async def create_thread(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> ThreadResponse:
     """Create a new chat thread."""
@@ -87,6 +89,18 @@ async def create_thread(
             input=input_data,
         )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="thread",
+                resource_id=thread.thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for thread create")
         return ThreadResponse(thread=thread)
 
     except HTTPException:
@@ -116,6 +130,7 @@ async def list_threads(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> ThreadListResponse:
     """List chat threads, optionally filtered by workspace and user."""
@@ -133,6 +148,17 @@ async def list_threads(
             offset=offset,
         )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="thread",
+            ))
+        except Exception:
+            logger.debug("Audit record failed for thread list")
         return ThreadListResponse(threads=threads, total_count=len(threads))
 
     except HTTPException:
@@ -159,6 +185,7 @@ async def get_thread(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> ThreadResponse:
     """Get thread metadata by ID."""
@@ -176,6 +203,18 @@ async def get_thread(
                 detail=f"Thread {thread_id} not found",
             )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="thread",
+                resource_id=thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for thread read")
         return ThreadResponse(thread=thread)
 
     except HTTPException:
@@ -205,6 +244,7 @@ async def get_thread_full(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> ThreadWithMessagesResponse:
     """Get thread with all messages inlined (paginated)."""
@@ -228,6 +268,18 @@ async def get_thread_full(
                 detail=f"Thread {thread_id} not found",
             )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="thread",
+                resource_id=thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for thread full read")
         return ThreadWithMessagesResponse(
             thread=result.thread,
             messages=result.messages,
@@ -258,6 +310,7 @@ async def delete_thread(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ):
     """Delete a thread and all its messages."""
@@ -274,6 +327,19 @@ async def delete_thread(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Thread {thread_id} not found",
             )
+
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="delete",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="thread",
+                resource_id=thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for thread delete")
 
     except HTTPException:
         raise
@@ -301,6 +367,7 @@ async def append_messages(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> MessagesAppendResponse:
     """Append messages to a chat thread."""
@@ -338,6 +405,18 @@ async def append_messages(
         thread = await chat_service.get_thread(workspace_id, thread_id)
         new_count = thread.message_count if thread else len(messages)
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="message",
+                resource_id=thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for message append")
         return MessagesAppendResponse(
             messages=messages,
             thread_id=thread_id,
@@ -374,6 +453,7 @@ async def get_messages(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> MessageListResponse:
     """Get messages from a chat thread with pagination."""
@@ -401,6 +481,18 @@ async def get_messages(
             order=order,
         )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="message",
+                resource_id=thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for message read")
         return MessageListResponse(
             messages=messages,
             thread_id=thread_id,
@@ -431,6 +523,7 @@ async def decompose_thread(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> ThreadDecomposeResponse:
     """Trigger on-demand memory decomposition for unprocessed messages."""
@@ -443,6 +536,18 @@ async def decompose_thread(
 
         result = await chat_service.trigger_decomposition(workspace_id, thread_id)
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="thread",
+                resource_id=thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for thread decompose")
         return ThreadDecomposeResponse(
             thread_id=result.thread_id,
             workspace_id=result.workspace_id,

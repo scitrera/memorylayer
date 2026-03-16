@@ -26,7 +26,8 @@ from .schemas import (
     GraphQueryResult,
     ErrorResponse,
 )
-from .deps import get_auth_service, get_authz_service
+from .deps import get_auth_service, get_authz_service, get_audit_service
+from ...services.audit import AuditService, AuditEvent
 
 router = APIRouter(prefix='/v1', tags=["associations"])
 
@@ -57,6 +58,7 @@ async def create_association(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         association_service: AssociationService = Depends(get_association_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> AssociationResponse:
     """
@@ -105,6 +107,18 @@ async def create_association(
         )
 
         logger.info("Created association: %s", association.id)
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="association",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="association",
+                resource_id=association.id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for association create")
         return AssociationResponse(association=association)
 
     except ValueError as e:
@@ -146,6 +160,7 @@ async def get_associations(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         association_service: AssociationService = Depends(get_association_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> AssociationListResponse:
     """
@@ -196,6 +211,18 @@ async def get_associations(
         )
 
         logger.debug("Found %d associations for memory: %s", len(associations), memory_id)
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="association",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="association",
+                resource_id=memory_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for association read")
         return AssociationListResponse(
             associations=associations,
             total_count=len(associations)
@@ -240,6 +267,7 @@ async def traverse_from_memory(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         association_service: AssociationService = Depends(get_association_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> GraphQueryResult:
     """
@@ -292,6 +320,18 @@ async def traverse_from_memory(
             len(result.unique_nodes)
         )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="association",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="association",
+                resource_id=memory_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for association traverse")
         return result
 
     except ValueError as e:
