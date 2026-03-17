@@ -106,6 +106,17 @@ class TaskHandlersSetupPlugin(Plugin):
             # Schedule recurring tasks
             schedule = handler_plugin.get_schedule(v)
             if schedule:
+                # Guard: verify payload is serializable (catches service objects at startup)
+                import json
+                try:
+                    json.dumps(schedule.default_payload)
+                except TypeError as e:
+                    raise TypeError(
+                        "Task handler '%s' has a non-serializable default_payload: %s. "
+                        "Move service resolution from get_schedule() to handle()."
+                        % (handler_plugin.get_task_type(), e)
+                    ) from e
+
                 await task_service.schedule_recurring(
                     handler_plugin.get_task_type(),
                     schedule.interval_seconds,

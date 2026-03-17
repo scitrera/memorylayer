@@ -68,17 +68,14 @@ class ChatThreadCleanupTaskHandlerPlugin(TaskHandlerPlugin):
         return 'cleanup_expired_threads'
 
     def get_schedule(self, v: Variables) -> Optional['TaskSchedule']:
-        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
-
         interval: int = v.environ(
             MEMORYLAYER_BACKGROUND_CHAT_THREAD_CLEANUP_INTERVAL,
             default=DEFAULT_CLEANUP_INTERVAL,
             type_fn=int
         )
-        return TaskSchedule(interval_seconds=interval, default_payload={
-            'storage': storage,
-            'logger': get_logger(name=self.get_task_type(), v=v)
-        })
+        return TaskSchedule(interval_seconds=interval, default_payload={})
 
     async def handle(self, v: Variables, payload: dict):
-        return await periodic_chat_thread_cleanup_task(**payload)
+        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
+        logger = get_logger(name=self.get_task_type(), v=v)
+        return await periodic_chat_thread_cleanup_task(storage=storage, logger=logger)

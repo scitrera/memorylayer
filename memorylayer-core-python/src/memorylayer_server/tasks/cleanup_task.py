@@ -90,9 +90,6 @@ class SessionCleanupTaskHandlerPlugin(TaskHandlerPlugin):
         return 'session_cleanup'
 
     def get_schedule(self, v: Variables) -> Optional['TaskSchedule']:
-        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
-        session_service: SessionService = self.get_extension(EXT_SESSION_SERVICE, v)
-
         interval: int = v.environ(
             MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_INTERVAL,
             default=DEFAULT_CLEANUP_INTERVAL,
@@ -104,11 +101,16 @@ class SessionCleanupTaskHandlerPlugin(TaskHandlerPlugin):
             type_fn=ext_parse_bool
         )
         return TaskSchedule(interval_seconds=interval, default_payload={
-            'storage': storage,
-            'session_service': session_service,
             'auto_commit_enabled': auto_commit_enabled,
-            'logger': get_logger(name=self.get_task_type(), v=v)
         })
 
     async def handle(self, v: Variables, payload: dict):
-        return await periodic_session_cleanup_task(**payload)
+        storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
+        session_service: SessionService = self.get_extension(EXT_SESSION_SERVICE, v)
+        logger = get_logger(name=self.get_task_type(), v=v)
+        return await periodic_session_cleanup_task(
+            storage=storage,
+            session_service=session_service,
+            auto_commit_enabled=payload.get('auto_commit_enabled', DEFAULT_AUTO_COMMIT_ENABLED),
+            logger=logger,
+        )

@@ -4,13 +4,13 @@ from scitrera_app_framework.api import enabled_option_pattern
 
 
 def make_service_plugin_base(
-    *,
-    ext_name: str,
-    config_key: str,
-    default_value: str,
-    dependencies: tuple[str, ...] = (),
-    extra_defaults: dict | None = None,
-) -> type:
+        *,
+        ext_name: str,
+        config_key: str,
+        default_value: str,
+        dependencies: tuple[str, ...] = (),
+        extra_defaults: dict | None = None,
+) -> type[Plugin]:
     """Create a PluginBase class with standard service plugin boilerplate.
 
     Args:

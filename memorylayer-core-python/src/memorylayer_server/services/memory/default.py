@@ -416,7 +416,6 @@ class MemoryService:
                     'memory_id': memory.id,
                     'workspace_id': workspace_id,
                     'content': memory.content,
-                    'embedding': embedding,
                     'classify_type': classify_type,
                 })
             except Exception as e:
