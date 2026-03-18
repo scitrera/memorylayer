@@ -873,6 +873,40 @@ class MemoryService:
 
         return result
 
+    async def _recall_browse(
+            self,
+            workspace_id: str,
+            input: RecallInput,
+    ) -> RecallResult:
+        """Browse memories without embedding — used for wildcard queries like '*'.
+
+        Returns recent memories ordered by creation time, skipping the
+        embedding + vector search path entirely.
+        """
+        self.logger.debug("Wildcard query detected, using browse mode for workspace %s", workspace_id)
+        far_past = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        recent = await self.storage.get_recent_memories(
+            workspace_id=workspace_id,
+            created_after=far_past,
+            limit=input.limit,
+            detail_level="full",
+            offset=input.offset,
+        )
+        # get_recent_memories returns dicts; fetch full Memory objects by ID
+        memories = []
+        for entry in recent:
+            mem = await self.storage.get_memory(workspace_id, entry["id"], track_access=False)
+            if mem is not None:
+                memories.append(mem)
+
+        return RecallResult(
+            memories=memories,
+            total_count=len(memories),
+            query_tokens=0,
+            search_latency_ms=0,
+            mode_used=RecallMode.RAG,
+        )
+
     async def _recall_rag(
             self,
             workspace_id: str,
@@ -880,6 +914,10 @@ class MemoryService:
             relevance_threshold: float,
     ) -> RecallResult:
         """Pure vector similarity search."""
+        # Wildcard/browse: skip embedding for trivial queries like "*"
+        if input.query.strip() in ("*", "**", ""):
+            return await self._recall_browse(workspace_id, input)
+
         # Generate query embedding
         query_embedding = await self.embedding.embed(input.query)
 
