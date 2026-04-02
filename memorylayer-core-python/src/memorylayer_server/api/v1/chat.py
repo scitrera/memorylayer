@@ -5,6 +5,7 @@ Endpoints:
 - POST   /v1/threads              - Create a new chat thread
 - GET    /v1/threads              - List threads (filter by workspace, user)
 - GET    /v1/threads/{id}         - Get thread metadata
+- PUT    /v1/threads/{id}         - Update thread (e.g. rename)
 - GET    /v1/threads/{id}/full    - Get thread with messages inlined
 - DELETE /v1/threads/{id}         - Delete thread and messages
 - POST   /v1/threads/{id}/messages   - Append messages
@@ -21,6 +22,7 @@ from .. import EXT_MULTI_API_ROUTERS
 from memorylayer_server.lifecycle.fastapi import get_logger
 from .schemas import (
     ThreadCreateRequest,
+    ThreadUpdateRequest,
     ThreadResponse,
     ThreadListResponse,
     MessagesAppendRequest,
@@ -224,6 +226,76 @@ async def get_thread(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get thread",
+        )
+
+
+@router.put(
+    "/{thread_id}",
+    response_model=ThreadResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "Thread not found"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+    },
+)
+async def update_thread(
+        http_request: Request,
+        thread_id: str,
+        request: ThreadUpdateRequest,
+        workspace_id: Optional[str] = Query(None, description="Workspace filter"),
+        auth_service: AuthenticationService = Depends(get_auth_service),
+        authz_service: AuthorizationService = Depends(get_authz_service),
+        chat_service: ChatService = Depends(get_chat_service),
+        audit_service: AuditService = Depends(get_audit_service),
+        logger: logging.Logger = Depends(get_logger),
+) -> ThreadResponse:
+    """Update a thread (e.g. rename)."""
+    try:
+        ctx = await auth_service.build_context(http_request, request)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(
+            ctx, "threads", "write", workspace_id=workspace_id
+        )
+
+        updates = request.model_dump(exclude_none=True)
+        if not updates:
+            # Nothing to update, just return the current thread
+            thread = await chat_service.get_thread(workspace_id, thread_id)
+            if not thread:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Thread {thread_id} not found",
+                )
+            return ThreadResponse(thread=thread)
+
+        thread = await chat_service.update_thread(workspace_id, thread_id, **updates)
+        if not thread:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Thread {thread_id} not found",
+            )
+
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="chat",
+                action="update",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="thread",
+                resource_id=thread_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for thread update")
+        return ThreadResponse(thread=thread)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to update thread %s: %s", thread_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update thread",
         )
 
 

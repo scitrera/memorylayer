@@ -1,13 +1,18 @@
 """Default contradiction service implementation."""
+import re
 from logging import Logger
 from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from .base import ContradictionService, ContradictionServicePluginBase, ContradictionRecord
+from .base import (
+    ContradictionService, ContradictionServicePluginBase, ContradictionRecord,
+    CONTRADICTION_TYPE_NEGATION, CONTRADICTION_TYPE_SEMANTIC_VALUE_CONFLICT,
+)
 from ..storage import EXT_STORAGE_BACKEND
 from ..storage.base import StorageBackend
+from ...utils import dot_product as _dot_product_util
 
 # Negation pairs used for simple textual contradiction detection.
 # For each pair, if text_a contains one term and text_b contains the other,
@@ -63,14 +68,18 @@ class DefaultContradictionService(ContradictionService):
             if existing_memory.id == memory_id:
                 continue
 
+            # Determine which memory is newer for temporal ordering
+            newer_id = self._determine_newer_memory(new_memory, existing_memory)
+
             if self._has_negation_pattern(new_memory.content, existing_memory.content):
                 record = ContradictionRecord(
                     workspace_id=workspace_id,
                     memory_a_id=memory_id,
                     memory_b_id=existing_memory.id,
-                    contradiction_type='negation',
+                    contradiction_type=CONTRADICTION_TYPE_NEGATION,
                     confidence=relevance,
                     detection_method='negation_pattern',
+                    newer_memory_id=newer_id,
                 )
                 stored = await self._storage.create_contradiction(record)
                 contradictions.append(stored)
@@ -163,6 +172,247 @@ class DefaultContradictionService(ContradictionService):
                 return True
 
         return False
+
+    @staticmethod
+    def _extract_entity_values(text: str) -> list[tuple[str, str, str]]:
+        """Extract (subject, predicate, value) triples from text using regex patterns.
+
+        Patterns match constructions like:
+          "<subject> is <value>"
+          "<subject> uses <value>"
+          "<subject> runs <value>"
+
+        Args:
+            text: Text to extract entity-value pairs from
+
+        Returns:
+            List of (subject, predicate, value) tuples (all lowercased)
+        """
+        patterns = [
+            r'(\w[\w\s]{1,30}?)\s+(is|uses|runs|has|uses|requires|needs)\s+([\w][\w\s\-\.]{0,40})',
+        ]
+        results = []
+        lower_text = text.lower()
+        for pattern in patterns:
+            for match in re.finditer(pattern, lower_text):
+                subject = match.group(1).strip()
+                predicate = match.group(2).strip()
+                value = match.group(3).strip()
+                # Filter out very short or very long subjects/values
+                if 2 <= len(subject) <= 50 and 1 <= len(value) <= 60:
+                    results.append((subject, predicate, value))
+        return results
+
+    @staticmethod
+    def _dot_product(vec_a: list[float], vec_b: list[float]) -> float:
+        """Compute dot product similarity between two vectors (assumed unit-normalized)."""
+        return _dot_product_util(vec_a, vec_b)
+
+    @staticmethod
+    def _determine_newer_memory(memory_a, memory_b) -> Optional[str]:
+        """Determine which memory is newer based on created_at timestamp.
+
+        Returns the ID of the newer memory, or None if timestamps are unavailable.
+        """
+        created_a = getattr(memory_a, 'created_at', None)
+        created_b = getattr(memory_b, 'created_at', None)
+        if created_a is None or created_b is None:
+            return None
+        return memory_a.id if created_a >= created_b else memory_b.id
+
+    async def check_semantic_conflict(self, memory_a, memory_b) -> Optional[ContradictionRecord]:
+        """Check if two memories have a semantic value conflict.
+
+        Detection logic:
+        1. Compute embedding similarity; must be in range [0.7, 0.9] (similar topic, not identical)
+        2. Extract entity-value triples from each memory
+        3. If two triples share the same subject+predicate but have different values → conflict
+
+        Args:
+            memory_a: First memory object
+            memory_b: Second memory object
+
+        Returns:
+            ContradictionRecord if a conflict is found, None otherwise
+        """
+        # Both memories need embeddings for similarity check
+        emb_a = getattr(memory_a, 'embedding', None)
+        emb_b = getattr(memory_b, 'embedding', None)
+        if not emb_a or not emb_b:
+            return None
+
+        similarity = self._dot_product(emb_a, emb_b)
+
+        # Similarity in [0.7, 0.9]: related topic but different enough to conflict
+        if not (0.7 <= similarity <= 0.9):
+            return None
+
+        triples_a = self._extract_entity_values(memory_a.content)
+        triples_b = self._extract_entity_values(memory_b.content)
+
+        if not triples_a or not triples_b:
+            return None
+
+        # Build lookup: (subject, predicate) -> value for memory_b
+        lookup_b: dict[tuple[str, str], str] = {
+            (subj, pred): val for subj, pred, val in triples_b
+        }
+
+        for subj_a, pred_a, val_a in triples_a:
+            key = (subj_a, pred_a)
+            if key in lookup_b:
+                val_b = lookup_b[key]
+                if val_a != val_b:
+                    newer_id = self._determine_newer_memory(memory_a, memory_b)
+                    record = ContradictionRecord(
+                        workspace_id=memory_a.workspace_id if hasattr(memory_a, 'workspace_id') else '',
+                        memory_a_id=memory_a.id,
+                        memory_b_id=memory_b.id,
+                        contradiction_type=CONTRADICTION_TYPE_SEMANTIC_VALUE_CONFLICT,
+                        confidence=similarity,
+                        detection_method='entity_value_extraction',
+                        newer_memory_id=newer_id,
+                    )
+                    self.logger.debug(
+                        "Semantic conflict: subject=%r predicate=%r val_a=%r val_b=%r",
+                        subj_a, pred_a, val_a, val_b,
+                    )
+                    return record
+
+        return None
+
+    async def scan_workspace(
+        self,
+        workspace_id: str,
+        batch_size: int = 50,
+    ) -> list[ContradictionRecord]:
+        """Scan all memories in workspace for contradictions using pairwise comparison.
+
+        For each memory with an embedding, searches for similar memories and checks
+        both negation patterns and semantic value conflicts. Skips pairs that already
+        have a recorded contradiction.
+
+        Args:
+            workspace_id: Workspace to scan
+            batch_size: Memories per batch for embedding search
+
+        Returns:
+            List of newly created contradiction records
+        """
+        self.logger.info("Starting workspace contradiction scan for workspace %s", workspace_id)
+
+        # Collect all existing contradiction pairs to avoid duplicates
+        existing = await self._storage.get_unresolved_contradictions(workspace_id, limit=10000)
+        existing_pairs: set[frozenset] = {
+            frozenset([c.memory_a_id, c.memory_b_id]) for c in existing
+        }
+
+        # Get workspace stats to understand scale
+        try:
+            stats = await self._storage.get_workspace_stats(workspace_id)
+            total_memories = stats.get('total_memories', 0)
+        except Exception:
+            total_memories = 0
+
+        self.logger.info("Workspace %s has ~%d memories to scan", workspace_id, total_memories)
+
+        new_contradictions: list[ContradictionRecord] = []
+        seen_pairs: set[frozenset] = set(existing_pairs)
+
+        # Use recent memories as scan seeds - fetch in batches
+        offset = 0
+        from datetime import datetime, timezone, timedelta
+        # Use a far-back date to get all memories
+        epoch = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+        while True:
+            batch = await self._storage.get_recent_memories(
+                workspace_id,
+                created_after=epoch,
+                limit=batch_size,
+                detail_level='full',
+                offset=offset,
+            )
+            if not batch:
+                break
+
+            offset += len(batch)
+
+            # Convert batch dicts to memory objects if needed
+            memory_objects = []
+            for item in batch:
+                if isinstance(item, dict):
+                    # get_recent_memories returns dicts; fetch the full Memory object
+                    mem_id = item.get('id')
+                    if mem_id:
+                        mem = await self._storage.get_memory(workspace_id, mem_id, track_access=False)
+                        if mem and mem.embedding:
+                            memory_objects.append(mem)
+                else:
+                    if getattr(item, 'embedding', None):
+                        memory_objects.append(item)
+
+            for memory in memory_objects:
+                if not memory.embedding:
+                    continue
+
+                # Search for similar memories to this one
+                similar = await self._storage.search_memories(
+                    workspace_id,
+                    query_embedding=memory.embedding,
+                    limit=20,
+                    min_relevance=0.7,
+                )
+
+                for candidate, relevance in similar:
+                    if candidate.id == memory.id:
+                        continue
+
+                    pair = frozenset([memory.id, candidate.id])
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+
+                    # Check negation pattern
+                    if self._has_negation_pattern(memory.content, candidate.content):
+                        newer_id = self._determine_newer_memory(memory, candidate)
+                        record = ContradictionRecord(
+                            workspace_id=workspace_id,
+                            memory_a_id=memory.id,
+                            memory_b_id=candidate.id,
+                            contradiction_type=CONTRADICTION_TYPE_NEGATION,
+                            confidence=relevance,
+                            detection_method='negation_pattern',
+                            newer_memory_id=newer_id,
+                        )
+                        stored = await self._storage.create_contradiction(record)
+                        new_contradictions.append(stored)
+                        self.logger.info(
+                            "Scan found negation contradiction: %s vs %s (%.2f)",
+                            memory.id, candidate.id, relevance,
+                        )
+                        continue
+
+                    # Check semantic value conflict
+                    conflict = await self.check_semantic_conflict(memory, candidate)
+                    if conflict:
+                        conflict.workspace_id = workspace_id
+                        stored = await self._storage.create_contradiction(conflict)
+                        new_contradictions.append(stored)
+                        self.logger.info(
+                            "Scan found semantic conflict: %s vs %s (%.2f)",
+                            memory.id, candidate.id, relevance,
+                        )
+
+            # If batch was smaller than batch_size, we've reached the end
+            if len(batch) < batch_size:
+                break
+
+        self.logger.info(
+            "Workspace scan complete for %s: found %d new contradictions",
+            workspace_id, len(new_contradictions),
+        )
+        return new_contradictions
 
 
 class DefaultContradictionServicePlugin(ContradictionServicePluginBase):

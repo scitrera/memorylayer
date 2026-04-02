@@ -704,7 +704,7 @@ export const TOOL_NAMES = {
 /**
  * Tool profile definitions.
  *
- * - "cc": Claude Code profile (default) - 9 essential tools for agent memory
+ * - "cc": Claude Code profile (default) - core + session + context + chat tools for agent memory
  * - "full": All tools enabled - for power users and advanced use cases
  * - "minimal": Just remember/recall - absolute minimum
  */

@@ -34,6 +34,7 @@ class MemoryCreateRequest(BaseModel):
     context_id: Optional[str] = Field(None, description="Target memory context")
     observer_id: Optional[str] = Field(None, description="Entity doing the observing/remembering (agent ID, user ID, etc.)")
     subject_id: Optional[str] = Field(None, description="Entity this memory is about")
+    user_id: Optional[str] = Field(None, description="User scope for this memory")
 
 
 class MemoryUpdateRequest(BaseModel):
@@ -59,6 +60,7 @@ class MemoryRecallRequest(BaseModel):
     context_id: Optional[str] = Field(None, description="Filter by memory context")
     observer_id: Optional[str] = Field(None, description="Filter by observer entity")
     subject_id: Optional[str] = Field(None, description="Filter by subject entity")
+    user_id: Optional[str] = Field(None, description="Filter by user")
     mode: Optional[RecallMode] = Field(None, description="Retrieval strategy (None = server default)")
     tolerance: Optional[SearchTolerance] = Field(None, description="Search precision (None = server default)")
     limit: int = Field(10, ge=1, le=100, description="Maximum memories to return")
@@ -74,6 +76,7 @@ class MemoryRecallRequest(BaseModel):
     rag_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Use LLM if RAG confidence < threshold")
     detail_level: Optional[str] = Field(None, description="Detail level: abstract, overview, or full (None = server default)")
     include_archived: bool = Field(False, description="Include archived memories in recall results")
+    exclude_ids: list[str] = Field(default_factory=list, description="Memory IDs to exclude from results (already shown to user)")
 
 
 class MemoryReflectRequest(BaseModel):
@@ -430,6 +433,20 @@ class ContradictionResolveRequest(BaseModel):
     merged_content: Optional[str] = Field(None, description="Merged content (required when resolution is 'merge')")
 
 
+class ContradictionScanRequest(BaseModel):
+    """Request model for triggering a workspace contradiction scan."""
+
+    batch_size: Optional[int] = Field(None, ge=1, le=500, description="Number of memories to process per batch (server default if omitted)")
+
+
+class ContradictionScanResponse(BaseModel):
+    """Response from a workspace contradiction scan."""
+
+    workspace_id: str = Field(..., description="Workspace that was scanned")
+    contradictions_found: int = Field(..., description="Number of new contradictions detected")
+    contradictions: list[ContradictionResponse] = Field(..., description="Newly detected contradictions")
+
+
 # ============================================
 # Context Environment API Schemas
 # ============================================
@@ -679,6 +696,13 @@ class ThreadCreateRequest(BaseModel):
     title: Optional[str] = Field(None, description="Optional display title")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
     expires_at: Optional[datetime] = Field(None, description="Optional expiration (None = permanent)")
+
+
+class ThreadUpdateRequest(BaseModel):
+    """Request schema for updating a chat thread."""
+
+    title: Optional[str] = Field(None, description="Updated display title")
+    metadata: Optional[dict[str, Any]] = Field(None, description="Updated metadata")
 
 
 class ThreadResponse(BaseModel):

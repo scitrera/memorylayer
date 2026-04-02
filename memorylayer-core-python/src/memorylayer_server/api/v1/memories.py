@@ -122,6 +122,7 @@ async def create_memory(
             context_id=request.context_id or ctx.context_id,
             observer_id=request.observer_id,
             subject_id=request.subject_id,
+            user_id=request.user_id if request.user_id is not None else ctx.user_id,
         )
 
         # Store memory
@@ -461,6 +462,7 @@ async def recall_memories(
             context_id=request.context_id or ctx.context_id,
             observer_id=request.observer_id,
             subject_id=request.subject_id,
+            user_id=request.user_id if request.user_id is not None else ctx.user_id,
             mode=request.mode,
             tolerance=request.tolerance,
             limit=request.limit,
@@ -474,6 +476,7 @@ async def recall_memories(
             context=request.context,
             rag_threshold=request.rag_threshold,
             include_archived=request.include_archived,
+            exclude_ids=request.exclude_ids,
         )
 
         # Perform recall

@@ -31,7 +31,7 @@ _UPDATABLE_MEMORY_COLUMNS = frozenset({
     "content", "content_hash", "type", "subtype", "importance",
     "tags", "metadata", "embedding", "abstract", "overview",
     "pinned", "category", "decay_factor", "status", "archived_at",
-    "observer_id", "subject_id", "source_scope",
+    "observer_id", "subject_id",
     "access_count", "last_accessed_at", "created_at", "updated_at",
     "source_memory_id",
 })
@@ -888,17 +888,22 @@ class SQLiteStorageBackend(StorageBackend):
             include_archived: bool = False,
             observer_id: Optional[str] = None,
             subject_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            user_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search using sqlite-vec or fallback."""
         if self._has_vec_extension:
             return await self._search_with_vec(
                 workspace_id, query_embedding, limit, offset, min_relevance, types, subtypes, tags,
                 include_archived=include_archived, observer_id=observer_id, subject_id=subject_id,
+                created_after=created_after, created_before=created_before, user_id=user_id,
             )
         else:
             return await self._search_with_fallback(
                 workspace_id, query_embedding, limit, offset, min_relevance, types, subtypes, tags,
                 include_archived=include_archived, observer_id=observer_id, subject_id=subject_id,
+                created_after=created_after, created_before=created_before, user_id=user_id,
             )
 
     async def _search_with_vec(
@@ -914,6 +919,9 @@ class SQLiteStorageBackend(StorageBackend):
             include_archived: bool = False,
             observer_id: Optional[str] = None,
             subject_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            user_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Search using sqlite-vec extension."""
         # Build WHERE clause
@@ -944,6 +952,18 @@ class SQLiteStorageBackend(StorageBackend):
         if subject_id is not None:
             where_parts.append("subject_id = ?")
             params.append(subject_id)
+
+        if user_id is not None:
+            where_parts.append("user_id = ?")
+            params.append(user_id)
+
+        if created_after is not None:
+            where_parts.append("created_at >= ?")
+            params.append(str(created_after))
+
+        if created_before is not None:
+            where_parts.append("created_at <= ?")
+            params.append(str(created_before))
 
         where_clause = " AND ".join(where_parts)
 
@@ -989,6 +1009,9 @@ class SQLiteStorageBackend(StorageBackend):
             include_archived: bool = False,
             observer_id: Optional[str] = None,
             subject_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            user_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Fallback: compute cosine similarity in Python."""
         # Build WHERE clause
@@ -1016,9 +1039,21 @@ class SQLiteStorageBackend(StorageBackend):
             where_parts.append("observer_id = ?")
             params.append(observer_id)
 
+        if created_after is not None:
+            where_parts.append("created_at >= ?")
+            params.append(str(created_after))
+
+        if created_before is not None:
+            where_parts.append("created_at <= ?")
+            params.append(str(created_before))
+
         if subject_id is not None:
             where_parts.append("subject_id = ?")
             params.append(subject_id)
+
+        if user_id is not None:
+            where_parts.append("user_id = ?")
+            params.append(user_id)
 
         where_clause = " AND ".join(where_parts)
 
@@ -1041,6 +1076,12 @@ class SQLiteStorageBackend(StorageBackend):
         results.sort(key=lambda x: x[1], reverse=True)
         return results[offset:offset + limit]
 
+    @staticmethod
+    def _sanitize_fts5_query(query: str) -> str:
+        """Escape FTS5 special syntax to prevent query injection."""
+        escaped = query.replace('"', '""')
+        return f'"{escaped}"'
+
     async def full_text_search(
             self,
             workspace_id: str,
@@ -1059,7 +1100,7 @@ class SQLiteStorageBackend(StorageBackend):
               AND m.deleted_at IS NULL
             LIMIT ? OFFSET ?
             """,
-            (workspace_id, query, limit, offset),
+            (workspace_id, self._sanitize_fts5_query(query), limit, offset),
         )
         rows = await cursor.fetchall()
 

@@ -1,7 +1,7 @@
 {
   "name": "memorylayer",
-  "version": "0.0.5",
-  "description": "Persistent memory for Claude Code - never lose context to compaction again",
+  "version": "0.0.6",
+  "description": "Persistent memory for Claude Code — knowledge graph, context sandbox, and recall that survives compaction",
   "author": {
     "name": "scitrera.ai",
     "email": "open-source-team@scitrera.com"
@@ -15,6 +15,9 @@
     "persistence",
     "knowledge-graph",
     "recall",
-    "compaction"
+    "compaction",
+    "agent",
+    "llm",
+    "ai"
   ]
 }

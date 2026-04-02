@@ -57,6 +57,16 @@ class ChatService(ABC):
         pass
 
     @abstractmethod
+    async def update_thread(
+            self,
+            workspace_id: str,
+            thread_id: str,
+            **updates,
+    ) -> Optional[ChatThread]:
+        """Update thread fields (e.g. title, metadata)."""
+        pass
+
+    @abstractmethod
     async def delete_thread(
             self,
             workspace_id: str,

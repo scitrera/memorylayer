@@ -1,5 +1,6 @@
 """MemoryLayer.ai CLI - Command line interface for memory infrastructure."""
 
+import json
 import logging
 import click
 

@@ -17,7 +17,8 @@ export enum MemorySubtype {
   PROFILE = "profile",
   ENTITY = "entity",
   EVENT = "event",
-  DIRECTIVE = "directive"
+  DIRECTIVE = "directive",
+  INFERENCE = "inference"
 }
 
 export enum RecallMode {
@@ -336,9 +337,9 @@ export interface GraphQueryResult {
 
 // Batch operations
 export type BatchOperation =
-  | { action: "create"; memory: RememberOptions & { content: string } }
-  | { action: "update"; memory_id: string; updates: Partial<RememberOptions> & { content?: string } }
-  | { action: "delete"; memory_id: string; hard?: boolean };
+  | { op: "create"; memory: RememberOptions & { content: string } }
+  | { op: "update"; memory_id: string; updates: Partial<RememberOptions> & { content?: string } }
+  | { op: "delete"; memory_id: string; hard?: boolean };
 
 export interface BatchResult {
   results: Array<{

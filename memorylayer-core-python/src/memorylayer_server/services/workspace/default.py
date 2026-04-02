@@ -154,6 +154,31 @@ class WorkspaceService:
                 # Already exists (race condition) or storage doesn't support contexts
                 pass
 
+    async def delete_workspace(self, workspace_id: str) -> bool:
+        """Delete a workspace.
+
+        Args:
+            workspace_id: Workspace ID to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        existing = await self._storage.get_workspace(workspace_id)
+        if not existing:
+            return False
+
+        if hasattr(self._storage, 'delete_workspace'):
+            await self._storage.delete_workspace(workspace_id)
+        else:
+            self.logger.warning(
+                "Storage backend does not support delete_workspace; skipping for %s",
+                workspace_id,
+            )
+            return False
+
+        self.logger.info("Deleted workspace: %s", workspace_id)
+        return True
+
     async def update_workspace(self, workspace: Workspace) -> Workspace:
         """
         Update workspace settings.

@@ -26,6 +26,7 @@ from .memory import (
     ReflectResult,
     RememberInput,
     SearchTolerance,
+    SessionMemorySections,
 )
 from .session import (
     ActivitySummary,
@@ -68,6 +69,7 @@ __all__ = [
     "DetailLevel",
     "ReflectInput",
     "ReflectResult",
+    "SessionMemorySections",
     # Association models
     "Association",
     "AssociateInput",

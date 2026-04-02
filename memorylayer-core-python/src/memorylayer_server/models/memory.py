@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
 class MemoryType(str, Enum):
@@ -145,6 +145,15 @@ class Memory(BaseModel):
     relevance_score: Optional[float] = Field(None, description="Base relevance score from vector similarity")
     boosted_score: Optional[float] = Field(None, description="Relevance score after locality boost applied")
 
+    # Trust scoring (populated during recall)
+    trust_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Composite trust score (0.0-1.0)")
+    trust_signals: Optional[dict] = Field(None, description="Component trust scores used to compute trust_score")
+
+    # Freshness metadata (populated during recall)
+    freshness_score: Optional[float] = Field(None, description="Exponential freshness score (1.0=new, 0.0=very old)")
+    staleness_warning: Optional[str] = Field(None, description="Staleness tier: none, mild, moderate, severe")
+    age_days: Optional[float] = Field(None, description="Age of memory in days since creation")
+
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Creation timestamp")
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last update timestamp")
@@ -247,6 +256,9 @@ class RecallInput(BaseModel):
     # Status filtering
     include_archived: bool = Field(False, description="Include archived memories in recall results")
 
+    # Already-surfaced filtering
+    exclude_ids: list[str] = Field(default_factory=list, description="Memory IDs to exclude from results (already shown to user)")
+
     # Trajectory tracing
     trace: bool = Field(False, description="Enable trajectory logging for this recall")
 
@@ -274,6 +286,12 @@ class RecallResult(BaseModel):
     # Trajectory tracing
     trajectory: Optional[dict] = Field(None, description="Trajectory data if trace=True")
 
+    # Trust scoring
+    drift_caveat: Optional[str] = Field(None, description="Warning when one or more recalled memories have low trust scores")
+
+    # Freshness metadata
+    freshness_metadata: Optional[dict] = Field(None, description="Aggregate freshness statistics for returned memories")
+
 
 class ReflectInput(BaseModel):
     """Request model for synthesizing memories."""
@@ -300,3 +318,74 @@ class ReflectResult(BaseModel):
     source_memories: list[str] = Field(default_factory=list, description="Source memory IDs")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="Confidence in synthesis")
     tokens_processed: int = Field(0, description="Total tokens used")
+
+
+# Default per-section token budget (~2K tokens each)
+DEFAULT_SESSION_SECTION_TOKEN_BUDGET = 2048
+
+# Canonical section names for structured session memory
+SESSION_MEMORY_SECTION_NAMES = (
+    "context",
+    "decisions",
+    "learnings",
+    "errors",
+    "progress",
+    "open_items",
+)
+
+
+class SessionMemorySections(BaseModel):
+    """Structured session memory organized into semantic categories.
+
+    Divides working memory content across named sections so that related
+    information is grouped together and individual section token budgets
+    can be enforced independently.
+
+    Each section is a list of string entries (facts, notes, items).
+    The total_tokens property provides a rough token-count estimate across
+    all sections using the standard len(content) / 4 heuristic.
+    """
+
+    sections: dict[str, list[str]] = Field(
+        default_factory=lambda: {name: [] for name in SESSION_MEMORY_SECTION_NAMES},
+        description="Named memory sections mapping section name to list of entries",
+    )
+    section_token_budget: int = Field(
+        DEFAULT_SESSION_SECTION_TOKEN_BUDGET,
+        ge=128,
+        description="Per-section token budget (approximate, character-based estimate)",
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total_tokens(self) -> int:
+        """Estimated total tokens across all sections (len(content) / 4)."""
+        total_chars = sum(
+            len(entry)
+            for entries in self.sections.values()
+            for entry in entries
+        )
+        return total_chars // 4
+
+    def add_entry(self, section: str, entry: str) -> bool:
+        """Add an entry to a section if the section budget allows.
+
+        Args:
+            section: Section name (must be a known section)
+            entry: Text entry to append
+
+        Returns:
+            True if the entry was added, False if the section budget was exceeded
+            or the section name is unknown.
+        """
+        if section not in self.sections:
+            return False
+
+        section_tokens = sum(len(e) for e in self.sections[section]) // 4
+        entry_tokens = len(entry) // 4
+
+        if section_tokens + entry_tokens > self.section_token_budget:
+            return False
+
+        self.sections[section].append(entry)
+        return True

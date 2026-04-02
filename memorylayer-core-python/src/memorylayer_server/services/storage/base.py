@@ -82,6 +82,9 @@ class StorageBackend(ABC):
             include_archived: bool = False,
             observer_id: Optional[str] = None,
             subject_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            user_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search, returns (memory, relevance_score) tuples."""
         pass
@@ -185,6 +188,10 @@ class StorageBackend(ABC):
     async def list_workspaces(self) -> list[Workspace]:
         """List all workspaces."""
         pass
+
+    async def delete_workspace(self, workspace_id: str) -> bool:
+        """Delete a workspace and all associated data. Override in subclasses."""
+        return False
 
     # Statistics
     @abstractmethod

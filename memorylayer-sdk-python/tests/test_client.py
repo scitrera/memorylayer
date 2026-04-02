@@ -36,8 +36,8 @@ def client(base_url: str) -> MemoryLayerClient:
 @respx.mock
 async def test_remember(client: MemoryLayerClient, base_url: str) -> None:
     """Test storing a memory."""
-    # Mock response
-    mock_response = {
+    # Mock response (server wraps in MemoryResponse envelope)
+    mock_response = {"memory": {
         "id": "mem_123",
         "workspace_id": "ws_test",
         "content": "User prefers Python",
@@ -48,7 +48,7 @@ async def test_remember(client: MemoryLayerClient, base_url: str) -> None:
         "access_count": 0,
         "created_at": "2026-01-26T10:00:00Z",
         "updated_at": "2026-01-26T10:00:00Z",
-    }
+    }}
 
     respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=mock_response))
 
@@ -136,8 +136,8 @@ async def test_reflect(client: MemoryLayerClient, base_url: str) -> None:
 @respx.mock
 async def test_get_memory(client: MemoryLayerClient, base_url: str) -> None:
     """Test getting a specific memory."""
-    # Mock response
-    mock_response = {
+    # Mock response (server wraps in MemoryResponse envelope)
+    mock_response = {"memory": {
         "id": "mem_123",
         "workspace_id": "ws_test",
         "content": "User prefers Python",
@@ -148,7 +148,7 @@ async def test_get_memory(client: MemoryLayerClient, base_url: str) -> None:
         "access_count": 0,
         "created_at": "2026-01-26T10:00:00Z",
         "updated_at": "2026-01-26T10:00:00Z",
-    }
+    }}
 
     respx.get(f"{base_url}/v1/memories/mem_123").mock(return_value=Response(200, json=mock_response))
 

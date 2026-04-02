@@ -253,6 +253,7 @@ class SyncMemoryLayerClient:
         tags: Optional[list[str]] = None,
         metadata: Optional[dict[str, Any]] = None,
         context_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Memory:
         """
         Store a new memory.
@@ -294,9 +295,11 @@ class SyncMemoryLayerClient:
             payload["metadata"] = metadata
         if context_id:
             payload["context_id"] = context_id
+        if user_id is not None:
+            payload["user_id"] = user_id
 
         data = self._request("POST", "/memories", json=payload)
-        return Memory(**data)
+        return Memory(**data["memory"])
 
     def recall(
         self,
@@ -307,10 +310,14 @@ class SyncMemoryLayerClient:
         mode: Optional[Union[str, RecallMode]] = None,
         limit: int = 10,
         min_relevance: Optional[float] = None,
+        recency_weight: Optional[float] = None,
         tolerance: Optional[Union[str, SearchTolerance]] = None,
         include_associations: Optional[bool] = None,
         traverse_depth: Optional[int] = None,
         max_expansion: Optional[int] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RecallResult:
         """
         Search memories by semantic query.
@@ -353,6 +360,8 @@ class SyncMemoryLayerClient:
             payload["traverse_depth"] = traverse_depth
         if min_relevance is not None:
             payload["min_relevance"] = min_relevance
+        if recency_weight is not None:
+            payload["recency_weight"] = recency_weight
         if max_expansion is not None:
             payload["max_expansion"] = max_expansion
         if types:
@@ -361,6 +370,12 @@ class SyncMemoryLayerClient:
             payload["subtypes"] = [_to_value(s) for s in subtypes]
         if tags:
             payload["tags"] = tags
+        if created_after is not None:
+            payload["created_after"] = created_after
+        if created_before is not None:
+            payload["created_before"] = created_before
+        if user_id is not None:
+            payload["user_id"] = user_id
 
         data = self._request("POST", "/memories/recall", json=payload)
 
@@ -443,7 +458,7 @@ class SyncMemoryLayerClient:
             memory = client.get_memory("mem_123")
         """
         data = self._request("GET", f"/memories/{memory_id}")
-        return Memory(**data)
+        return Memory(**data["memory"])
 
     def update_memory(
         self,
@@ -484,7 +499,7 @@ class SyncMemoryLayerClient:
             payload["metadata"] = metadata
 
         data = self._request("PUT", f"/memories/{memory_id}", json=payload)
-        return Memory(**data)
+        return Memory(**data["memory"])
 
     # Association methods
 
@@ -665,7 +680,7 @@ class SyncMemoryLayerClient:
             sessions = client.list_sessions()
         """
         params: dict[str, Any] = {}
-        ws_id = workspace_id or self._workspace_id
+        ws_id = workspace_id or self.workspace_id
         if ws_id:
             params["workspace_id"] = ws_id
         if context_id:

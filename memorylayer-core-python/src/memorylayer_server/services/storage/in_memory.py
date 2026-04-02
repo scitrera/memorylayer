@@ -145,6 +145,9 @@ class MemoryStorageBackend(StorageBackend):
             include_archived: bool = False,
             observer_id: Optional[str] = None,
             subject_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            user_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search using cosine similarity."""
         ws_memories = self._memories.get(workspace_id, {})
@@ -173,6 +176,8 @@ class MemoryStorageBackend(StorageBackend):
             if observer_id is not None and getattr(memory, 'observer_id', None) != observer_id:
                 continue
             if subject_id is not None and getattr(memory, 'subject_id', None) != subject_id:
+                continue
+            if user_id is not None and getattr(memory, 'user_id', None) != user_id:
                 continue
 
             # Calculate cosine similarity

@@ -82,9 +82,9 @@ llm = [
     "memorylayer-server[openai,anthropic,google]",
 ]
 
-# Full installation with all features
+# Full installation with all features (excludes dev tools)
 all = [
-    "memorylayer-server[embeddings,llm,context,dev]",
+    "memorylayer-server[embeddings,llm,context]",
 ]
 
 [project.scripts]

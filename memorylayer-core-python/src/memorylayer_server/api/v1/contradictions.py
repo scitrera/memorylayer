@@ -19,6 +19,8 @@ from .schemas import (
     ContradictionListResponse,
     ContradictionResolveRequest,
     ContradictionResponse,
+    ContradictionScanRequest,
+    ContradictionScanResponse,
     ErrorResponse,
 )
 from .deps import get_auth_service, get_authz_service, get_audit_service
@@ -201,6 +203,84 @@ async def resolve_contradiction(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to resolve contradiction"
+        )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/contradictions/scan",
+    response_model=ContradictionScanResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def scan_workspace_contradictions(
+        http_request: Request,
+        workspace_id: str,
+        request: ContradictionScanRequest = None,
+        auth_service: AuthenticationService = Depends(get_auth_service),
+        authz_service: AuthorizationService = Depends(get_authz_service),
+        contradiction_service: ContradictionService = Depends(get_contradiction_svc),
+        audit_service: AuditService = Depends(get_audit_service),
+        logger: logging.Logger = Depends(get_logger),
+) -> ContradictionScanResponse:
+    """Scan all memories in a workspace for contradictions."""
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(
+            ctx, "contradictions", "write", workspace_id=workspace_id
+        )
+    except AuthenticationError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Authorization failed for contradiction scan: %s", e)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+    try:
+        kwargs = {}
+        if request and request.batch_size is not None:
+            kwargs['batch_size'] = request.batch_size
+
+        records = await contradiction_service.scan_workspace(workspace_id, **kwargs)
+        contradictions = [
+            ContradictionResponse(
+                id=r.id,
+                workspace_id=r.workspace_id,
+                memory_a_id=r.memory_a_id,
+                memory_b_id=r.memory_b_id,
+                contradiction_type=r.contradiction_type,
+                confidence=r.confidence,
+                detection_method=r.detection_method,
+                detected_at=r.detected_at,
+                resolved_at=r.resolved_at,
+                resolution=r.resolution,
+            )
+            for r in records
+        ]
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="contradiction",
+                action="scan",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="contradiction",
+            ))
+        except Exception:
+            logger.debug("Audit record failed for contradiction scan")
+        return ContradictionScanResponse(
+            workspace_id=workspace_id,
+            contradictions_found=len(contradictions),
+            contradictions=contradictions,
+        )
+    except Exception as e:
+        logger.error("Failed to scan contradictions for workspace %s: %s", workspace_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to scan workspace contradictions"
         )
 
 

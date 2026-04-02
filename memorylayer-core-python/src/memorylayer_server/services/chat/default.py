@@ -119,6 +119,20 @@ class DefaultChatService(ChatService):
             offset=offset,
         )
 
+    async def update_thread(
+            self,
+            workspace_id: str,
+            thread_id: str,
+            **updates,
+    ) -> Optional[ChatThread]:
+        thread = await self.get_thread(workspace_id, thread_id)
+        if not thread:
+            return None
+        result = await self.storage.update_thread(workspace_id, thread_id, **updates)
+        if result:
+            self.logger.info("Updated chat thread %s in workspace %s", thread_id, workspace_id)
+        return result
+
     async def delete_thread(
             self,
             workspace_id: str,
