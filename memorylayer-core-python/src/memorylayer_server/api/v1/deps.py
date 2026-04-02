@@ -12,6 +12,12 @@ from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SE
 from ...services.session import SessionService, EXT_SESSION_SERVICE
 from ...services.workspace import WorkspaceService, EXT_WORKSPACE_SERVICE
 from ...services.memory import MemoryService, EXT_MEMORY_SERVICE
+from ...services.inference import DefaultInferenceService, EXT_INFERENCE_SERVICE
+from ...services.reflect import EXT_REFLECT_SERVICE
+from ...services.cache import CacheService, EXT_CACHE_SERVICE
+from ...services.chat import ChatService, EXT_CHAT_SERVICE
+from ...services.audit import AuditService, EXT_AUDIT_SERVICE
+from ...services.metrics import MetricsService, EXT_METRICS_SERVICE
 from ...tasks.session_touch_handler import SESSION_TOUCH_HANDLER_TASK
 
 
@@ -59,3 +65,33 @@ def get_workspace_service(v: Variables = Depends(get_variables_dep)) -> Workspac
 def get_memory_service(v: Variables = Depends(get_variables_dep)) -> MemoryService:
     """FastAPI dependency wrapper for memory service."""
     return get_extension(EXT_MEMORY_SERVICE, v)
+
+
+def get_inference_service(v: Variables = Depends(get_variables_dep)) -> DefaultInferenceService:
+    """FastAPI dependency wrapper for inference service."""
+    return get_extension(EXT_INFERENCE_SERVICE, v)
+
+
+def get_reflect_service(v: Variables = Depends(get_variables_dep)):
+    """FastAPI dependency wrapper for reflect service."""
+    return get_extension(EXT_REFLECT_SERVICE, v)
+
+
+def get_cache_service(v: Variables = Depends(get_variables_dep)) -> CacheService:
+    """FastAPI dependency wrapper for cache service."""
+    return get_extension(EXT_CACHE_SERVICE, v)
+
+
+def get_chat_service(v: Variables = Depends(get_variables_dep)) -> ChatService:
+    """FastAPI dependency wrapper for chat service."""
+    return get_extension(EXT_CHAT_SERVICE, v)
+
+
+def get_audit_service(v: Variables = Depends(get_variables_dep)) -> AuditService:
+    """FastAPI dependency wrapper for audit service."""
+    return get_extension(EXT_AUDIT_SERVICE, v)
+
+
+def get_metrics_service(v: Variables = Depends(get_variables_dep)) -> MetricsService:
+    """FastAPI dependency wrapper for metrics service."""
+    return get_extension(EXT_METRICS_SERVICE, v)

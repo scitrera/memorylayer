@@ -26,6 +26,7 @@ from .memory import (
     ReflectResult,
     RememberInput,
     SearchTolerance,
+    SessionMemorySections,
 )
 from .session import (
     ActivitySummary,
@@ -37,6 +38,16 @@ from .session import (
     WorkspaceSummary,
 )
 from .auth import AuthIdentity, RequestContext
+from .chat import (
+    ChatMessage,
+    ChatMessageContent,
+    ChatThread,
+    ChatThreadWithMessages,
+    CreateThreadInput,
+    AppendMessagesInput,
+    MessageInput,
+    DecompositionResult,
+)
 from .workspace import (
     Context,
     ContextSettings,
@@ -58,6 +69,7 @@ __all__ = [
     "DetailLevel",
     "ReflectInput",
     "ReflectResult",
+    "SessionMemorySections",
     # Association models
     "Association",
     "AssociateInput",
@@ -67,9 +79,6 @@ __all__ = [
     "GraphQueryInput",
     "GraphQueryResult",
     "GraphPath",
-    # Tenant models (v2)
-    "Tenant",
-    "TenantSettings",
     # Workspace models
     "Workspace",
     "WorkspaceSettings",
@@ -86,4 +95,13 @@ __all__ = [
     # Auth models
     "AuthIdentity",
     "RequestContext",
+    # Chat history models
+    "ChatMessage",
+    "ChatMessageContent",
+    "ChatThread",
+    "ChatThreadWithMessages",
+    "CreateThreadInput",
+    "AppendMessagesInput",
+    "MessageInput",
+    "DecompositionResult",
 ]

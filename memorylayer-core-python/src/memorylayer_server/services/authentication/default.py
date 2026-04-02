@@ -9,10 +9,11 @@ This implementation provides:
 import logging
 from typing import Optional, Iterable
 
-from scitrera_app_framework import Plugin, Variables, get_extension
+from scitrera_app_framework import Variables, get_extension, ext_parse_bool
 
 from .base import (
     AuthenticationService,
+    AuthenticationServicePluginBase,
     EXT_AUTHENTICATION_SERVICE,
 )
 from ...models.auth import AuthIdentity
@@ -109,10 +110,10 @@ class OpenAuthenticationService(AuthenticationService):
         return workspace_id
 
     async def ensure_session(
-        self,
-        session_id: str,
-        workspace_id: str,
-        tenant_id: str,
+            self,
+            session_id: str,
+            workspace_id: str,
+            tenant_id: str,
     ) -> Optional[Session]:
         """
         Auto-create session for unknown session_id when workspace is explicit.
@@ -148,17 +149,14 @@ class OpenAuthenticationService(AuthenticationService):
             return None
 
 
-class OpenAuthenticationServicePlugin(Plugin):
+class OpenAuthenticationServicePlugin(AuthenticationServicePluginBase):
     """Plugin to register the OSS authentication service."""
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_AUTHENTICATION_SERVICE
+    PROVIDER_NAME = 'default'
 
     def initialize(self, v: Variables, logger: logging.Logger) -> OpenAuthenticationService:
-        session_service = get_extension(EXT_SESSION_SERVICE, v)
-        workspace_service = get_extension(EXT_WORKSPACE_SERVICE, v)
+        session_service = self.get_extension(EXT_SESSION_SERVICE, v=v)
+        workspace_service = self.get_extension(EXT_WORKSPACE_SERVICE, v=v)
 
-        from scitrera_app_framework import ext_parse_bool
         implicit_create = v.environ(
             MEMORYLAYER_SESSION_IMPLICIT_CREATE,
             default=DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE,
@@ -172,8 +170,9 @@ class OpenAuthenticationServicePlugin(Plugin):
             logger=logger,
         )
 
+    # noinspection PyMethodMayBeStatic
     def get_dependencies(self, v: Variables) -> Iterable[str]:
-        return (EXT_SESSION_SERVICE, EXT_WORKSPACE_SERVICE,)
+        return EXT_SESSION_SERVICE, EXT_WORKSPACE_SERVICE,
 
 
 def get_authentication_service(v: Variables) -> AuthenticationService:

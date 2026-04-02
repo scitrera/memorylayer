@@ -9,8 +9,6 @@ from enum import Enum
 from typing import Optional
 from datetime import datetime
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_EXTRACTION_SERVICE, DEFAULT_MEMORYLAYER_EXTRACTION_SERVICE
 from ...models.memory import Memory, MemoryType, MemorySubtype
 from .._constants import (
@@ -20,6 +18,7 @@ from .._constants import (
     EXT_LLM_SERVICE,
     EXT_STORAGE_BACKEND,
 )
+from .._plugin_factory import make_service_plugin_base
 
 
 class ExtractionCategory(str, Enum):
@@ -114,21 +113,9 @@ class ExtractionService(ABC):
 
 
 # noinspection PyAbstractClass
-class ExtractionServicePluginBase(Plugin):
-    """Base plugin for extraction service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_EXTRACTION_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_EXTRACTION_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_EXTRACTION_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_EXTRACTION_SERVICE, DEFAULT_MEMORYLAYER_EXTRACTION_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND, EXT_LLM_SERVICE, EXT_DEDUPLICATION_SERVICE, EXT_EMBEDDING_SERVICE)
+ExtractionServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_EXTRACTION_SERVICE,
+    config_key=MEMORYLAYER_EXTRACTION_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_EXTRACTION_SERVICE,
+    dependencies=(EXT_STORAGE_BACKEND, EXT_LLM_SERVICE, EXT_DEDUPLICATION_SERVICE, EXT_EMBEDDING_SERVICE),
+)

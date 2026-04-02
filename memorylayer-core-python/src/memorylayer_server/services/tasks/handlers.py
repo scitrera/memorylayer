@@ -94,7 +94,7 @@ class TaskHandlersSetupPlugin(Plugin):
         # Register task service handlers
         for handler_plugin in get_extensions(EXT_MULTI_TASK_HANDLERS, v).values():  # type: TaskHandlerPlugin
             task_type: str = handler_plugin.get_task_type()
-            handler: Callable[[dict], Awaitable[None]] = handler_plugin.handle
+            handler: Callable[[Variables, dict], Awaitable[None]] = handler_plugin.handle
             task_service.register_handler(task_type, handler)
 
         return task_service  # not really **critial** but we can pass through the task_service for convenience
@@ -106,6 +106,17 @@ class TaskHandlersSetupPlugin(Plugin):
             # Schedule recurring tasks
             schedule = handler_plugin.get_schedule(v)
             if schedule:
+                # Guard: verify payload is serializable (catches service objects at startup)
+                import json
+                try:
+                    json.dumps(schedule.default_payload)
+                except TypeError as e:
+                    raise TypeError(
+                        "Task handler '%s' has a non-serializable default_payload: %s. "
+                        "Move service resolution from get_schedule() to handle()."
+                        % (handler_plugin.get_task_type(), e)
+                    ) from e
+
                 await task_service.schedule_recurring(
                     handler_plugin.get_task_type(),
                     schedule.interval_seconds,

@@ -17,6 +17,8 @@ from typing import Optional, Union, Any
 from scitrera_app_framework.api import Variables, Plugin, enabled_option_pattern
 from scitrera_app_framework import get_logger
 
+from .._plugin_factory import make_service_plugin_base
+
 from ...config import (
     MEMORYLAYER_RERANKER_PROVIDER, DEFAULT_MEMORYLAYER_RERANKER_PROVIDER,
     MEMORYLAYER_RERANKER_SERVICE, DEFAULT_MEMORYLAYER_RERANKER_SERVICE,
@@ -275,21 +277,9 @@ class RerankerProviderPluginBase(Plugin):
             await provider.preload()
 
 
-class RerankerServicePluginBase(Plugin):
-    """Base Plugin for reranker service implementations."""
-    PROVIDER_NAME: str = ''
-
-    def name(self) -> str:
-        return f"{EXT_RERANKER_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_RERANKER_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_RERANKER_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_RERANKER_SERVICE, DEFAULT_MEMORYLAYER_RERANKER_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_RERANKER_PROVIDER,)
+RerankerServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_RERANKER_SERVICE,
+    config_key=MEMORYLAYER_RERANKER_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_RERANKER_SERVICE,
+    dependencies=(EXT_RERANKER_PROVIDER,),
+)

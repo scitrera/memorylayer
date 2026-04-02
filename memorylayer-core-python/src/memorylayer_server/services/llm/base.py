@@ -2,11 +2,10 @@
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
 
 from .._constants import EXT_LLM_PROVIDER, EXT_LLM_SERVICE, EXT_LLM_REGISTRY
+from .._plugin_factory import make_service_plugin_base
 
 # Registry config constants
 MEMORYLAYER_LLM_REGISTRY = 'MEMORYLAYER_LLM_REGISTRY'
@@ -87,39 +86,16 @@ class LLMProvider(ABC):
 
 
 # noinspection PyAbstractClass
-class LLMProviderRegistryPluginBase(Plugin):
-    """Base plugin for LLM provider registry."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_LLM_REGISTRY}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_LLM_REGISTRY
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_LLM_REGISTRY, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_LLM_REGISTRY, DEFAULT_MEMORYLAYER_LLM_REGISTRY)
-
+LLMProviderRegistryPluginBase = make_service_plugin_base(
+    ext_name=EXT_LLM_REGISTRY,
+    config_key=MEMORYLAYER_LLM_REGISTRY,
+    default_value=DEFAULT_MEMORYLAYER_LLM_REGISTRY,
+)
 
 # noinspection PyAbstractClass
-class LLMServicePluginBase(Plugin):
-    """Base plugin for LLM service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_LLM_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_LLM_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_LLM_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_LLM_SERVICE, DEFAULT_MEMORYLAYER_LLM_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_LLM_REGISTRY,)
+LLMServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_LLM_SERVICE,
+    config_key=MEMORYLAYER_LLM_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_LLM_SERVICE,
+    dependencies=(EXT_LLM_REGISTRY,),
+)

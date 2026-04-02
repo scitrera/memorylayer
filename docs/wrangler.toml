@@ -1,9 +1,0 @@
-# Cloudflare Workers static assets configuration
-name = "memorylayer-docs"
-compatibility_date = "2026-02-01"
-
-[assets]
-directory = "./dist"
-
-[vars]
-SITE_URL = "https://docs.memorylayer.ai"

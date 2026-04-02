@@ -39,7 +39,9 @@ from ...services.workspace import WorkspaceService
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
 from ...config import DEFAULT_TENANT_ID, DEFAULT_CONTEXT_ID
-from .deps import get_auth_service, get_authz_service, get_session_service, get_workspace_service, get_active_session
+from .deps import get_auth_service, get_authz_service, get_session_service, get_workspace_service, get_active_session, get_audit_service, get_metrics_service
+from ...services.audit import AuditService, AuditEvent
+from ...services.metrics import MetricsService
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -62,6 +64,8 @@ async def create_session(
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
         workspace_service: WorkspaceService = Depends(get_workspace_service),
+        audit_service: AuditService = Depends(get_audit_service),
+        metrics_service: MetricsService = Depends(get_metrics_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> SessionStartResponse:
     """
@@ -91,7 +95,7 @@ async def create_session(
         )
 
         # Generate session ID if not provided
-        session_id = request.session_id or f"sess_{uuid4().hex[:16]}"
+        session_id = request.session_id or f"sess_{uuid4().hex}"
 
         # Use workspace from resolved context
         workspace_id = ctx.workspace_id
@@ -158,6 +162,22 @@ async def create_session(
             )
 
         logger.info("Created session: %s", session_id)
+        try:
+            metrics_service.counter("memorylayer_session_create_total", labels={"workspace": ctx.workspace_id})
+        except Exception:
+            logger.debug("Metrics recording failed for session create")
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="session",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="session",
+                resource_id=session.id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for session create")
         return SessionStartResponse(session=session, briefing=briefing)
 
     except ValueError as e:
@@ -337,6 +357,7 @@ async def get_session(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> SessionResponse:
     """
@@ -372,6 +393,18 @@ async def get_session(
             resource_id=session_id, workspace_id=session.workspace_id
         )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="session",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=session.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="session",
+                resource_id=session_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for session read")
         return SessionResponse(session=session)
 
     except HTTPException:
@@ -400,6 +433,8 @@ async def delete_session(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         session_service: SessionService = Depends(get_session_service),
+        audit_service: AuditService = Depends(get_audit_service),
+        metrics_service: MetricsService = Depends(get_metrics_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> None:
     """
@@ -438,6 +473,23 @@ async def delete_session(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Session not found: {session_id}"
             )
+
+        try:
+            metrics_service.counter("memorylayer_session_close_total", labels={"workspace": session.workspace_id})
+        except Exception:
+            logger.debug("Metrics recording failed for session close")
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="session",
+                action="close",
+                tenant_id=ctx.tenant_id,
+                workspace_id=session.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="session",
+                resource_id=session_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for session close")
 
     except HTTPException:
         raise

@@ -3,8 +3,6 @@ from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING
 
 from fastapi import HTTPException, status
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_AUTHORIZATION_SERVICE, DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE
 from ...models.authz import AuthorizationDecision, AuthorizationContext
 
@@ -12,6 +10,7 @@ if TYPE_CHECKING:
     from ...models.auth import RequestContext
 
 from .._constants import EXT_AUTHORIZATION_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 class AuthorizationService(ABC):
@@ -58,6 +57,7 @@ class AuthorizationService(ABC):
             resource=resource,
             action=action,
             resource_id=resource_id,
+            metadata=getattr(ctx, 'metadata', None) or {},
         )
 
         decision = await self.authorize(authz_ctx)
@@ -117,18 +117,8 @@ class AuthorizationService(ABC):
 
 
 # noinspection PyAbstractClass
-class AuthorizationServicePluginBase(Plugin):
-    """Base plugin for authorization service."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_AUTHORIZATION_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_AUTHORIZATION_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_AUTHORIZATION_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_AUTHORIZATION_SERVICE, DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE)
+AuthorizationServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_AUTHORIZATION_SERVICE,
+    config_key=MEMORYLAYER_AUTHORIZATION_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE,
+)

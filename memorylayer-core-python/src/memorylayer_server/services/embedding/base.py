@@ -10,6 +10,8 @@ from typing import Optional, Union
 from scitrera_app_framework.api import Variables, Plugin, enabled_option_pattern
 from scitrera_app_framework import get_extension, get_logger, ext_parse_bool
 
+from .._plugin_factory import make_service_plugin_base
+
 from ...config import (
     MEMORYLAYER_EMBEDDING_PROVIDER, DEFAULT_MEMORYLAYER_EMBEDDING_PROVIDER,
     MEMORYLAYER_EMBEDDING_SERVICE, DEFAULT_MEMORYLAYER_EMBEDDING_SERVICE,
@@ -173,21 +175,9 @@ class EmbeddingProviderPluginBase(Plugin):
 
 
 # noinspection PyAbstractClass
-class EmbeddingServicePluginBase(Plugin):
-    """Base plugin for embedding service - extensible for custom implementations."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_EMBEDDING_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_EMBEDDING_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_EMBEDDING_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_EMBEDDING_SERVICE, DEFAULT_MEMORYLAYER_EMBEDDING_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_EMBEDDING_PROVIDER, EXT_CACHE_SERVICE)
+EmbeddingServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_EMBEDDING_SERVICE,
+    config_key=MEMORYLAYER_EMBEDDING_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_EMBEDDING_SERVICE,
+    dependencies=(EXT_EMBEDDING_PROVIDER, EXT_CACHE_SERVICE),
+)

@@ -68,6 +68,12 @@ class MemoryStorageBackend(StorageBackend):
             tenant_id=getattr(input, 'tenant_id', None) or DEFAULT_TENANT_ID,
             context_id=getattr(input, 'context_id', None) or DEFAULT_CONTEXT_ID,
             user_id=input.user_id,
+            observer_id=getattr(input, 'observer_id', None),
+            subject_id=getattr(input, 'subject_id', None),
+            source_document_id=getattr(input, 'source_document_id', None),
+            source_page_id=getattr(input, 'source_page_id', None),
+            source_dataset_id=getattr(input, 'source_dataset_id', None),
+            source_thread_id=getattr(input, 'source_thread_id', None),
             content=input.content,
             content_hash=content_hash,
             type=input.type or MemoryType.SEMANTIC,
@@ -137,6 +143,11 @@ class MemoryStorageBackend(StorageBackend):
             subtypes: Optional[list[str]] = None,
             tags: Optional[list[str]] = None,
             include_archived: bool = False,
+            observer_id: Optional[str] = None,
+            subject_id: Optional[str] = None,
+            created_after: Optional[str] = None,
+            created_before: Optional[str] = None,
+            user_id: Optional[str] = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search using cosine similarity."""
         ws_memories = self._memories.get(workspace_id, {})
@@ -160,6 +171,14 @@ class MemoryStorageBackend(StorageBackend):
                 memory_tags = memory.tags or []
                 if not any(t in memory_tags for t in tags):
                     continue
+
+            # Filter by entity attribution
+            if observer_id is not None and getattr(memory, 'observer_id', None) != observer_id:
+                continue
+            if subject_id is not None and getattr(memory, 'subject_id', None) != subject_id:
+                continue
+            if user_id is not None and getattr(memory, 'user_id', None) != user_id:
+                continue
 
             # Calculate cosine similarity
             if memory.embedding:

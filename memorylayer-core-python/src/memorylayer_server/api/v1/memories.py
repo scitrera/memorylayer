@@ -13,6 +13,7 @@ Endpoints:
 """
 
 import logging
+import time as _time
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from scitrera_app_framework import Plugin, Variables, get_extension
@@ -33,6 +34,9 @@ from .schemas import (
     MemoryReflectRequest,
     MemoryDecayRequest,
     MemoryBatchRequest,
+    BatchCreateOp,
+    BatchUpdateOp,
+    BatchDeleteOp,
     MemoryResponse,
     RecallResult,
     ReflectResult,
@@ -40,7 +44,9 @@ from .schemas import (
     BatchOperationResponse,
     BatchOperationResult,
 )
-from .deps import get_active_session, get_auth_service, get_authz_service, get_memory_service
+from .deps import get_active_session, get_auth_service, get_authz_service, get_memory_service, get_audit_service, get_metrics_service
+from ...services.audit import AuditService, AuditEvent
+from ...services.metrics import MetricsService
 
 router = APIRouter(prefix="/v1/memories", tags=["memories"])
 
@@ -69,6 +75,8 @@ async def create_memory(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    metrics_service: MetricsService = Depends(get_metrics_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> MemoryResponse:
     """
@@ -112,15 +120,36 @@ async def create_memory(
             metadata=request.metadata,
             associations=request.associations,
             context_id=request.context_id or ctx.context_id,
+            observer_id=request.observer_id,
+            subject_id=request.subject_id,
+            user_id=request.user_id if request.user_id is not None else ctx.user_id,
         )
 
         # Store memory
+        _t0 = _time.monotonic()
         memory = await memory_service.remember(
             workspace_id=ctx.workspace_id,
             input=remember_input,
         )
 
         logger.info("Created memory: %s", memory.id)
+        try:
+            metrics_service.counter("memorylayer_remember_total", labels={"workspace": ctx.workspace_id})
+            metrics_service.histogram("memorylayer_remember_duration_seconds", _time.monotonic() - _t0, labels={"workspace": ctx.workspace_id})
+        except Exception:
+            logger.debug("Metrics recording failed for memory create")
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="memory",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="memory",
+                resource_id=memory.id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for memory create")
         return MemoryResponse(memory=memory)
 
     except AuthenticationError as e:
@@ -150,6 +179,7 @@ async def get_memory(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> MemoryResponse:
     """
@@ -181,6 +211,18 @@ async def get_memory(
 
         await authz_service.require_authorization(ctx, "memories", "read", resource_id=memory_id, workspace_id=memory.workspace_id)
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="memory",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=memory.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="memory",
+                resource_id=memory_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for memory read")
         return MemoryResponse(memory=memory)
 
     except HTTPException:
@@ -208,6 +250,7 @@ async def update_memory(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> MemoryResponse:
     """
@@ -227,16 +270,17 @@ async def update_memory(
         HTTPException: If memory not found or update fails
     """
     try:
-        # Build request context and check authorization
+        # Build request context
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(ctx, "memories", "write", resource_id=memory_id, workspace_id=ctx.workspace_id)
 
         logger.info("Updating memory: %s", memory_id)
 
-        # Check if memory exists
-        existing_memory = await memory_service.get(ctx.workspace_id, memory_id)
+        # Fetch memory first, then authorize against the memory's actual workspace
+        existing_memory = await memory_service.get_by_id(memory_id=memory_id)
         if not existing_memory:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
+
+        await authz_service.require_authorization(ctx, "memories", "write", resource_id=memory_id, workspace_id=existing_memory.workspace_id)
 
         # Build update kwargs from non-None fields
         update_kwargs = {}
@@ -255,14 +299,25 @@ async def update_memory(
         if request.pinned is not None:
             update_kwargs["pinned"] = 1 if request.pinned else 0
 
-        # Update memory via storage
-        # Note: This assumes memory_service has access to storage.update_memory
-        updated_memory = await memory_service.storage.update_memory(workspace_id=ctx.workspace_id, memory_id=memory_id, **update_kwargs)
+        # Update memory via service layer
+        updated_memory = await memory_service.update(workspace_id=existing_memory.workspace_id, memory_id=memory_id, **update_kwargs)
 
         if not updated_memory:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update memory")
 
         logger.info("Updated memory: %s", memory_id)
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="memory",
+                action="update",
+                tenant_id=ctx.tenant_id,
+                workspace_id=existing_memory.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="memory",
+                resource_id=memory_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for memory update")
         return MemoryResponse(memory=updated_memory)
 
     except HTTPException:
@@ -292,6 +347,8 @@ async def delete_memory(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    metrics_service: MetricsService = Depends(get_metrics_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> None:
     """
@@ -324,6 +381,22 @@ async def delete_memory(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
 
         logger.info("Deleted memory: %s", memory_id)
+        try:
+            metrics_service.counter("memorylayer_delete_total", labels={"workspace": ctx.workspace_id})
+        except Exception:
+            logger.debug("Metrics recording failed for memory delete")
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="memory",
+                action="delete",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="memory",
+                resource_id=memory_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for memory delete")
 
     except HTTPException:
         raise
@@ -349,6 +422,8 @@ async def recall_memories(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    metrics_service: MetricsService = Depends(get_metrics_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> RecallResult:
     """
@@ -385,6 +460,9 @@ async def recall_memories(
             subtypes=request.subtypes,
             tags=request.tags,
             context_id=request.context_id or ctx.context_id,
+            observer_id=request.observer_id,
+            subject_id=request.subject_id,
+            user_id=request.user_id if request.user_id is not None else ctx.user_id,
             mode=request.mode,
             tolerance=request.tolerance,
             limit=request.limit,
@@ -398,9 +476,11 @@ async def recall_memories(
             context=request.context,
             rag_threshold=request.rag_threshold,
             include_archived=request.include_archived,
+            exclude_ids=request.exclude_ids,
         )
 
         # Perform recall
+        _t0 = _time.monotonic()
         result = await memory_service.recall(
             workspace_id=ctx.workspace_id,
             input=recall_input,
@@ -408,6 +488,24 @@ async def recall_memories(
 
         logger.debug("Recalled %d memories in %d ms using %s mode", len(result.memories), result.search_latency_ms, result.mode_used)
 
+        try:
+            metrics_service.counter("memorylayer_recall_total", labels={"workspace": ctx.workspace_id, "mode": request.mode or "default"})
+            metrics_service.histogram("memorylayer_recall_duration_seconds", _time.monotonic() - _t0, labels={"workspace": ctx.workspace_id})
+            metrics_service.histogram("memorylayer_recall_result_count", len(result.memories) if hasattr(result, "memories") else 0, labels={"workspace": ctx.workspace_id})
+        except Exception:
+            logger.debug("Metrics recording failed for memory recall")
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="memory",
+                action="recall",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="memory",
+                metadata={"query_length": len(request.query), "mode": request.mode},
+            ))
+        except Exception:
+            logger.debug("Audit record failed for memory recall")
         return result
 
     except ValueError as e:
@@ -434,6 +532,7 @@ async def reflect_memories(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     reflection_service: ReflectService = Depends(get_reflect_service),
+    audit_service: AuditService = Depends(get_audit_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> ReflectResult:
     """
@@ -480,6 +579,8 @@ async def reflect_memories(
             subtypes=request.subtypes,
             tags=request.tags,
             context_id=request.context_id or ctx.context_id,
+            observer_id=request.observer_id,
+            subject_id=request.subject_id,
         )
 
         # Perform reflection
@@ -490,6 +591,17 @@ async def reflect_memories(
 
         logger.info("Reflected on %d source memories, generated %d tokens", len(result.source_memories), result.tokens_processed)
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="memory",
+                action="reflect",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="memory",
+            ))
+        except Exception:
+            logger.debug("Audit record failed for memory reflect")
         return result
 
     except ValueError as e:
@@ -581,6 +693,7 @@ async def batch_operations(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> BatchOperationResponse:
     """
@@ -615,24 +728,22 @@ async def batch_operations(
         failed = 0
 
         for i, operation in enumerate(request.operations):
-            op_type = operation.get("type")
-            op_data = operation.get("data", {})
+            op_type = operation.op
 
             logger.debug("Processing batch operation %d: %s", i, op_type)
 
             try:
                 # CREATE operation
-                if op_type == "create":
-                    # Convert data to RememberInput
+                if isinstance(operation, BatchCreateOp):
                     remember_input = RememberInput(
-                        content=op_data.get("content"),
-                        type=op_data.get("type"),
-                        subtype=op_data.get("subtype"),
-                        importance=op_data.get("importance", 0.5),
-                        tags=op_data.get("tags", []),
-                        metadata=op_data.get("metadata", {}),
-                        associations=op_data.get("associations", []),
-                        context_id=op_data.get("context_id"),
+                        content=operation.content,
+                        type=operation.type,
+                        subtype=operation.subtype,
+                        importance=operation.importance,
+                        tags=operation.tags,
+                        metadata=operation.metadata,
+                        observer_id=operation.observer_id,
+                        subject_id=operation.subject_id,
                     )
 
                     # Create memory
@@ -652,33 +763,33 @@ async def batch_operations(
                     successful += 1
 
                 # UPDATE operation
-                elif op_type == "update":
-                    memory_id = op_data.get("memory_id")
-                    if not memory_id:
-                        raise ValueError("memory_id is required for update operation")
+                elif isinstance(operation, BatchUpdateOp):
+                    memory_id = operation.memory_id
 
                     # Check if memory exists
                     existing = await memory_service.get(ctx.workspace_id, memory_id)
                     if not existing:
                         raise ValueError(f"Memory not found: {memory_id}")
 
-                    # Build update kwargs
+                    # Build update kwargs from non-None fields
                     update_kwargs = {}
-                    if "content" in op_data:
-                        update_kwargs["content"] = op_data["content"]
-                    if "type" in op_data:
-                        update_kwargs["type"] = op_data["type"]
-                    if "subtype" in op_data:
-                        update_kwargs["subtype"] = op_data["subtype"]
-                    if "importance" in op_data:
-                        update_kwargs["importance"] = op_data["importance"]
-                    if "tags" in op_data:
-                        update_kwargs["tags"] = op_data["tags"]
-                    if "metadata" in op_data:
-                        update_kwargs["metadata"] = op_data["metadata"]
+                    if operation.content is not None:
+                        update_kwargs["content"] = operation.content
+                    if operation.type is not None:
+                        update_kwargs["type"] = operation.type
+                    if operation.subtype is not None:
+                        update_kwargs["subtype"] = operation.subtype
+                    if operation.importance is not None:
+                        update_kwargs["importance"] = operation.importance
+                    if operation.tags is not None:
+                        update_kwargs["tags"] = operation.tags
+                    if operation.metadata is not None:
+                        update_kwargs["metadata"] = operation.metadata
+                    if operation.pinned is not None:
+                        update_kwargs["pinned"] = 1 if operation.pinned else 0
 
-                    # Update memory
-                    updated = await memory_service.storage.update_memory(
+                    # Update memory via service layer
+                    updated = await memory_service.update(
                         workspace_id=ctx.workspace_id, memory_id=memory_id, **update_kwargs
                     )
 
@@ -693,18 +804,14 @@ async def batch_operations(
                     successful += 1
 
                 # DELETE operation
-                elif op_type == "delete":
-                    memory_id = op_data.get("memory_id")
-                    if not memory_id:
-                        raise ValueError("memory_id is required for delete operation")
-
-                    hard = op_data.get("hard", False)
+                elif isinstance(operation, BatchDeleteOp):
+                    memory_id = operation.memory_id
 
                     # Delete memory
                     success = await memory_service.forget(
                         workspace_id=ctx.workspace_id,
                         memory_id=memory_id,
-                        hard=hard,
+                        hard=operation.hard,
                     )
 
                     if not success:
@@ -720,16 +827,12 @@ async def batch_operations(
                     )
                     successful += 1
 
-                # Unknown operation type
-                else:
-                    raise ValueError(f"Unknown operation type: {op_type}")
-
             except Exception as e:
                 logger.warning("Batch operation %d failed: %s - %s", i, op_type, str(e))
                 results.append(
                     BatchOperationResult(
                         index=i,
-                        type=op_type or "unknown",
+                        type=op_type,
                         status="error",
                         error=str(e),
                     )
@@ -738,6 +841,18 @@ async def batch_operations(
 
         logger.info("Completed batch operations: %d successful, %d failed", successful, failed)
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="memory",
+                action="batch",
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                resource_type="memory",
+                metadata={"operation_count": len(request.operations)},
+            ))
+        except Exception:
+            logger.debug("Audit record failed for memory batch")
         return BatchOperationResponse(
             total_operations=len(request.operations),
             successful=successful,

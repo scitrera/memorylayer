@@ -15,6 +15,12 @@ from ..memory import MemoryService, EXT_MEMORY_SERVICE
 from ..contradiction import ContradictionService, EXT_CONTRADICTION_SERVICE
 from ...models import Session, WorkingMemory
 from ...models.session import SessionBriefing
+from ...config import (
+    MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT,
+    DEFAULT_MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT,
+    MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH,
+    DEFAULT_MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH,
+)
 
 
 class PersistentSessionService(SessionService):
@@ -39,6 +45,7 @@ class PersistentSessionService(SessionService):
             default_touch_ttl: int = 3600,
     ):
         self.storage = storage
+        self.v = v
         self.extraction_service = extraction_service
         self.deduplication_service = deduplication_service
         self._memory_service = memory_service
@@ -327,6 +334,11 @@ class PersistentSessionService(SessionService):
             success=True,
         )
 
+    @staticmethod
+    def _estimate_tokens(content: str) -> int:
+        """Estimate token count from content using character-based heuristic."""
+        return len(content) // 4
+
     async def touch_session(
             self,
             workspace_id: str,
@@ -337,6 +349,11 @@ class PersistentSessionService(SessionService):
 
         Resets expires_at to now + TTL. If extend_seconds is provided,
         it overrides the server default for this call.
+
+        Also tracks cumulative token usage from working memory and schedules
+        a background extraction task when thresholds are exceeded.
+        Token trigger thresholds are read from config:
+        MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT and MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH.
 
         Args:
             workspace_id: Workspace boundary
@@ -349,6 +366,19 @@ class PersistentSessionService(SessionService):
         Raises:
             ValueError: If session not found in storage
         """
+        token_trigger_init = DEFAULT_MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT
+        token_trigger_growth = DEFAULT_MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH
+        if self.v is not None:
+            token_trigger_init = self.v.environ(
+                MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT,
+                default=DEFAULT_MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT,
+                type_fn=int,
+            )
+            token_trigger_growth = self.v.environ(
+                MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH,
+                default=DEFAULT_MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH,
+                type_fn=int,
+            )
         session = await self.get_session(workspace_id, session_id)
         if session is None:
             raise ValueError(f"Session {session_id} not found in workspace {workspace_id}")
@@ -356,8 +386,47 @@ class PersistentSessionService(SessionService):
         ttl = extend_seconds if extend_seconds is not None else self.default_touch_ttl
         new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
+        # Track cumulative token usage from working memory
+        metadata_updates = {}
+        try:
+            working_memory_entries = await self.storage.get_all_working_memory(workspace_id, session_id)
+            cumulative_tokens = 0
+            for wm in working_memory_entries:
+                content_str = wm.value if isinstance(wm.value, str) else json.dumps(wm.value, default=str)
+                cumulative_tokens += self._estimate_tokens(content_str)
+
+            prev_tokens = int(session.metadata.get('cumulative_tokens', 0))
+            prev_extraction_tokens = int(session.metadata.get('last_extraction_tokens', 0))
+
+            metadata_updates['cumulative_tokens'] = cumulative_tokens
+
+            # Determine if extraction should be triggered
+            should_extract = False
+            if prev_extraction_tokens == 0 and cumulative_tokens >= token_trigger_init:
+                should_extract = True
+            elif prev_extraction_tokens > 0 and (cumulative_tokens - prev_extraction_tokens) >= token_trigger_growth:
+                should_extract = True
+
+            if should_extract and self.task_service is not None:
+                metadata_updates['last_extraction_tokens'] = cumulative_tokens
+                self.logger.info(
+                    "Token budget trigger reached for session %s (tokens: %d), scheduling extraction",
+                    session_id, cumulative_tokens,
+                )
+                await self.task_service.schedule_task(
+                    'session_extraction',
+                    {
+                        'workspace_id': workspace_id,
+                        'session_id': session_id,
+                        'context_id': session.context_id if hasattr(session, 'context_id') else None,
+                    },
+                )
+        except Exception as e:
+            self.logger.warning("Failed to track token usage for session %s: %s", session_id, e)
+
         updated = await self.storage.update_session(
-            workspace_id, session_id, expires_at=new_expires_at
+            workspace_id, session_id, expires_at=new_expires_at,
+            metadata={**session.metadata, **metadata_updates} if metadata_updates else None,
         )
         if updated is None:
             raise ValueError(f"Failed to update session {session_id} in storage")

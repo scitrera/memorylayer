@@ -11,6 +11,7 @@ Enterprise implementations can extend this for:
 - API key generation and verification
 - JWT token validation
 - RBAC integration
+- Gateway-injected identity headers (e.g. Aether auth-proxy)
 """
 import logging
 from abc import ABC, abstractmethod
@@ -18,13 +19,17 @@ from typing import Optional, TYPE_CHECKING
 
 from fastapi import Request
 from pydantic import BaseModel
-
 from ...models.auth import AuthIdentity, RequestContext
+from ...config import (
+    MEMORYLAYER_AUTHENTICATION_SERVICE,
+    DEFAULT_MEMORYLAYER_AUTHENTICATION_SERVICE,
+)
 
 if TYPE_CHECKING:
     from ...models.session import Session
 
 from .._constants import EXT_AUTHENTICATION_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 # Header names
 HEADER_AUTHORIZATION = "Authorization"
@@ -210,3 +215,11 @@ class AuthenticationService(ABC):
 
         # Also support raw token
         return auth_header
+
+
+# noinspection PyAbstractClass
+AuthenticationServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_AUTHENTICATION_SERVICE,
+    config_key=MEMORYLAYER_AUTHENTICATION_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_AUTHENTICATION_SERVICE,
+)

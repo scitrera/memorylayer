@@ -1,25 +1,12 @@
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_REFLECT_SERVICE, DEFAULT_MEMORYLAYER_REFLECT_SERVICE
 from .._constants import EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE, EXT_REFLECT_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 # noinspection PyAbstractClass
-class ReflectServicePluginBase(Plugin):
-    """Base plugin for reflect service - extensible for custom implementations."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_REFLECT_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_REFLECT_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_REFLECT_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_REFLECT_SERVICE, DEFAULT_MEMORYLAYER_REFLECT_SERVICE)
-
-    def get_dependencies(self, v: Variables):
-        return EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE
+ReflectServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_REFLECT_SERVICE,
+    config_key=MEMORYLAYER_REFLECT_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_REFLECT_SERVICE,
+    dependencies=(EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE),
+)

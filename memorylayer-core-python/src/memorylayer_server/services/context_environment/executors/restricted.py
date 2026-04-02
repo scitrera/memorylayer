@@ -45,7 +45,7 @@ _SAFE_BUILTINS = {
     'enumerate': enumerate,
     'zip': zip,
     'range': range,
-    'type': type,
+    'type': lambda *args: (_ for _ in ()).throw(TypeError("type() with multiple arguments is not allowed in restricted mode")) if len(args) != 1 else type(args[0]),
     'isinstance': isinstance,
     'any': any,
     'all': all,
@@ -160,8 +160,18 @@ class _ASTValidator(ast.NodeVisitor):
             f"Disallowed syntax: {type(node).__name__} at line {getattr(node, 'lineno', '?')}"
         )
 
+    _DUNDER_ALLOWLIST = frozenset({"__name__", "__doc__", "__len__", "__getitem__", "__contains__"})
+
     def generic_visit(self, node: ast.AST) -> None:
         self._check_node(node)
+        # Block dunder attribute access to prevent sandbox escapes
+        # e.g. ().__class__.__bases__[0].__subclasses__()
+        if isinstance(node, ast.Attribute):
+            attr = node.attr
+            if attr.startswith("__") and attr.endswith("__") and attr not in self._DUNDER_ALLOWLIST:
+                self.errors.append(
+                    f"Disallowed dunder attribute access: {attr} at line {getattr(node, 'lineno', '?')}"
+                )
         super().generic_visit(node)
 
 

@@ -63,6 +63,14 @@ from ...config import (
     DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_ENABLED,
     MEMORYLAYER_FACT_DECOMPOSITION_MIN_LENGTH,
     DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_MIN_LENGTH,
+    MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED,
+    DEFAULT_MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED,
+    MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS,
+    DEFAULT_MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS,
+    MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT,
+    DEFAULT_MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT,
+    MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
+    DEFAULT_MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
 )
 
 # Internal constant for LLM recall token budget
@@ -87,6 +95,19 @@ class MemoryService:
     - LLM service (for query rewriting and re-ranking)
     - Cache (for recent memories)
     """
+
+    @staticmethod
+    def _exponential_freshness(age: float, half_life: float) -> float:
+        """Compute exponential decay factor for freshness/recency scoring.
+
+        Args:
+            age: Age in the same time unit as half_life (hours, days, etc.)
+            half_life: Time until the factor reaches 0.5
+
+        Returns:
+            Decay factor in (0.0, 1.0]
+        """
+        return math.exp(-math.log(2) * age / half_life)
 
     def __init__(
             self,
@@ -155,6 +176,30 @@ class MemoryService:
         self.default_traverse_depth = v.get(
             MEMORYLAYER_MEMORY_TRAVERSE_DEPTH,
             DEFAULT_MEMORYLAYER_MEMORY_TRAVERSE_DEPTH,
+        )
+
+        # LLM query rewriting config
+        self.llm_query_rewrite_enabled = v.get(
+            MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED,
+            DEFAULT_MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED,
+        )
+
+        # Freshness annotation config
+        self.freshness_half_life_days = v.get(
+            MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS,
+            DEFAULT_MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS,
+        )
+
+        # Configurable scope boosts
+        self.default_scope_boosts = ScopeBoosts(
+            same_context=v.get(
+                MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT,
+                DEFAULT_MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT,
+            ),
+            same_workspace=v.get(
+                MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
+                DEFAULT_MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
+            ),
         )
 
         self.logger.info(
@@ -269,23 +314,13 @@ class MemoryService:
             return updated
 
         elif dedup_result.action == DeduplicationAction.MERGE:
-            # Merge candidate - for now, treat as UPDATE
-            # TODO: Implement proper merge logic (combine content, metadata, etc.)
             self.logger.info(
                 "Merging with existing memory: %s (%s)",
                 dedup_result.existing_memory_id,
                 dedup_result.reason
             )
             existing = await self.storage.get_memory(workspace_id, dedup_result.existing_memory_id, track_access=False)
-            # Simple merge: append new content to existing
-            merged_content = f"{existing.content}\n\n---\n\n{input.content}"
-            updated = await self.storage.update_memory(
-                workspace_id=workspace_id,
-                memory_id=dedup_result.existing_memory_id,
-                content=merged_content,
-                embedding=embedding,
-                importance=max(existing.importance, input.importance),
-            )
+            updated = await self._merge_memories(workspace_id, existing, input.content, input.tags, input.metadata, input.importance)
             return updated
 
         # 4. No duplicate - proceed with creating new memory
@@ -311,6 +346,8 @@ class MemoryService:
             associations=input.associations,
             context_id=input.context_id,
             user_id=user_id or input.user_id,
+            observer_id=input.observer_id,
+            subject_id=input.subject_id,
         )
 
         # Store in backend (backend will create Memory object)
@@ -414,7 +451,6 @@ class MemoryService:
                     'memory_id': memory.id,
                     'workspace_id': workspace_id,
                     'content': memory.content,
-                    'embedding': embedding,
                     'classify_type': classify_type,
                 })
             except Exception as e:
@@ -492,15 +528,8 @@ class MemoryService:
             existing = await self.storage.get_memory(
                 workspace_id, dedup_result.existing_memory_id, track_access=False,
             )
-            merged_content = f"{existing.content}\n\n---\n\n{input.content}"
-            updated = await self.storage.update_memory(
-                workspace_id=workspace_id,
-                memory_id=dedup_result.existing_memory_id,
-                content=merged_content,
-                embedding=embedding,
-                importance=max(existing.importance, input.importance),
-            )
-            await self._post_store_pipeline(workspace_id, updated, embedding, inline=inline)
+            updated = await self._merge_memories(workspace_id, existing, input.content, input.tags, input.metadata, input.importance)
+            await self._post_store_pipeline(workspace_id, updated, updated.embedding, inline=inline)
             return updated
 
         # CREATE: store new memory
@@ -845,6 +874,29 @@ class MemoryService:
             await asyncio.gather(*access_tasks, return_exceptions=True)
             access_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
 
+        # Annotate memories with trust scores and set drift_caveat if any are low-trust
+        if result.memories:
+            self._annotate_trust(result.memories)
+            low_trust = [m for m in result.memories if m.trust_score is not None and m.trust_score < 0.5]
+            if low_trust:
+                result.drift_caveat = (
+                    f"{len(low_trust)} of {len(result.memories)} recalled memories have low trust scores "
+                    f"and may be stale or unreliable."
+                )
+
+        # Annotate memories with freshness scores and staleness warnings
+        if result.memories:
+            self._annotate_freshness(result.memories)
+            freshness_scores = [m.freshness_score for m in result.memories if m.freshness_score is not None]
+            if freshness_scores:
+                result.freshness_metadata = {
+                    'avg_freshness': round(sum(freshness_scores) / len(freshness_scores), 4),
+                    'min_freshness': round(min(freshness_scores), 4),
+                    'max_freshness': round(max(freshness_scores), 4),
+                    'severe_count': sum(1 for m in result.memories if m.staleness_warning == 'severe'),
+                    'moderate_count': sum(1 for m in result.memories if m.staleness_warning == 'moderate'),
+                }
+
         # Calculate total latency
         total_latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
@@ -872,6 +924,172 @@ class MemoryService:
 
         return result
 
+    async def _merge_memories(
+            self,
+            workspace_id: str,
+            existing: Memory,
+            new_content: str,
+            new_tags: list,
+            new_metadata: dict,
+            new_importance: float,
+    ) -> Memory:
+        """
+        Merge new memory content into an existing memory.
+
+        Strategy:
+        - Keep newer content as primary (new_content replaces existing)
+        - Tag union from both memories
+        - Deep-merge metadata dicts (new overrides old)
+        - Importance: max(existing, new) * 1.1 capped at 1.0
+        - Store old content_hash in metadata.merged_from for provenance
+        - Re-embed merged content
+        - Re-generate semantic tiers
+        """
+        # Tag union
+        merged_tags = sorted(set(existing.tags) | set(new_tags))
+
+        # Deep-merge metadata: old base, new overrides, plus provenance
+        merged_metadata = {**existing.metadata, **new_metadata}
+        merged_metadata['merged_from'] = existing.content_hash
+
+        # Importance boost capped at 1.0
+        merged_importance = min(max(existing.importance, new_importance) * 1.1, 1.0)
+
+        # Re-embed the new content
+        new_embedding = await self.embedding.embed(new_content)
+
+        updated = await self.storage.update_memory(
+            workspace_id=workspace_id,
+            memory_id=existing.id,
+            content=new_content,
+            embedding=new_embedding,
+            importance=merged_importance,
+            tags=merged_tags,
+            metadata=merged_metadata,
+        )
+
+        # Re-generate semantic tiers for merged memory
+        if self.tier_generation_service:
+            try:
+                await self.tier_generation_service.generate_tiers(existing.id, workspace_id)
+            except Exception as e:
+                self.logger.warning("Tier generation failed after merge for %s: %s", existing.id, e)
+
+        return updated
+
+    def _compute_trust_score(self, memory: Memory) -> tuple[float, dict]:
+        """
+        Compute a composite trust score for a memory.
+
+        Components:
+        - Freshness (0.3 weight): exponential decay same as recency scoring
+        - Access frequency (0.2): min(access_count / 10, 1.0)
+        - Decay factor (0.2): current memory.decay_factor value
+        - Verification (0.15): 1.0 if pinned or metadata.verified, else 0.5
+        - Source reliability (0.15): 1.0 session commit, 0.8 manual, 0.6 extraction
+
+        Returns:
+            Tuple of (trust_score, trust_signals dict)
+        """
+        now = datetime.now(timezone.utc)
+
+        # Freshness component: exponential decay (aligned with configurable freshness_half_life_days)
+        age_hours = (now - memory.created_at).total_seconds() / 3600.0
+        half_life = self.freshness_half_life_days * 24.0
+        freshness = self._exponential_freshness(age_hours, half_life)
+
+        # Access frequency
+        access_freq = min(memory.access_count / 10.0, 1.0)
+
+        # Decay factor (already 0.0-1.0)
+        decay = memory.decay_factor
+
+        # Verification
+        if memory.pinned or memory.metadata.get('verified'):
+            verification = 1.0
+        else:
+            verification = 0.5
+
+        # Source reliability
+        if memory.source_memory_id:
+            # Came from session commit decomposition
+            source_reliability = 1.0
+        elif memory.metadata.get('source') == 'manual' or (
+            not memory.source_memory_id
+            and not memory.source_document_id
+            and not memory.source_thread_id
+        ):
+            source_reliability = 0.8
+        else:
+            # Extracted from document/thread
+            source_reliability = 0.6
+
+        trust_score = (
+            0.3 * freshness
+            + 0.2 * access_freq
+            + 0.2 * decay
+            + 0.15 * verification
+            + 0.15 * source_reliability
+        )
+        # Clamp to [0.0, 1.0]
+        trust_score = max(0.0, min(1.0, trust_score))
+
+        trust_signals = {
+            'freshness': round(freshness, 4),
+            'access_frequency': round(access_freq, 4),
+            'decay_factor': round(decay, 4),
+            'verification': round(verification, 4),
+            'source_reliability': round(source_reliability, 4),
+        }
+
+        return trust_score, trust_signals
+
+    def _annotate_trust(self, memories: list[Memory]) -> list[Memory]:
+        """
+        Annotate memories with trust scores in place.
+
+        Sets trust_score and trust_signals on each memory.
+        """
+        for memory in memories:
+            trust_score, trust_signals = self._compute_trust_score(memory)
+            memory.trust_score = trust_score
+            memory.trust_signals = trust_signals
+        return memories
+
+    async def _recall_browse(
+            self,
+            workspace_id: str,
+            input: RecallInput,
+    ) -> RecallResult:
+        """Browse memories without embedding — used for wildcard queries like '*'.
+
+        Returns recent memories ordered by creation time, skipping the
+        embedding + vector search path entirely.
+        """
+        self.logger.debug("Wildcard query detected, using browse mode for workspace %s", workspace_id)
+        far_past = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        recent = await self.storage.get_recent_memories(
+            workspace_id=workspace_id,
+            created_after=far_past,
+            limit=input.limit,
+            detail_level="full",
+            offset=input.offset,
+        )
+        # get_recent_memories returns dicts; fetch full Memory objects by ID
+        memories = []
+        for entry in recent:
+            mem = await self.storage.get_memory(workspace_id, entry["id"], track_access=False)
+            if mem is not None:
+                memories.append(mem)
+
+        return RecallResult(
+            memories=memories,
+            total_count=len(memories),
+            query_tokens=0,
+            search_latency_ms=0,
+            mode_used=RecallMode.RAG,
+        )
+
     async def _recall_rag(
             self,
             workspace_id: str,
@@ -879,6 +1097,10 @@ class MemoryService:
             relevance_threshold: float,
     ) -> RecallResult:
         """Pure vector similarity search."""
+        # Wildcard/browse: skip embedding for trivial queries like "*"
+        if input.query.strip() in ("*", "**", ""):
+            return await self._recall_browse(workspace_id, input)
+
         # Generate query embedding
         query_embedding = await self.embedding.embed(input.query)
 
@@ -887,6 +1109,20 @@ class MemoryService:
 
         # Search memories in current workspace
         include_archived = getattr(input, 'include_archived', False)
+        entity_filters = {}
+        if getattr(input, 'observer_id', None) is not None:
+            entity_filters['observer_id'] = input.observer_id
+        if getattr(input, 'subject_id', None) is not None:
+            entity_filters['subject_id'] = input.subject_id
+        if getattr(input, 'user_id', None) is not None:
+            entity_filters['user_id'] = input.user_id
+
+        date_filters = {}
+        if getattr(input, 'created_after', None) is not None:
+            date_filters['created_after'] = input.created_after.isoformat() if hasattr(input.created_after, 'isoformat') else str(input.created_after)
+        if getattr(input, 'created_before', None) is not None:
+            date_filters['created_before'] = input.created_before.isoformat() if hasattr(input.created_before, 'isoformat') else str(input.created_before)
+
         results = await self.storage.search_memories(
             workspace_id=workspace_id,
             query_embedding=query_embedding,
@@ -897,6 +1133,8 @@ class MemoryService:
             subtypes=[s.value for s in input.subtypes] if input.subtypes else None,
             tags=input.tags if input.tags else None,
             include_archived=include_archived,
+            **entity_filters,
+            **date_filters,
         )
 
         # Search _global workspace if enabled and not already searching it
@@ -912,10 +1150,18 @@ class MemoryService:
                 subtypes=[s.value for s in input.subtypes] if input.subtypes else None,
                 tags=input.tags if input.tags else None,
                 include_archived=include_archived,
+                **entity_filters,
+                **date_filters,
             )
 
         # Combine results
         all_results = results + global_results
+
+        # Filter out already-surfaced memory IDs
+        exclude_ids = getattr(input, 'exclude_ids', None)
+        if exclude_ids:
+            exclude_set = set(exclude_ids)
+            all_results = [(m, s) for m, s in all_results if m.id not in exclude_set]
 
         # Apply scope boosts
         context_id = input.context_id if input.context_id else DEFAULT_CONTEXT_ID
@@ -972,15 +1218,21 @@ class MemoryService:
             )
 
         # Step 1: LLM Query Rewriting
-        # TODO: configurable LLM query rewriting
-        # rewritten_query = await self._rewrite_query_with_llm(input.query, input.context)
         rewritten_query = input.query
-
-        # self.logger.info(
-        #     "LLM query rewrite: '%s' -> '%s'",
-        #     input.query[:50],
-        #     rewritten_query[:50] if rewritten_query != input.query else "(unchanged)"
-        # )
+        if self.llm_query_rewrite_enabled:
+            # Serialize context list to a string for the rewriter
+            context_str = None
+            if input.context:
+                context_str = "\n".join(
+                    f"{msg.get('role', 'user')}: {msg.get('content', '')}"
+                    for msg in input.context
+                )
+            rewritten_query = await self._rewrite_query_with_llm(input.query, context_str)
+            self.logger.info(
+                "LLM query rewrite: '%s' -> '%s'",
+                input.query[:50],
+                rewritten_query[:50] if rewritten_query != input.query else "(unchanged)"
+            )
 
         # Step 2: Search with rewritten query (fetch more candidates for re-ranking)
         search_input = RecallInput(
@@ -1000,6 +1252,7 @@ class MemoryService:
             context=input.context,
             rag_threshold=input.rag_threshold,
             detail_level=input.detail_level,
+            exclude_ids=input.exclude_ids,
         )
 
         rag_result = await self._recall_rag(
@@ -1277,6 +1530,36 @@ Top {limit} indices (comma-separated):"""
         )
 
         return updated
+
+    async def update(
+            self,
+            workspace_id: str,
+            memory_id: str,
+            **updates,
+    ) -> Optional[Memory]:
+        """
+        Update a memory, recomputing content_hash and embedding when content changes.
+
+        Args:
+            workspace_id: Workspace the memory belongs to
+            memory_id: Memory identifier
+            **updates: Fields to update (content, type, importance, tags, etc.)
+
+        Returns:
+            Updated Memory object, or None if not found
+        """
+        self.logger.info("Updating memory: %s in workspace: %s", memory_id, workspace_id)
+
+        # If content changed, recompute content_hash and regenerate embedding
+        if "content" in updates:
+            updates["content_hash"] = compute_content_hash(updates["content"])
+            updates["embedding"] = await self.embedding.embed(updates["content"])
+
+        return await self.storage.update_memory(
+            workspace_id=workspace_id,
+            memory_id=memory_id,
+            **updates,
+        )
 
     async def get(
             self,
@@ -1612,7 +1895,7 @@ Top {limit} indices (comma-separated):"""
             List of Memory objects sorted by boosted score with source_scope added
         """
         if boosts is None:
-            boosts = ScopeBoosts()
+            boosts = getattr(self, 'default_scope_boosts', ScopeBoosts())
 
         boosted_memories = []
 
@@ -1675,17 +1958,77 @@ Top {limit} indices (comma-separated):"""
             return memories
 
         now = datetime.now(timezone.utc)
-        decay_lambda = math.log(2) / half_life_hours
 
         for memory in memories:
             age_hours = max(0.0, (now - memory.updated_at).total_seconds() / 3600.0)
-            recency_factor = math.exp(-decay_lambda * age_hours)
+            recency_factor = self._exponential_freshness(age_hours, half_life_hours)
             # Blend: at weight=0 no effect, at weight=1 full decay
             adjusted_score = memory.boosted_score * (1.0 - recency_weight + recency_weight * recency_factor)
             memory.boosted_score = adjusted_score
 
         # Re-sort by adjusted boosted_score
         memories.sort(key=lambda m: m.boosted_score, reverse=True)
+        return memories
+
+    def _annotate_freshness(
+            self,
+            memories: list[Memory],
+            half_life_days: Optional[float] = None,
+    ) -> list[Memory]:
+        """
+        Annotate recalled memories with freshness scores and staleness warnings.
+
+        Uses exponential decay: score = exp(-age_days / half_life_days)
+
+        Staleness tiers:
+          - none:     age < 1 day
+          - mild:     1 <= age < 7 days
+          - moderate: 7 <= age < 30 days
+          - severe:   age >= 30 days
+
+        Also applies a small access-recency bonus: memories accessed within
+        the last 24 hours get a +0.05 bonus (capped at 1.0).
+
+        Args:
+            memories: List of Memory objects to annotate (mutated in place)
+            half_life_days: Days until freshness score reaches 0.5 (None uses instance default)
+
+        Returns:
+            The same list of Memory objects with freshness_score, staleness_warning,
+            and age_days populated.
+        """
+        if not memories:
+            return memories
+
+        if half_life_days is None:
+            half_life_days = getattr(self, 'freshness_half_life_days', DEFAULT_MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS)
+
+        now = datetime.now(timezone.utc)
+
+        for memory in memories:
+            age_days = max(0.0, (now - memory.created_at).total_seconds() / 86400.0)
+            freshness_score = self._exponential_freshness(age_days, half_life_days)
+
+            # Access recency bonus: memories accessed in the last 24h feel fresher
+            if memory.last_accessed_at is not None:
+                hours_since_access = (now - memory.last_accessed_at).total_seconds() / 3600.0
+                if hours_since_access < 24.0:
+                    freshness_score = min(1.0, freshness_score + 0.05)
+
+            # Staleness tier
+            if age_days < 1.0:
+                staleness_warning = "none"
+            elif age_days < 7.0:
+                staleness_warning = "mild"
+            elif age_days < 30.0:
+                staleness_warning = "moderate"
+            else:
+                staleness_warning = "severe"
+
+            memory.freshness_score = round(freshness_score, 4)
+            memory.staleness_warning = staleness_warning
+            memory.age_days = round(age_days, 2)
+
         return memories
 
     async def recall_with_global(
@@ -1727,6 +2070,12 @@ Top {limit} indices (comma-separated):"""
         # Generate query embedding once
         query_embedding = await self.embedding.embed(query)
 
+        entity_filters = {}
+        if kwargs.get('observer_id') is not None:
+            entity_filters['observer_id'] = kwargs['observer_id']
+        if kwargs.get('subject_id') is not None:
+            entity_filters['subject_id'] = kwargs['subject_id']
+
         # Get memories from current workspace
         workspace_results = await self.storage.search_memories(
             workspace_id=workspace_id,
@@ -1736,6 +2085,7 @@ Top {limit} indices (comma-separated):"""
             types=[t.value for t in recall_input.types] if recall_input.types else None,
             subtypes=[s.value for s in recall_input.subtypes] if recall_input.subtypes else None,
             tags=recall_input.tags if recall_input.tags else None,
+            **entity_filters,
         )
 
         # Get memories from _global if enabled
@@ -1749,6 +2099,7 @@ Top {limit} indices (comma-separated):"""
                 types=[t.value for t in recall_input.types] if recall_input.types else None,
                 subtypes=[s.value for s in recall_input.subtypes] if recall_input.subtypes else None,
                 tags=recall_input.tags if recall_input.tags else None,
+                **entity_filters,
             )
 
         # Combine results

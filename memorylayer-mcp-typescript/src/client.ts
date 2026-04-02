@@ -176,18 +176,19 @@ export class MemoryLayerClient {
     success: boolean;
     total_memories: number;
     total_associations: number;
+    implemented: boolean;
+    message?: string;
     breakdown?: {
       by_type: Record<string, number>;
       by_subtype: Record<string, number>;
     };
   }> {
-    // SDK doesn't have a dedicated statistics endpoint yet
-    // For now, we'll return a basic response
-    // TODO: Implement when SDK adds statistics endpoint
     return {
       success: true,
       total_memories: 0,
       total_associations: 0,
+      implemented: false,
+      message: "Statistics endpoint not yet implemented in SDK. Values are placeholders.",
       breakdown: includeBreakdown ? {
         by_type: {},
         by_subtype: {}
@@ -207,11 +208,9 @@ export class MemoryLayerClient {
   }
 
   async auditMemories(_memoryId?: string, _autoResolve: boolean = false): Promise<ToolResponse> {
-    // SDK doesn't have audit endpoint yet
-    // TODO: Implement when SDK adds audit endpoint
     return {
-      success: true,
-      message: "Audit functionality not yet available in SDK"
+      success: false,
+      message: "Audit endpoint not yet implemented. This is a placeholder — no audit was performed."
     };
   }
 
@@ -431,5 +430,150 @@ export class MemoryLayerClient {
    */
   async contextCheckpoint(): Promise<void> {
     await this.sdk.contextCheckpoint();
+  }
+
+  // ============================================================================
+  // Raw HTTP helper (for endpoints not yet in the SDK)
+  // ============================================================================
+
+  private async rawRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
+    const sessionId = this.sdk.getSessionId();
+    if (sessionId) {
+      headers["X-Session-ID"] = sessionId;
+    }
+    if (this.workspaceId) {
+      headers["X-Workspace-ID"] = this.workspaceId;
+    }
+
+    const url = `${this.baseUrl}${path}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({})) as Record<string, unknown>;
+        const detail = errBody.detail ?? errBody.message ?? response.statusText;
+        const message = typeof detail === "string" ? detail : JSON.stringify(detail);
+        throw new Error(`HTTP ${response.status}: ${message}`);
+      }
+
+      if (response.status === 204) {
+        return undefined as T;
+      }
+
+      return await response.json() as T;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error) throw error;
+      throw new Error(`Request failed: ${error}`);
+    }
+  }
+
+  // ============================================================================
+  // Chat History
+  // ============================================================================
+
+  /**
+   * Create a new chat thread.
+   */
+  async chatThreadCreate(options: {
+    thread_id?: string;
+    user_id?: string;
+    observer_id?: string;
+    subject_id?: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<Record<string, unknown>> {
+    return this.rawRequest<Record<string, unknown>>("POST", "/v1/chat/threads", options);
+  }
+
+  /**
+   * Append messages to a chat thread.
+   */
+  async chatThreadAppend(threadId: string, messages: Array<{
+    role: string;
+    content: unknown;
+    metadata?: Record<string, unknown>;
+  }>): Promise<Record<string, unknown>> {
+    return this.rawRequest<Record<string, unknown>>(
+      "POST",
+      `/v1/chat/threads/${threadId}/messages`,
+      { messages }
+    );
+  }
+
+  /**
+   * Get a chat thread with its messages.
+   */
+  async chatThreadGet(threadId: string, options: {
+    limit?: number;
+    offset?: number;
+    order?: "asc" | "desc";
+  } = {}): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams();
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    if (options.order) params.set("order", options.order);
+    const query = params.toString();
+    return this.rawRequest<Record<string, unknown>>(
+      "GET",
+      `/v1/chat/threads/${threadId}${query ? `?${query}` : ""}`
+    );
+  }
+
+  /**
+   * List chat threads in the workspace.
+   */
+  async chatThreadList(options: {
+    user_id?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams();
+    if (options.user_id) params.set("user_id", options.user_id);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.rawRequest<Record<string, unknown>>(
+      "GET",
+      `/v1/chat/threads${query ? `?${query}` : ""}`
+    );
+  }
+
+  /**
+   * Trigger memory decomposition for a thread's unprocessed messages.
+   */
+  async chatThreadDecompose(threadId: string): Promise<Record<string, unknown>> {
+    return this.rawRequest<Record<string, unknown>>(
+      "POST",
+      `/v1/chat/threads/${threadId}/decompose`
+    );
+  }
+
+  /**
+   * Delete a chat thread and all its messages.
+   */
+  async chatThreadDelete(threadId: string): Promise<Record<string, unknown>> {
+    await this.rawRequest<void>("DELETE", `/v1/chat/threads/${threadId}`);
+    return { success: true, thread_id: threadId };
   }
 }

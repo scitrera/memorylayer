@@ -9,11 +9,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
 from ...config import MEMORYLAYER_DEDUPLICATION_SERVICE, DEFAULT_MEMORYLAYER_DEDUPLICATION_SERVICE
 
 from .._constants import EXT_STORAGE_BACKEND, EXT_EMBEDDING_SERVICE, EXT_DEDUPLICATION_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 # ============================================
 # Deduplication Configuration
@@ -71,23 +70,13 @@ class DeduplicationService(ABC):
 
 
 # noinspection PyAbstractClass
-class DeduplicationServicePluginBase(Plugin):
-    """Base plugin for deduplication service - extensible for custom implementations."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_DEDUPLICATION_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_DEDUPLICATION_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_DEDUPLICATION_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        v.set_default_value(MEMORYLAYER_DEDUPLICATION_SERVICE, DEFAULT_MEMORYLAYER_DEDUPLICATION_SERVICE)
-        v.set_default_value(MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD, DEFAULT_MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD)
-        v.set_default_value(MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD, DEFAULT_MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD)
-
-    def get_dependencies(self, v: Variables):
-        return (EXT_STORAGE_BACKEND, EXT_EMBEDDING_SERVICE)
+DeduplicationServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_DEDUPLICATION_SERVICE,
+    config_key=MEMORYLAYER_DEDUPLICATION_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_DEDUPLICATION_SERVICE,
+    dependencies=(EXT_STORAGE_BACKEND, EXT_EMBEDDING_SERVICE),
+    extra_defaults={
+        MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD: DEFAULT_MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD,
+        MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD: DEFAULT_MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD,
+    },
+)

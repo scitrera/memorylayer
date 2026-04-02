@@ -24,6 +24,10 @@ class MemorySubtype(str, Enum):
     PREFERENCE = "preference"  # User/project preferences
     DECISION = "decision"  # Architectural decisions
     DIRECTIVE = "directive"  # User instructions/constraints
+    PROFILE = "profile"  # User/entity profile information
+    ENTITY = "entity"  # Named entities
+    EVENT = "event"  # Time-bound events
+    INFERENCE = "inference"  # Inferred/derived knowledge
 
 
 class RecallMode(str, Enum):

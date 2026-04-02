@@ -39,3 +39,22 @@ export class RateLimitError extends MemoryLayerError {
     this.name = "RateLimitError";
   }
 }
+
+/**
+ * Raised when an enterprise-only endpoint returns 404.
+ * Indicates the server is running MemoryLayer OSS which does not
+ * include the requested feature (e.g. document ingestion, page search).
+ */
+export class EnterpriseRequiredError extends MemoryLayerError {
+  constructor(
+    public feature: string = "This feature",
+    message?: string
+  ) {
+    super(
+      message ??
+        `${feature} requires MemoryLayer Enterprise. See https://memorylayer.ai for upgrade options.`,
+      404
+    );
+    this.name = "EnterpriseRequiredError";
+  }
+}

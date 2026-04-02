@@ -55,6 +55,8 @@ class ReflectService:
         tags: Optional[list] = None,
         context_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        observer_id: Optional[str] = None,
+        subject_id: Optional[str] = None,
         mode: RecallMode = RecallMode.LLM,
         limit: int = 20,
         min_relevance: float = 0.5,
@@ -69,6 +71,8 @@ class ReflectService:
             tags=tags,
             context_id=context_id,
             user_id=user_id,
+            observer_id=observer_id,
+            subject_id=subject_id,
             mode=mode,
             limit=limit,
             min_relevance=min_relevance,
@@ -106,6 +110,8 @@ class ReflectService:
             tags=input.tags,
             context_id=input.context_id,
             user_id=input.user_id,
+            observer_id=getattr(input, 'observer_id', None),
+            subject_id=getattr(input, 'subject_id', None),
             mode=RecallMode.LLM,  # Use LLM mode for best semantic matching
             limit=20,  # Get more memories for synthesis
             min_relevance=0.5,

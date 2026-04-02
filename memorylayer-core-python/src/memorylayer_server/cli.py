@@ -1,8 +1,12 @@
 """MemoryLayer.ai CLI - Command line interface for memory infrastructure."""
 
+import json
+import logging
 import click
 
 from scitrera_app_framework import get_variables
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -48,7 +52,7 @@ def serve(host: str, port: int):
 @cli.command()
 def version():
     """Show version information."""
-    from memorylayer import __version__
+    from memorylayer_server import __version__
     click.echo(f"memorylayer.ai v{__version__}")
 
 
@@ -96,8 +100,8 @@ def export(workspace, output, offset, limit, include_associations, server_url, a
                                 if obj.get("type") == "footer":
                                     memories_count = obj.get("memories_exported", 0)
                                     associations_count = obj.get("associations_exported", 0)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("Skipped line during export footer parse: %s", e)
 
                     click.echo(f"Exported {memories_count} memories and {associations_count} associations to {output}")
                 else:
@@ -129,8 +133,8 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
         obj = json.loads(first_line)
         if obj.get("type") == "header":
             is_ndjson = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Skipped item during processing: %s", e)
 
     if is_ndjson:
         # NDJSON format
@@ -147,8 +151,8 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
                         memories.append(obj.get("data", {}))
                     elif obj_type == "association":
                         associations.append(obj.get("data", {}))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Skipped item during processing: %s", e)
     else:
         # JSON format
         with open(file, 'r') as f:
@@ -197,28 +201,38 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
 
 @cli.command()
 @click.option("--format", "output_format", default="text", type=click.Choice(["text", "json"]))
-def info(output_format: str):
+@click.option("--reveal-secrets", is_flag=True, help="Reveal secret keys in text output")
+def info(output_format: str, reveal_secrets: bool):
     """Show system information and configuration."""
 
+    from memorylayer_server import __version__
     from memorylayer_server.dependencies import _initialize_sync
+    from datetime import datetime, timezone
     v = get_variables()
     v.set("LOGGING_LEVEL", "ERROR")  # suppress logs during info output
     v = _initialize_sync(v)
+
+    redact_keys: bool = not reveal_secrets
+
     # TODO: move redaction log to scitrera_app_framework and share with log_framework_variables
-    settings = {
-        k.removeprefix('MEMORYLAYER_'): '(redacted)' if any(
+    def _redacted(k, val):
+        return '(redacted)' if any(
             (not 'max_tokens' in k.lower()) and x in k.lower() for x in ('password', 'secret', 'credentials', 'token', 'key',)) else val
-        for (k, val) in sorted(v.export_all_variables().items(), key=lambda kv: kv[0])
-        if k.startswith('MEMORYLAYER')
-    }
+
+    settings = ({k: _redacted(k, v) for (k, v) in sorted(v.export_all_variables().items(), key=lambda kv: kv[0])
+                 if k.startswith('MEMORYLAYER')} if redact_keys else
+                {k: v for k, v in sorted(v.export_all_variables().items(), key=lambda kv: kv[0]) if k.startswith('MEMORYLAYER')})
 
     if output_format == "json":
-        click.echo(json.dumps(settings, indent=2))
+        click.echo(json.dumps({k.removeprefix('MEMORYLAYER_').lower(): v for k, v in settings.items()}, indent=2))
     else:
-        click.echo("MemoryLayer.ai Configuration")
-        click.echo("=" * 40)
+        click.echo('# ' + "=" * 50)
+        click.echo("# MemoryLayer.ai Configuration")
+        click.echo(f"# exported at {datetime.now(tz=timezone.utc).isoformat()}")
+        click.echo(f"# version = v{__version__}")
+        click.echo('# ' + "=" * 50)
         for k, v in settings.items():
-            click.echo(f"{k}: {v}")
+            click.echo(f"{k}={v}")
         click.echo("")
 
 

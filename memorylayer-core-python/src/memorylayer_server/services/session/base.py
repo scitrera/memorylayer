@@ -20,15 +20,17 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional, Any, List, Dict, TYPE_CHECKING
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
-
-from ...config import MEMORYLAYER_SESSION_SERVICE, DEFAULT_MEMORYLAYER_SESSION_SERVICE
+from ...config import (
+    MEMORYLAYER_SESSION_SERVICE, DEFAULT_MEMORYLAYER_SESSION_SERVICE,
+    MEMORYLAYER_SESSION_TOUCH_TTL, DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL,
+)
 from ...models import Session, WorkingMemory
 
 if TYPE_CHECKING:
     from ...models.session import SessionBriefing
 
 from .._constants import EXT_SESSION_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 class CommitResult:
@@ -247,20 +249,11 @@ class SessionService(ABC):
 
 
 # noinspection PyAbstractClass
-class SessionServicePluginBase(Plugin):
-    """Base plugin for session service - extensible for custom implementations."""
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        return f"{EXT_SESSION_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        return EXT_SESSION_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_SESSION_SERVICE, self_attr='PROVIDER_NAME')
-
-    def on_registration(self, v: Variables) -> None:
-        from ...config import MEMORYLAYER_SESSION_TOUCH_TTL, DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL
-        v.set_default_value(MEMORYLAYER_SESSION_SERVICE, DEFAULT_MEMORYLAYER_SESSION_SERVICE)
-        v.set_default_value(MEMORYLAYER_SESSION_TOUCH_TTL, DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL)
+SessionServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_SESSION_SERVICE,
+    config_key=MEMORYLAYER_SESSION_SERVICE,
+    default_value=DEFAULT_MEMORYLAYER_SESSION_SERVICE,
+    extra_defaults={
+        MEMORYLAYER_SESSION_TOUCH_TTL: DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL,
+    },
+)

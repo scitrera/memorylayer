@@ -63,7 +63,16 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
         # Resolve services from the framework
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
 
-        # If no embedding was provided in the payload, generate one
+        # Resolve embedding: payload -> DB lookup -> re-generate (last resort)
+        if embedding is None:
+            try:
+                stored_memory = await storage.get_memory(workspace_id, memory_id, track_access=False)
+                if stored_memory and stored_memory.embedding is not None:
+                    embedding = stored_memory.embedding
+                    logger.debug("Loaded embedding from DB for memory %s", memory_id)
+            except Exception as e:
+                logger.debug("DB lookup for embedding failed for memory %s: %s", memory_id, e)
+
         if embedding is None:
             try:
                 embedding_service: EmbeddingService = self.get_extension(EXT_EMBEDDING_SERVICE, v)

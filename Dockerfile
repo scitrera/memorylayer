@@ -1,6 +1,6 @@
 FROM python:3.12-slim AS base
 
-LABEL maintainer="Scitrera <open-source-team@scitrera.com>"
+LABEL maintainer="scitrera.ai <open-source-team@scitrera.com>"
 LABEL org.opencontainers.image.source="https://github.com/scitrera/memorylayer"
 LABEL org.opencontainers.image.description="MemoryLayer.ai - Memory infrastructure for LLM-powered agents"
 LABEL org.opencontainers.image.licenses="Apache-2.0"

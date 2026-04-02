@@ -2,6 +2,13 @@
 import numpy as np
 
 
+def dot_product(vec_a: list[float], vec_b: list[float]) -> float:
+    """Compute dot product similarity between two unit-normalized vectors."""
+    if not vec_a or not vec_b or len(vec_a) != len(vec_b):
+        return 0.0
+    return sum(a * b for a, b in zip(vec_a, vec_b))
+
+
 def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     """
     Calculate cosine similarity between two vectors using numpy for performance.

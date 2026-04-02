@@ -6,9 +6,9 @@ Provides background task scheduling abstraction for memory lifecycle operations.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Optional
 
-from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
+from scitrera_app_framework.api import Variables
 
 from ...config import MEMORYLAYER_TASK_PROVIDER, DEFAULT_MEMORYLAYER_TASK_PROVIDER
 
@@ -19,6 +19,7 @@ from .._constants import (
     EXT_STORAGE_BACKEND,
     EXT_TASK_SERVICE,
 )
+from .._plugin_factory import make_service_plugin_base
 
 
 class TaskStatus(str, Enum):
@@ -53,7 +54,7 @@ class TaskService(ABC):
             payload: dict,
             delay_seconds: int = 0,
             priority: int = 5
-    ) -> str:
+    ) -> Optional[str]:
         """
         Schedule a task for background execution.
 
@@ -64,7 +65,7 @@ class TaskService(ABC):
             priority: Task priority (1-10, lower is higher priority)
 
         Returns:
-            Task ID for tracking
+            Task ID for tracking, or None if tasks are disabled.
         """
         pass
 
@@ -74,7 +75,7 @@ class TaskService(ABC):
             task_type: str,
             interval_seconds: int,
             payload: dict
-    ) -> str:
+    ) -> Optional[str]:
         """
         Schedule a recurring task.
 
@@ -84,7 +85,7 @@ class TaskService(ABC):
             payload: Task payload data
 
         Returns:
-            Schedule ID for tracking/cancellation
+            Schedule ID for tracking/cancellation, or None if tasks are disabled.
         """
         pass
 
@@ -133,41 +134,9 @@ class TaskService(ABC):
 
 
 # noinspection PyAbstractClass
-class TaskServicePluginBase(Plugin):
-    """
-    Base plugin for TaskService implementations.
-
-    Subclasses MUST:
-    1. Set PROVIDER_NAME to their provider name (e.g., 'asyncio', 'distributed')
-    2. Implement initialize() to return a TaskService instance
-    """
-
-    # Subclasses MUST set this to their provider name
-    PROVIDER_NAME: str = None
-
-    def name(self) -> str:
-        """Unique plugin name combining extension point and provider."""
-        return f"{EXT_TASK_SERVICE}|{self.PROVIDER_NAME}"
-
-    def extension_point_name(self, v: Variables) -> str:
-        """Return the extension point this plugin provides."""
-        return EXT_TASK_SERVICE
-
-    def is_enabled(self, v: Variables) -> bool:
-        """Check if this provider is enabled based on config."""
-        return enabled_option_pattern(
-            self, v,
-            MEMORYLAYER_TASK_PROVIDER,
-            self_attr='PROVIDER_NAME'
-        )
-
-    def on_registration(self, v: Variables) -> None:
-        """Set default value when plugin is registered."""
-        v.set_default_value(
-            MEMORYLAYER_TASK_PROVIDER,
-            DEFAULT_MEMORYLAYER_TASK_PROVIDER
-        )
-
-    def get_dependencies(self, v: Variables):
-        """Declare dependencies. Override in subclasses if needed."""
-        return (EXT_STORAGE_BACKEND,)
+TaskServicePluginBase = make_service_plugin_base(
+    ext_name=EXT_TASK_SERVICE,
+    config_key=MEMORYLAYER_TASK_PROVIDER,
+    default_value=DEFAULT_MEMORYLAYER_TASK_PROVIDER,
+    dependencies=(EXT_STORAGE_BACKEND,),
+)

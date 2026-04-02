@@ -5,6 +5,7 @@ Provides identity verification and request context resolution.
 """
 from .base import (
     AuthenticationService,
+    AuthenticationServicePluginBase,
     AuthenticationError,
     EXT_AUTHENTICATION_SERVICE,
     HEADER_AUTHORIZATION,
@@ -18,6 +19,7 @@ from .default import (
 
 __all__ = [
     "AuthenticationService",
+    "AuthenticationServicePluginBase",
     "AuthenticationError",
     "EXT_AUTHENTICATION_SERVICE",
     "HEADER_AUTHORIZATION",

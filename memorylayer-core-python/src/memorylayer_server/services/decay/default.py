@@ -63,7 +63,7 @@ class DefaultDecayService(DecayService):
             workspace_id,
             max_importance=settings.archive_threshold,
             max_access_count=settings.archive_max_access_count,
-            min_age_days=settings.archive_min_age_days,
+            older_than_days=settings.archive_min_age_days,
         )
 
         archived = 0

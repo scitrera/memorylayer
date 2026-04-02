@@ -3,8 +3,8 @@ Authentication and authorization context models.
 
 These models represent the resolved identity and context for API requests.
 """
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from .session import Session
 
@@ -34,11 +34,15 @@ class RequestContext:
     1. Explicit workspace_id in request body (override)
     2. Session's workspace_id (from X-Session-ID header)
     3. DEFAULT_WORKSPACE_ID ("_default")
+
+    The metadata dict carries extension-specific data (e.g., gateway-injected
+    access levels) without coupling the core model to any particular auth scheme.
     """
     tenant_id: str
     workspace_id: str
     user_id: Optional[str] = None
     session: Optional[Session] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def session_id(self) -> Optional[str]:

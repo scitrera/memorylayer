@@ -3,6 +3,8 @@
 from .client import MemoryLayerClient
 from .exceptions import (
     AuthenticationError,
+    AuthorizationError,
+    EnterpriseRequiredError,
     MemoryLayerError,
     NotFoundError,
     RateLimitError,
@@ -11,7 +13,20 @@ from .exceptions import (
 )
 from .models import (
     Association,
+    ChatMessage,
+    ChatMessageContent,
+    ChatThread,
+    ChatThreadWithMessages,
+    DatasetColumn,
+    DatasetInfo,
+    DatasetJobInfo,
+    DatasetSliceResult,
+    DecompositionResult,
+    DocumentInfo,
+    DocumentPage,
+    JobInfo,
     Memory,
+    PageSearchResult,
     RecallResult,
     ReflectResult,
     Session,
@@ -28,7 +43,7 @@ from .types import (
     SearchTolerance,
 )
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 __all__ = [
     # Main clients
@@ -43,6 +58,22 @@ __all__ = [
     "Session",
     "SessionBriefing",
     "Workspace",
+    # Chat history models
+    "ChatMessage",
+    "ChatMessageContent",
+    "ChatThread",
+    "ChatThreadWithMessages",
+    "DecompositionResult",
+    # Document models (Enterprise)
+    "DocumentInfo",
+    "DocumentPage",
+    "JobInfo",
+    "PageSearchResult",
+    # Dataset models (Enterprise)
+    "DatasetColumn",
+    "DatasetInfo",
+    "DatasetJobInfo",
+    "DatasetSliceResult",
     # Types
     "MemoryType",
     "MemorySubtype",
@@ -53,6 +84,8 @@ __all__ = [
     # Exceptions
     "MemoryLayerError",
     "AuthenticationError",
+    "AuthorizationError",
+    "EnterpriseRequiredError",
     "NotFoundError",
     "ValidationError",
     "RateLimitError",

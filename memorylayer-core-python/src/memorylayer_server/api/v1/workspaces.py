@@ -2,9 +2,11 @@
 Workspace management API endpoints.
 
 Endpoints:
-- POST /v1/workspaces - Create workspace
-- GET /v1/workspaces/{workspace_id} - Get workspace
-- PUT /v1/workspaces/{workspace_id} - Update workspace
+- POST   /v1/workspaces                   - Create workspace
+- GET    /v1/workspaces                   - List workspaces
+- GET    /v1/workspaces/{workspace_id}    - Get workspace
+- PUT    /v1/workspaces/{workspace_id}    - Update workspace
+- DELETE /v1/workspaces/{workspace_id}    - Delete workspace
 """
 import json
 import logging
@@ -34,7 +36,8 @@ from ...services.ontology import get_ontology_service as _get_ontology_service
 from ...services.memory import MemoryService
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
-from .deps import get_auth_service, get_authz_service, get_workspace_service, get_memory_service
+from .deps import get_auth_service, get_authz_service, get_workspace_service, get_memory_service, get_audit_service
+from ...services.audit import AuditService, AuditEvent
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 
@@ -56,6 +59,7 @@ async def create_workspace(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         workspace_service: WorkspaceService = Depends(get_workspace_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceResponse:
     """
@@ -104,6 +108,18 @@ async def create_workspace(
         workspace = await workspace_service.create_workspace(workspace)
 
         logger.info("Created workspace: %s", workspace_id)
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="workspace",
+                action="create",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace.id,
+                user_id=ctx.user_id,
+                resource_type="workspace",
+                resource_id=workspace.id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for workspace create")
         return WorkspaceResponse(workspace=workspace)
 
     except ValueError as e:
@@ -177,6 +193,7 @@ async def get_workspace(
         auth_service: AuthenticationService = Depends(get_auth_service),
         authz_service: AuthorizationService = Depends(get_authz_service),
         workspace_service: WorkspaceService = Depends(get_workspace_service),
+        audit_service: AuditService = Depends(get_audit_service),
         logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceResponse:
     """
@@ -213,6 +230,18 @@ async def get_workspace(
                 detail=f"Workspace not found: {workspace_id}"
             )
 
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="workspace",
+                action="read",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="workspace",
+                resource_id=workspace_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for workspace read")
         return WorkspaceResponse(workspace=workspace)
 
     except HTTPException:
@@ -301,6 +330,63 @@ async def update_workspace(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update workspace"
+        )
+
+
+@router.delete(
+    "/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        404: {"model": ErrorResponse, "description": "Workspace not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def delete_workspace(
+        http_request: Request,
+        workspace_id: str,
+        auth_service: AuthenticationService = Depends(get_auth_service),
+        authz_service: AuthorizationService = Depends(get_authz_service),
+        workspace_service: WorkspaceService = Depends(get_workspace_service),
+        audit_service: AuditService = Depends(get_audit_service),
+        logger: logging.Logger = Depends(get_logger),
+):
+    """Delete a workspace and all associated data."""
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(
+            ctx, "workspaces", "delete",
+            resource_id=workspace_id, workspace_id=workspace_id
+        )
+
+        deleted = await workspace_service.delete_workspace(workspace_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workspace not found: {workspace_id}"
+            )
+
+        try:
+            await audit_service.record(AuditEvent(
+                event_type="workspace",
+                action="delete",
+                tenant_id=ctx.tenant_id,
+                workspace_id=workspace_id,
+                user_id=ctx.user_id,
+                resource_type="workspace",
+                resource_id=workspace_id,
+            ))
+        except Exception:
+            logger.debug("Audit record failed for workspace delete")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete workspace %s: %s", workspace_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete workspace"
         )
 
 
