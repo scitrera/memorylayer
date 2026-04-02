@@ -7,4 +7,3 @@ node-modules/
 __pycache__/
 *.pyc
 uv.lock
-package-lock.json
