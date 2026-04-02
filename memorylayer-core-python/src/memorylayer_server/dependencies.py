@@ -3,14 +3,13 @@
 Uses scitrera-app-framework plugin pattern for service initialization.
 Services are lazily initialized on first access via get_extension().
 """
-import logging
-from logging import Logger
-from typing import Callable
 
-from scitrera_app_framework import (
-    Variables, get_variables, get_logger, init_framework_desktop,
-    async_plugins_ready, async_plugins_stopping
-)
+import logging
+from collections.abc import Callable
+from logging import Logger
+
+from scitrera_app_framework import Variables, async_plugins_ready, async_plugins_stopping, get_logger, get_variables, init_framework_desktop
+
 from .config import MEMORYLAYER_DATA_DIR
 
 # global preconfigure hooks (not specific to variables instance)
@@ -19,74 +18,79 @@ _preconfigure_hooks: list[Callable[[Variables], None]] = []
 
 # noinspection PyTypeHints
 def preconfigure(v: Variables = None, test_mode: bool = False, test_logger: Logger = None) -> (Variables, dict):
-    """ Pre-configure the framework """
+    """Pre-configure the framework"""
     from scitrera_app_framework import register_package_plugins
-    from . import api, services, lifecycle, tasks, middleware  # noqa: F401
+
+    from . import api, lifecycle, middleware, services, tasks  # noqa: F401
 
     # handle test mode
-    additional_kwargs = {} if not test_mode else {
-        'fault_handler': False,
-        'fixed_logger': test_logger,
-        'pyroscope': False,
-        'shutdown_hooks': False,
-    }
+    additional_kwargs = (
+        {}
+        if not test_mode
+        else {
+            "fault_handler": False,
+            "fixed_logger": test_logger,
+            "pyroscope": False,
+            "shutdown_hooks": False,
+        }
+    )
 
     # init framework (has internal protection against multiple invocations)
     v: Variables = init_framework_desktop(
-        'memorylayer-server',
+        "memorylayer-server",
         base_plugins=False,  # disable base plugins (we don't need them)
         stateful_chdir=True,  # change working directory to stateful root
         stateful_root_env_key=MEMORYLAYER_DATA_DIR,  # use MEMORYLAYER_DATA_DIR for stateful root
         async_auto_enabled=False,  # manage async plugin lifecycle hooks manually
         v=v,  # allow variables instance pass-through
-        **additional_kwargs
+        **additional_kwargs,
     )
 
     # do some custom logging tweaks (TODO: upstream mechanism for logging tweaks to scitrera-app-framework)
-    logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
-    logging.getLogger('aiosqlite').setLevel(logging.WARNING)
-    logging.getLogger('httpcore.http11').setLevel(logging.WARNING)
-    logging.getLogger('httpcore.connection').setLevel(logging.WARNING)
-    logging.getLogger('httpx').setLevel(logging.WARNING)
-    logging.getLogger('openai._base_client').setLevel(logging.WARNING)
-    logging.getLogger('google_genai.models').setLevel(logging.WARNING)
+    logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+    logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+    logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+    logging.getLogger("google_genai.models").setLevel(logging.WARNING)
 
     # avoid duplicate invocations of preconfigure()
-    if v.get('__preconfigure_complete__', default=False):
+    if v.get("__preconfigure_complete__", default=False):
         return v, services
 
     logger = get_logger(v)
 
     # register plugins
-    logger.debug('Registering core services')
+    logger.debug("Registering core services")
     register_package_plugins(services.__package__, v, recursive=True)
 
-    logger.debug('Registering lifecycle components')
+    logger.debug("Registering lifecycle components")
     register_package_plugins(lifecycle.__package__, v, recursive=True)
 
-    logger.debug('Registering API Routes')
+    logger.debug("Registering API Routes")
     register_package_plugins(api.__package__, v, recursive=True)
 
-    logger.debug('Registering Task Handlers')
+    logger.debug("Registering Task Handlers")
     register_package_plugins(tasks.__package__, v, recursive=True)
 
-    logger.debug('Registering Middleware')
+    logger.debug("Registering Middleware")
     register_package_plugins(middleware.__package__, v, recursive=True)
 
     # handle preconfiguration hooks
-    logger.debug('Evaluating preconfigure hooks')
+    logger.debug("Evaluating preconfigure hooks")
     global _preconfigure_hooks
-    if v.get('__preconfigure_hooks_installed__', default=0) == (lph := len(_preconfigure_hooks)):
+    if v.get("__preconfigure_hooks_installed__", default=0) == (lph := len(_preconfigure_hooks)):
         return v, services
 
     # run through preconfigure hooks (allows for registering additional plugins before initialization)
     for hook in _preconfigure_hooks:
         hook(v)
 
-    v.set('__preconfigure_hooks_installed__', lph)
-    logger.debug('Installed preconfiguration hooks')
+    v.set("__preconfigure_hooks_installed__", lph)
+    logger.debug("Installed preconfiguration hooks")
 
-    v.set('__preconfigure_complete__', True)
+    v.set("__preconfigure_complete__", True)
     return v, services
 
 
@@ -97,6 +101,7 @@ def _initialize_sync(v: Variables = None) -> Variables:
 
     logger.debug("Initializing services")
     from scitrera_app_framework.core.plugins import init_all_plugins
+
     init_all_plugins(v, async_enabled=False)  # handle sync part
     return v
 
@@ -121,4 +126,5 @@ async def shutdown_services(v: Variables = None) -> None:
     await async_plugins_stopping(v)
 
     from scitrera_app_framework.core.plugins import shutdown_all_plugins
+
     shutdown_all_plugins(v)

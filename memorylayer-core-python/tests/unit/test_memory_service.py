@@ -7,9 +7,12 @@ Tests:
 - forget: soft and hard delete
 - decay: importance reduction
 """
+
+from datetime import UTC
+
 import pytest
 
-from memorylayer_server.models.memory import RememberInput, RecallInput, MemoryType, RecallMode, SearchTolerance
+from memorylayer_server.models.memory import MemoryType, RecallInput, RecallMode, RememberInput, SearchTolerance
 from memorylayer_server.services.memory import MemoryService
 
 # Mock provider default dimensions
@@ -21,9 +24,9 @@ class TestRemember:
 
     @pytest.mark.asyncio
     async def test_remember_creates_memory(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that remember creates a new memory with ID."""
         input = RememberInput(
@@ -41,9 +44,9 @@ class TestRemember:
 
     @pytest.mark.asyncio
     async def test_remember_with_all_fields(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test remember with all optional fields."""
         input = RememberInput(
@@ -62,9 +65,9 @@ class TestRemember:
 
     @pytest.mark.asyncio
     async def test_remember_generates_embedding(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that remember generates embedding vector."""
         input = RememberInput(content="Memory with embedding")
@@ -76,9 +79,9 @@ class TestRemember:
 
     @pytest.mark.asyncio
     async def test_remember_deduplication(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that duplicate content returns existing memory."""
         input = RememberInput(content="Duplicate content")
@@ -90,9 +93,9 @@ class TestRemember:
 
     @pytest.mark.asyncio
     async def test_remember_generates_content_hash(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that remember generates content hash."""
         input = RememberInput(content="Content to hash")
@@ -108,53 +111,35 @@ class TestRecall:
 
     @pytest.mark.asyncio
     async def test_recall_finds_similar_memories(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that recall finds semantically similar memories."""
         # Store some memories
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Python is great for data science")
-        )
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="JavaScript is used for web development")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Python is great for data science"))
+        await memory_service.remember(workspace_id, RememberInput(content="JavaScript is used for web development"))
 
         # Recall related memories (use LOOSE tolerance because mock embeddings are hash-based)
         result = await memory_service.recall(
             workspace_id,
-            RecallInput(
-                query="programming languages for data analysis",
-                limit=10,
-                tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+            RecallInput(query="programming languages for data analysis", limit=10, tolerance=SearchTolerance.LOOSE, min_relevance=0.0),
         )
 
         assert len(result.memories) > 0
 
     @pytest.mark.asyncio
     async def test_recall_with_type_filter(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test recall with memory type filter."""
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Semantic fact", type=MemoryType.SEMANTIC)
-        )
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Episodic event", type=MemoryType.EPISODIC)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Semantic fact", type=MemoryType.SEMANTIC))
+        await memory_service.remember(workspace_id, RememberInput(content="Episodic event", type=MemoryType.EPISODIC))
 
         result = await memory_service.recall(
-            workspace_id,
-            RecallInput(query="fact", types=[MemoryType.SEMANTIC], include_associations=False, traverse_depth=0)
+            workspace_id, RecallInput(query="fact", types=[MemoryType.SEMANTIC], include_associations=False, traverse_depth=0)
         )
 
         for memory in result.memories:
@@ -162,38 +147,29 @@ class TestRecall:
 
     @pytest.mark.asyncio
     async def test_recall_respects_limit(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that recall respects limit parameter."""
         # Store multiple memories
         for i in range(10):
-            await memory_service.remember(
-                workspace_id,
-                RememberInput(content=f"Memory number {i}")
-            )
+            await memory_service.remember(workspace_id, RememberInput(content=f"Memory number {i}"))
 
-        result = await memory_service.recall(
-            workspace_id,
-            RecallInput(query="memory", limit=5)
-        )
+        result = await memory_service.recall(workspace_id, RecallInput(query="memory", limit=5))
 
         assert len(result.memories) <= 5
 
     @pytest.mark.asyncio
     async def test_recall_returns_relevance_scores(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that recall includes relevance scores."""
         # Use exact same text for memory and query to ensure embedding match
         content = "Relevant content for query"
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content=content)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content=content))
 
         # Query with same content to get exact embedding match (similarity=1.0)
         result = await memory_service.recall(
@@ -201,8 +177,8 @@ class TestRecall:
             RecallInput(
                 query=content,  # Same text ensures identical embedding
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         assert len(result.memories) > 0
@@ -214,15 +190,12 @@ class TestForget:
 
     @pytest.mark.asyncio
     async def test_soft_delete(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test soft delete sets deleted_at."""
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Memory to forget")
-        )
+        memory = await memory_service.remember(workspace_id, RememberInput(content="Memory to forget"))
 
         result = await memory_service.forget(workspace_id, memory.id, hard=False)
 
@@ -234,15 +207,12 @@ class TestForget:
 
     @pytest.mark.asyncio
     async def test_hard_delete(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test hard delete removes from database."""
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Memory to permanently delete")
-        )
+        memory = await memory_service.remember(workspace_id, RememberInput(content="Memory to permanently delete"))
 
         result = await memory_service.forget(workspace_id, memory.id, hard=True)
 
@@ -250,9 +220,9 @@ class TestForget:
 
     @pytest.mark.asyncio
     async def test_forget_nonexistent_returns_false(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test forgetting non-existent memory returns False."""
         result = await memory_service.forget(workspace_id, "nonexistent_id")
@@ -265,15 +235,12 @@ class TestDecay:
 
     @pytest.mark.asyncio
     async def test_decay_reduces_importance(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that decay reduces memory importance."""
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Important memory", importance=0.8)
-        )
+        memory = await memory_service.remember(workspace_id, RememberInput(content="Important memory", importance=0.8))
 
         updated = await memory_service.decay(workspace_id, memory.id, decay_rate=0.2)
 
@@ -287,9 +254,9 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_remember_with_episodic_type(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing episodic memory (specific event)."""
         from memorylayer_server.models.memory import MemoryType
@@ -304,9 +271,9 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_remember_with_semantic_type(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing semantic memory (fact/concept)."""
         from memorylayer_server.models.memory import MemoryType
@@ -321,9 +288,9 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_remember_with_procedural_type(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing procedural memory (how-to)."""
         from memorylayer_server.models.memory import MemoryType
@@ -338,12 +305,12 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_remember_with_solution_subtype(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing memory with SOLUTION subtype."""
-        from memorylayer_server.models.memory import MemoryType, MemorySubtype
+        from memorylayer_server.models.memory import MemorySubtype, MemoryType
 
         input = RememberInput(
             content="Fixed TypeScript error by adding type annotation",
@@ -356,12 +323,12 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_remember_with_problem_subtype(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing memory with PROBLEM subtype."""
-        from memorylayer_server.models.memory import MemoryType, MemorySubtype
+        from memorylayer_server.models.memory import MemorySubtype, MemoryType
 
         input = RememberInput(
             content="Database connection pool exhaustion during load test",
@@ -374,12 +341,12 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_remember_with_code_pattern_subtype(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing memory with CODE_PATTERN subtype."""
-        from memorylayer_server.models.memory import MemoryType, MemorySubtype
+        from memorylayer_server.models.memory import MemorySubtype, MemoryType
 
         input = RememberInput(
             content="Use factory pattern for creating database connections",
@@ -392,12 +359,12 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_remember_with_preference_subtype(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing memory with PREFERENCE subtype."""
-        from memorylayer_server.models.memory import MemoryType, MemorySubtype
+        from memorylayer_server.models.memory import MemorySubtype, MemoryType
 
         input = RememberInput(
             content="User prefers tabs over spaces for indentation",
@@ -410,25 +377,20 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_recall_filter_by_single_type(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test recall filtering by single memory type."""
         from memorylayer_server.models.memory import MemoryType
 
         # Store memories of different types with similar but unique content
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Programming language concepts event", type=MemoryType.EPISODIC)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Programming language concepts event", type=MemoryType.EPISODIC))
         semantic_memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Programming language concepts knowledge", type=MemoryType.SEMANTIC)
+            workspace_id, RememberInput(content="Programming language concepts knowledge", type=MemoryType.SEMANTIC)
         )
         await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Programming language concepts steps", type=MemoryType.PROCEDURAL)
+            workspace_id, RememberInput(content="Programming language concepts steps", type=MemoryType.PROCEDURAL)
         )
 
         # Recall only semantic memories (use semantic query for higher similarity to semantic memory)
@@ -438,8 +400,8 @@ class TestMemoryTypesAndSubtypes:
                 query="Programming language concepts knowledge",
                 types=[MemoryType.SEMANTIC],
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         assert len(result.memories) > 0
@@ -450,26 +412,17 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_recall_filter_by_multiple_types(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test recall filtering by multiple memory types."""
         from memorylayer_server.models.memory import MemoryType
 
         # Store memories of different types
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Episodic event", type=MemoryType.EPISODIC)
-        )
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Semantic fact", type=MemoryType.SEMANTIC)
-        )
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Procedural steps", type=MemoryType.PROCEDURAL)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Episodic event", type=MemoryType.EPISODIC))
+        await memory_service.remember(workspace_id, RememberInput(content="Semantic fact", type=MemoryType.SEMANTIC))
+        await memory_service.remember(workspace_id, RememberInput(content="Procedural steps", type=MemoryType.PROCEDURAL))
 
         # Recall episodic and procedural, exclude semantic
         result = await memory_service.recall(
@@ -481,7 +434,7 @@ class TestMemoryTypesAndSubtypes:
                 min_relevance=0.0,
                 include_associations=False,
                 traverse_depth=0,
-            )
+            ),
         )
 
         assert len(result.memories) > 0
@@ -490,29 +443,21 @@ class TestMemoryTypesAndSubtypes:
 
     @pytest.mark.asyncio
     async def test_recall_filter_by_subtype(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test recall filtering by memory subtype."""
-        from memorylayer_server.models.memory import MemoryType, MemorySubtype
+        from memorylayer_server.models.memory import MemorySubtype, MemoryType
 
         # Store memories with different subtypes (use similar content)
         solution_memory = await memory_service.remember(
             workspace_id,
-            RememberInput(
-                content="How to fix database connection issue",
-                type=MemoryType.PROCEDURAL,
-                subtype=MemorySubtype.SOLUTION
-            )
+            RememberInput(content="How to fix database connection issue", type=MemoryType.PROCEDURAL, subtype=MemorySubtype.SOLUTION),
         )
         await memory_service.remember(
             workspace_id,
-            RememberInput(
-                content="How to fix database connection issue",
-                type=MemoryType.EPISODIC,
-                subtype=MemorySubtype.PROBLEM
-            )
+            RememberInput(content="How to fix database connection issue", type=MemoryType.EPISODIC, subtype=MemorySubtype.PROBLEM),
         )
 
         # Recall only solutions (use same query for high similarity)
@@ -522,8 +467,8 @@ class TestMemoryTypesAndSubtypes:
                 query="How to fix database connection issue",
                 subtypes=[MemorySubtype.SOLUTION],
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         assert len(result.memories) > 0
@@ -538,24 +483,15 @@ class TestRecallModes:
 
     @pytest.mark.asyncio
     async def test_recall_rag_mode(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test RAG mode uses pure vector similarity."""
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Python data structures")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Python data structures"))
 
         result = await memory_service.recall(
-            workspace_id,
-            RecallInput(
-                query="data structures",
-                mode=RecallMode.RAG,
-                tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+            workspace_id, RecallInput(query="data structures", mode=RecallMode.RAG, tolerance=SearchTolerance.LOOSE, min_relevance=0.0)
         )
 
         assert result.mode_used == RecallMode.RAG
@@ -563,15 +499,12 @@ class TestRecallModes:
 
     @pytest.mark.asyncio
     async def test_recall_llm_mode(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test LLM mode with query rewriting."""
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Machine learning algorithms")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Machine learning algorithms"))
 
         result = await memory_service.recall(
             workspace_id,
@@ -580,8 +513,8 @@ class TestRecallModes:
                 mode=RecallMode.LLM,
                 context=[{"role": "user", "content": "I'm learning about AI"}],
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         assert result.mode_used == RecallMode.LLM
@@ -590,17 +523,14 @@ class TestRecallModes:
 
     @pytest.mark.asyncio
     async def test_recall_hybrid_mode_uses_rag_when_sufficient(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test HYBRID mode uses RAG when results are sufficient."""
         # Use identical text for perfect match
         content = "High quality machine learning content"
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content=content, importance=0.95)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content=content, importance=0.95))
 
         result = await memory_service.recall(
             workspace_id,
@@ -609,8 +539,8 @@ class TestRecallModes:
                 mode=RecallMode.HYBRID,
                 rag_threshold=0.8,  # High threshold
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         # Should use RAG mode since result is high quality
@@ -618,15 +548,12 @@ class TestRecallModes:
 
     @pytest.mark.asyncio
     async def test_recall_hybrid_mode_falls_back_to_llm(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test HYBRID mode falls back to LLM when RAG results are insufficient."""
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Low importance memory", importance=0.1)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Low importance memory", importance=0.1))
 
         result = await memory_service.recall(
             workspace_id,
@@ -635,8 +562,8 @@ class TestRecallModes:
                 mode=RecallMode.HYBRID,
                 rag_threshold=0.9,  # Very high threshold
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         # Should fall back to LLM mode due to low quality RAG results
@@ -649,29 +576,17 @@ class TestToleranceLevels:
 
     @pytest.mark.asyncio
     async def test_loose_tolerance_returns_more_results(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test LOOSE tolerance has broader matching."""
         # Store some memories (use similar content for better matching)
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Programming language design patterns")
-        )
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Programming web applications")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Programming language design patterns"))
+        await memory_service.remember(workspace_id, RememberInput(content="Programming web applications"))
 
         result = await memory_service.recall(
-            workspace_id,
-            RecallInput(
-                query="Programming",
-                tolerance=SearchTolerance.LOOSE,
-                limit=10,
-                min_relevance=0.0
-            )
+            workspace_id, RecallInput(query="Programming", tolerance=SearchTolerance.LOOSE, limit=10, min_relevance=0.0)
         )
 
         # LOOSE tolerance should return results
@@ -679,49 +594,36 @@ class TestToleranceLevels:
 
     @pytest.mark.asyncio
     async def test_moderate_tolerance_balanced(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test MODERATE tolerance provides balanced results."""
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Python data analysis")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Python data analysis"))
 
-        result = await memory_service.recall(
-            workspace_id,
-            RecallInput(
-                query="data science",
-                tolerance=SearchTolerance.MODERATE,
-                limit=10
-            )
-        )
+        result = await memory_service.recall(workspace_id, RecallInput(query="data science", tolerance=SearchTolerance.MODERATE, limit=10))
 
         # MODERATE is default, should work reasonably
         assert isinstance(result.memories, list)
 
     @pytest.mark.asyncio
     async def test_strict_tolerance_high_precision(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test STRICT tolerance requires high relevance."""
         # Use exact matching text for strict tolerance
         content = "Machine learning model training"
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content=content)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content=content))
 
         result = await memory_service.recall(
             workspace_id,
             RecallInput(
                 query=content,  # Exact match
                 tolerance=SearchTolerance.STRICT,
-                limit=10
-            )
+                limit=10,
+            ),
         )
 
         # STRICT should find exact matches
@@ -733,21 +635,18 @@ class TestAdvancedRecallFeatures:
 
     @pytest.mark.asyncio
     async def test_recall_with_time_range_filter(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test filtering memories by creation time range."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         # Store a memory
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Recent memory")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Recent memory"))
 
         # Query with time range
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await memory_service.recall(
             workspace_id,
             RecallInput(
@@ -755,51 +654,27 @@ class TestAdvancedRecallFeatures:
                 created_after=now - timedelta(minutes=5),
                 created_before=now + timedelta(minutes=5),
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         assert len(result.memories) > 0
 
     @pytest.mark.asyncio
     async def test_recall_with_tag_filter_and_logic(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test filtering by tags with AND logic."""
         # Store memories with different tag combinations
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(
-                content="Python backend code",
-                tags=["python", "backend"]
-            )
-        )
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(
-                content="JavaScript frontend code",
-                tags=["javascript", "frontend"]
-            )
-        )
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(
-                content="Python data science",
-                tags=["python", "datascience"]
-            )
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Python backend code", tags=["python", "backend"]))
+        await memory_service.remember(workspace_id, RememberInput(content="JavaScript frontend code", tags=["javascript", "frontend"]))
+        await memory_service.remember(workspace_id, RememberInput(content="Python data science", tags=["python", "datascience"]))
 
         # Query with tag filter (AND logic)
         result = await memory_service.recall(
-            workspace_id,
-            RecallInput(
-                query="code",
-                tags=["python", "backend"],
-                tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+            workspace_id, RecallInput(query="code", tags=["python", "backend"], tolerance=SearchTolerance.LOOSE, min_relevance=0.0)
         )
 
         # Should only return memories with both tags
@@ -810,16 +685,13 @@ class TestAdvancedRecallFeatures:
 
     @pytest.mark.asyncio
     async def test_recall_with_include_associations(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test include_associations flag."""
         content = "Memory with associations for testing"
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content=content)
-        )
+        memory = await memory_service.remember(workspace_id, RememberInput(content=content))
 
         result = await memory_service.recall(
             workspace_id,
@@ -827,8 +699,8 @@ class TestAdvancedRecallFeatures:
                 query=content,  # Use exact query for high similarity
                 include_associations=True,
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         assert len(result.memories) > 0
@@ -839,15 +711,12 @@ class TestAdvancedRecallFeatures:
 
     @pytest.mark.asyncio
     async def test_recall_with_traverse_depth(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test multi-hop graph traversal depth."""
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Starting point memory")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="Starting point memory"))
 
         result = await memory_service.recall(
             workspace_id,
@@ -856,25 +725,22 @@ class TestAdvancedRecallFeatures:
                 include_associations=True,
                 traverse_depth=2,  # Multi-hop traversal
                 tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+                min_relevance=0.0,
+            ),
         )
 
         assert len(result.memories) > 0
 
     @pytest.mark.asyncio
     async def test_recall_with_min_relevance(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test min_relevance threshold filtering."""
         # Use exact match for guaranteed high relevance
         content = "Exact match test content"
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content=content)
-        )
+        await memory_service.remember(workspace_id, RememberInput(content=content))
 
         # Query with high min_relevance
         result = await memory_service.recall(
@@ -882,8 +748,8 @@ class TestAdvancedRecallFeatures:
             RecallInput(
                 query=content,  # Exact match
                 min_relevance=0.8,  # High threshold
-                tolerance=SearchTolerance.LOOSE
-            )
+                tolerance=SearchTolerance.LOOSE,
+            ),
         )
 
         # Should find exact match
@@ -895,30 +761,20 @@ class TestAccessTracking:
 
     @pytest.mark.asyncio
     async def test_access_count_increments_on_recall(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that recall increments access_count."""
         # Create a memory
         content = "Memory to track access"
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content=content)
-        )
+        memory = await memory_service.remember(workspace_id, RememberInput(content=content))
 
         initial_count = memory.access_count
 
         # Recall the memory multiple times
         for _ in range(3):
-            await memory_service.recall(
-                workspace_id,
-                RecallInput(
-                    query=content,
-                    tolerance=SearchTolerance.LOOSE,
-                    min_relevance=0.0
-                )
-            )
+            await memory_service.recall(workspace_id, RecallInput(query=content, tolerance=SearchTolerance.LOOSE, min_relevance=0.0))
 
         # Get updated memory
         updated_memory = await memory_service.get(workspace_id, memory.id)
@@ -929,36 +785,26 @@ class TestAccessTracking:
 
     @pytest.mark.asyncio
     async def test_last_accessed_at_updates_on_recall(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that recall updates last_accessed_at timestamp."""
-        from datetime import datetime, timezone
         import asyncio
+        from datetime import datetime
 
         # Create a memory with unique content
         content = "Unique memory to track timestamp update for test"
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content=content)
-        )
+        memory = await memory_service.remember(workspace_id, RememberInput(content=content))
 
         # Record time before recall (truncate to seconds for comparison with SQLite)
-        before_recall = datetime.now(timezone.utc).replace(microsecond=0)
+        before_recall = datetime.now(UTC).replace(microsecond=0)
 
         # Wait to ensure timestamp difference
         await asyncio.sleep(1)
 
         # Recall the memory (use exact match)
-        result = await memory_service.recall(
-            workspace_id,
-            RecallInput(
-                query=content,
-                tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
-        )
+        result = await memory_service.recall(workspace_id, RecallInput(query=content, tolerance=SearchTolerance.LOOSE, min_relevance=0.0))
 
         # Verify memory was found in recall
         assert len(result.memories) > 0
@@ -975,17 +821,14 @@ class TestAccessTracking:
 
     @pytest.mark.asyncio
     async def test_increment_access_method(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test direct increment_access method."""
         import asyncio
 
-        memory = await memory_service.remember(
-            workspace_id,
-            RememberInput(content="Memory for direct access tracking")
-        )
+        memory = await memory_service.remember(workspace_id, RememberInput(content="Memory for direct access tracking"))
 
         # Get initial state
         initial_memory = await memory_service.get(workspace_id, memory.id)
@@ -1011,15 +854,12 @@ class TestBatchOperations:
 
     @pytest.mark.asyncio
     async def test_batch_remember_multiple_memories(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test storing multiple memories in sequence (simulated batch)."""
-        inputs = [
-            RememberInput(content=f"Batch memory {i}")
-            for i in range(5)
-        ]
+        inputs = [RememberInput(content=f"Batch memory {i}") for i in range(5)]
 
         memories = []
         for input in inputs:
@@ -1033,62 +873,41 @@ class TestBatchOperations:
 
     @pytest.mark.asyncio
     async def test_get_memories_by_workspace(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test listing all memories in a workspace."""
         # Store several memories
         for i in range(3):
-            await memory_service.remember(
-                workspace_id,
-                RememberInput(content=f"Workspace memory {i}")
-            )
+            await memory_service.remember(workspace_id, RememberInput(content=f"Workspace memory {i}"))
 
         # Get all memories via recall with loose filters
         result = await memory_service.recall(
-            workspace_id,
-            RecallInput(
-                query="memory",
-                limit=100,
-                tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0
-            )
+            workspace_id, RecallInput(query="memory", limit=100, tolerance=SearchTolerance.LOOSE, min_relevance=0.0)
         )
 
         assert len(result.memories) >= 3
 
     @pytest.mark.asyncio
     async def test_workspace_isolation(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Test that memories are isolated by workspace."""
         workspace1 = "workspace_1"
         workspace2 = "workspace_2"
 
         # Store in workspace 1
-        await memory_service.remember(
-            workspace1,
-            RememberInput(content="Memory in workspace 1")
-        )
+        await memory_service.remember(workspace1, RememberInput(content="Memory in workspace 1"))
 
         # Store in workspace 2
-        await memory_service.remember(
-            workspace2,
-            RememberInput(content="Memory in workspace 2")
-        )
+        await memory_service.remember(workspace2, RememberInput(content="Memory in workspace 2"))
 
         # Recall from workspace 1 should not see workspace 2 memories
         result1 = await memory_service.recall(
-            workspace1,
-            RecallInput(
-                query="memory",
-                tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0,
-                include_global=False
-            )
+            workspace1, RecallInput(query="memory", tolerance=SearchTolerance.LOOSE, min_relevance=0.0, include_global=False)
         )
 
         for memory in result1.memories:
@@ -1096,13 +915,7 @@ class TestBatchOperations:
 
         # Recall from workspace 2 should not see workspace 1 memories
         result2 = await memory_service.recall(
-            workspace2,
-            RecallInput(
-                query="memory",
-                tolerance=SearchTolerance.LOOSE,
-                min_relevance=0.0,
-                include_global=False
-            )
+            workspace2, RecallInput(query="memory", tolerance=SearchTolerance.LOOSE, min_relevance=0.0, include_global=False)
         )
 
         for memory in result2.memories:
@@ -1114,24 +927,21 @@ class TestRecallOverfetch:
 
     @pytest.mark.asyncio
     async def test_recall_rag_overfetches_for_reranker(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Verify overfetch multiplier is applied: storage receives limit * overfetch."""
         # Store enough memories to have a pool
         for i in range(5):
-            await memory_service.remember(
-                workspace_id,
-                RememberInput(content=f"Overfetch test memory number {i}")
-            )
+            await memory_service.remember(workspace_id, RememberInput(content=f"Overfetch test memory number {i}"))
 
         # Patch storage.search_memories to capture the limit argument
         original_search = memory_service.storage.search_memories
         captured_limits = []
 
         async def capturing_search(*args, **kwargs):
-            captured_limits.append(kwargs.get('limit'))
+            captured_limits.append(kwargs.get("limit"))
             return await original_search(*args, **kwargs)
 
         memory_service.storage.search_memories = capturing_search
@@ -1146,7 +956,7 @@ class TestRecallOverfetch:
                     tolerance=SearchTolerance.LOOSE,
                     min_relevance=0.0,
                     include_global=False,
-                )
+                ),
             )
 
             # Storage should have been called with limit * recall_overfetch
@@ -1158,16 +968,13 @@ class TestRecallOverfetch:
 
     @pytest.mark.asyncio
     async def test_recall_result_trimmed_to_requested_limit(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Even with overfetch, final result respects the requested limit."""
         for i in range(10):
-            await memory_service.remember(
-                workspace_id,
-                RememberInput(content=f"Trim test memory content {i}")
-            )
+            await memory_service.remember(workspace_id, RememberInput(content=f"Trim test memory content {i}"))
 
         requested_limit = 3
         result = await memory_service.recall(
@@ -1179,36 +986,33 @@ class TestRecallOverfetch:
                 tolerance=SearchTolerance.LOOSE,
                 min_relevance=0.0,
                 include_global=False,
-            )
+            ),
         )
 
         assert len(result.memories) <= requested_limit
 
     @pytest.mark.asyncio
     async def test_recall_overfetch_default_value(
-            self,
-            memory_service: MemoryService,
+        self,
+        memory_service: MemoryService,
     ):
         """Default overfetch multiplier should be 3."""
         assert memory_service.recall_overfetch == 3
 
     @pytest.mark.asyncio
     async def test_recall_llm_uses_overfetch_config(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """LLM recall path should use the config overfetch value, not a hardcoded multiplier."""
-        await memory_service.remember(
-            workspace_id,
-            RememberInput(content="LLM overfetch test memory")
-        )
+        await memory_service.remember(workspace_id, RememberInput(content="LLM overfetch test memory"))
 
         original_search = memory_service.storage.search_memories
         captured_limits = []
 
         async def capturing_search(*args, **kwargs):
-            captured_limits.append(kwargs.get('limit'))
+            captured_limits.append(kwargs.get("limit"))
             return await original_search(*args, **kwargs)
 
         memory_service.storage.search_memories = capturing_search
@@ -1223,14 +1027,14 @@ class TestRecallOverfetch:
                     tolerance=SearchTolerance.LOOSE,
                     min_relevance=0.0,
                     include_global=False,
-                )
+                ),
             )
 
             # LLM path calls _recall_rag internally, which applies overfetch
             assert len(captured_limits) >= 1
-            expected_limit = min(
-                requested_limit * memory_service.recall_overfetch, 50
-            ) * memory_service.recall_overfetch  # _recall_llm sets limit, then _recall_rag overfetches
+            (
+                min(requested_limit * memory_service.recall_overfetch, 50) * memory_service.recall_overfetch
+            )  # _recall_llm sets limit, then _recall_rag overfetches
             # The innermost storage call should use overfetched limit from _recall_rag
             # _recall_llm sets limit=min(5*3, 50)=15, then _recall_rag overfetches 15*3=45
             inner_llm_limit = min(requested_limit * memory_service.recall_overfetch, 50)

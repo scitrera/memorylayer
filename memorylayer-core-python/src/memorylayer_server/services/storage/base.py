@@ -1,20 +1,21 @@
 """Abstract storage backend interface."""
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 from logging import Logger
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Any, Optional
 
-from scitrera_app_framework import get_logger, get_extension
-from scitrera_app_framework.api import Variables, Plugin, enabled_option_pattern
+from scitrera_app_framework import get_logger
+from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
-from ...config import MEMORYLAYER_STORAGE_BACKEND, DEFAULT_MEMORYLAYER_STORAGE_BACKEND
+from ...config import DEFAULT_MEMORYLAYER_STORAGE_BACKEND, MEMORYLAYER_STORAGE_BACKEND
+from ...models.association import AssociateInput, Association, GraphQueryResult
+from ...models.memory import Memory, RememberInput
+from ...models.workspace import Context, Workspace
 
-from ...models.memory import Memory, RememberInput, RecallInput, RecallResult
-from ...models.association import Association, AssociateInput, GraphQueryInput, GraphQueryResult
-from ...models.workspace import Workspace, Context
 if TYPE_CHECKING:
     from ...models import Session, WorkingMemory
-    from ...models.chat import ChatThread, ChatMessage, MessageInput
+    from ...models.chat import ChatMessage, ChatThread, MessageInput
 
 from .._constants import EXT_STORAGE_BACKEND
 
@@ -50,16 +51,16 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+    async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Memory | None:
         """Get memory by ID within a workspace. Set track_access=False for internal reads that should not affect decay tracking."""
         pass
 
-    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Memory | None:
         """Get memory by ID without workspace filter. Memory IDs are globally unique."""
         raise NotImplementedError("Subclass should implement get_memory_by_id")
 
     @abstractmethod
-    async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Optional[Memory]:
+    async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Memory | None:
         """Update memory fields."""
         pass
 
@@ -70,38 +71,38 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def search_memories(
-            self,
-            workspace_id: str,
-            query_embedding: list[float],
-            limit: int = 10,
-            offset: int = 0,
-            min_relevance: float = 0.5,
-            types: Optional[list[str]] = None,
-            subtypes: Optional[list[str]] = None,
-            tags: Optional[list[str]] = None,
-            include_archived: bool = False,
-            observer_id: Optional[str] = None,
-            subject_id: Optional[str] = None,
-            created_after: Optional[str] = None,
-            created_before: Optional[str] = None,
-            user_id: Optional[str] = None,
+        self,
+        workspace_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+        offset: int = 0,
+        min_relevance: float = 0.5,
+        types: list[str] | None = None,
+        subtypes: list[str] | None = None,
+        tags: list[str] | None = None,
+        include_archived: bool = False,
+        observer_id: str | None = None,
+        subject_id: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        user_id: str | None = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search, returns (memory, relevance_score) tuples."""
         pass
 
     @abstractmethod
     async def full_text_search(
-            self,
-            workspace_id: str,
-            query: str,
-            limit: int = 10,
-            offset: int = 0,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[Memory]:
         """Full-text search on memory content."""
         pass
 
     @abstractmethod
-    async def get_memory_by_hash(self, workspace_id: str, content_hash: str) -> Optional[Memory]:
+    async def get_memory_by_hash(self, workspace_id: str, content_hash: str) -> Memory | None:
         """Get memory by content hash for deduplication."""
         pass
 
@@ -136,23 +137,23 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def get_associations(
-            self,
-            workspace_id: str,
-            memory_id: str,
-            direction: str = "both",  # outgoing, incoming, both
-            relationships: Optional[list[str]] = None,
+        self,
+        workspace_id: str,
+        memory_id: str,
+        direction: str = "both",  # outgoing, incoming, both
+        relationships: list[str] | None = None,
     ) -> list[Association]:
         """Get associations for a memory."""
         pass
 
     @abstractmethod
     async def traverse_graph(
-            self,
-            workspace_id: str,
-            start_id: str,
-            max_depth: int = 3,
-            relationships: Optional[list[str]] = None,
-            direction: str = "both",
+        self,
+        workspace_id: str,
+        start_id: str,
+        max_depth: int = 3,
+        relationships: list[str] | None = None,
+        direction: str = "both",
     ) -> GraphQueryResult:
         """Multi-hop graph traversal."""
         pass
@@ -164,7 +165,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_workspace(self, workspace_id: str) -> Optional[Workspace]:
+    async def get_workspace(self, workspace_id: str) -> Workspace | None:
         """Get workspace by ID."""
         pass
 
@@ -175,7 +176,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_context(self, workspace_id: str, context_id: str) -> Optional[Context]:
+    async def get_context(self, workspace_id: str, context_id: str) -> Context | None:
         """Get context by ID."""
         pass
 
@@ -201,17 +202,17 @@ class StorageBackend(ABC):
 
     # Session operations (for persistent sessions)
     @abstractmethod
-    async def create_session(self, workspace_id: str, session: 'Session') -> 'Session':
+    async def create_session(self, workspace_id: str, session: "Session") -> "Session":
         """Store a new session."""
         pass
 
     @abstractmethod
-    async def get_session(self, workspace_id: str, session_id: str) -> Optional['Session']:
+    async def get_session(self, workspace_id: str, session_id: str) -> Optional["Session"]:
         """Get session by ID (returns None if not found or expired)."""
         pass
 
     @abstractmethod
-    async def get_session_by_id(self, session_id: str) -> Optional['Session']:
+    async def get_session_by_id(self, session_id: str) -> Optional["Session"]:
         """Get session by ID without workspace filter.
 
         Useful when looking up a session from the X-Session-ID header
@@ -226,32 +227,18 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def set_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str,
-            key: str,
-            value: Any,
-            ttl_seconds: Optional[int] = None
-    ) -> 'WorkingMemory':
+        self, workspace_id: str, session_id: str, key: str, value: Any, ttl_seconds: int | None = None
+    ) -> "WorkingMemory":
         """Set working memory key-value within session."""
         pass
 
     @abstractmethod
-    async def get_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str,
-            key: str
-    ) -> Optional['WorkingMemory']:
+    async def get_working_memory(self, workspace_id: str, session_id: str, key: str) -> Optional["WorkingMemory"]:
         """Get specific working memory entry."""
         pass
 
     @abstractmethod
-    async def get_all_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str
-    ) -> list['WorkingMemory']:
+    async def get_all_working_memory(self, workspace_id: str, session_id: str) -> list["WorkingMemory"]:
         """Get all working memory entries for session."""
         pass
 
@@ -265,7 +252,7 @@ class StorageBackend(ABC):
         # Default implementation: no-op (subclasses should override for efficiency)
         return 0
 
-    async def list_expired_sessions(self, limit: int = 100) -> list['Session']:
+    async def list_expired_sessions(self, limit: int = 100) -> list["Session"]:
         """List expired sessions that need cleanup.
 
         Used by the cleanup task to retrieve sessions before deletion,
@@ -280,12 +267,7 @@ class StorageBackend(ABC):
         # Default implementation: empty list (subclasses should override)
         return []
 
-    async def update_session(
-            self,
-            workspace_id: str,
-            session_id: str,
-            **updates
-    ) -> Optional['Session']:
+    async def update_session(self, workspace_id: str, session_id: str, **updates) -> Optional["Session"]:
         """Update session fields.
 
         Args:
@@ -300,11 +282,11 @@ class StorageBackend(ABC):
         return None
 
     async def list_sessions(
-            self,
-            workspace_id: str,
-            context_id: str | None = None,
-            include_expired: bool = False,
-    ) -> list['Session']:
+        self,
+        workspace_id: str,
+        context_id: str | None = None,
+        include_expired: bool = False,
+    ) -> list["Session"]:
         """List sessions for a workspace.
 
         Args:
@@ -345,15 +327,15 @@ class StorageBackend(ABC):
 
     # Contradiction service support methods (non-abstract with default no-op implementations)
 
-    async def create_contradiction(self, contradiction: 'ContradictionRecord') -> 'ContradictionRecord':
+    async def create_contradiction(self, contradiction: "ContradictionRecord") -> "ContradictionRecord":
         """Store a contradiction record. Override in subclasses."""
         return contradiction
 
-    async def get_contradiction(self, workspace_id: str, contradiction_id: str) -> Optional['ContradictionRecord']:
+    async def get_contradiction(self, workspace_id: str, contradiction_id: str) -> Optional["ContradictionRecord"]:
         """Get a specific contradiction. Override in subclasses."""
         return None
 
-    async def get_unresolved_contradictions(self, workspace_id: str, limit: int = 10) -> list['ContradictionRecord']:
+    async def get_unresolved_contradictions(self, workspace_id: str, limit: int = 10) -> list["ContradictionRecord"]:
         """Get unresolved contradictions. Override in subclasses."""
         return []
 
@@ -362,32 +344,32 @@ class StorageBackend(ABC):
         workspace_id: str,
         contradiction_id: str,
         resolution: str,
-        merged_content: Optional[str] = None,
-    ) -> Optional['ContradictionRecord']:
+        merged_content: str | None = None,
+    ) -> Optional["ContradictionRecord"]:
         """Resolve a contradiction. Override in subclasses."""
         return None
 
     # Chat history operations (non-abstract with default no-op implementations)
 
-    async def create_thread(self, thread: 'ChatThread') -> 'ChatThread':
+    async def create_thread(self, thread: "ChatThread") -> "ChatThread":
         """Store a new chat thread. Override in subclasses."""
         return thread
 
-    async def get_thread(self, workspace_id: str, thread_id: str) -> Optional['ChatThread']:
+    async def get_thread(self, workspace_id: str, thread_id: str) -> Optional["ChatThread"]:
         """Get chat thread by ID. Override in subclasses."""
         return None
 
     async def list_threads(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list['ChatThread']:
+    ) -> list["ChatThread"]:
         """List chat threads in a workspace. Override in subclasses."""
         return []
 
-    async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> Optional['ChatThread']:
+    async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> Optional["ChatThread"]:
         """Update thread fields. Override in subclasses."""
         return None
 
@@ -399,8 +381,8 @@ class StorageBackend(ABC):
         self,
         workspace_id: str,
         thread_id: str,
-        messages: list['MessageInput'],
-    ) -> list['ChatMessage']:
+        messages: list["MessageInput"],
+    ) -> list["ChatMessage"]:
         """Append messages to a thread. Override in subclasses."""
         return []
 
@@ -410,9 +392,9 @@ class StorageBackend(ABC):
         thread_id: str,
         limit: int = 100,
         offset: int = 0,
-        after_index: Optional[int] = None,
+        after_index: int | None = None,
         order: str = "asc",
-    ) -> list['ChatMessage']:
+    ) -> list["ChatMessage"]:
         """Get messages from a thread. Override in subclasses."""
         return []
 
@@ -420,7 +402,7 @@ class StorageBackend(ABC):
         """Get total message count for a thread. Override in subclasses."""
         return 0
 
-    async def list_expired_threads(self, limit: int = 100) -> list['ChatThread']:
+    async def list_expired_threads(self, limit: int = 100) -> list["ChatThread"]:
         """List expired chat threads across all workspaces.
 
         Enables efficient cleanup of expired threads via background tasks.
@@ -446,7 +428,7 @@ class StoragePluginBase(Plugin):
         return EXT_STORAGE_BACKEND
 
     def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_STORAGE_BACKEND, self_attr='PROVIDER_NAME')
+        return enabled_option_pattern(self, v, MEMORYLAYER_STORAGE_BACKEND, self_attr="PROVIDER_NAME")
 
     def on_registration(self, v: Variables) -> None:
         v.set_default_value(MEMORYLAYER_STORAGE_BACKEND, DEFAULT_MEMORYLAYER_STORAGE_BACKEND)

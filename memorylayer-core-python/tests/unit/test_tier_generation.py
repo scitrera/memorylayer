@@ -1,6 +1,8 @@
 """Unit tests for DefaultTierGenerationService."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from memorylayer_server.models.llm import LLMRole
 from memorylayer_server.services.semantic_tiering.default import DefaultSemanticTieringService

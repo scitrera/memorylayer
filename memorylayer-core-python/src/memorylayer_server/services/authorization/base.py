@@ -1,10 +1,12 @@
 """Authorization Service - Pluggable permission checking interface."""
+
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
-from ...config import MEMORYLAYER_AUTHORIZATION_SERVICE, DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE
-from ...models.authz import AuthorizationDecision, AuthorizationContext
+
+from ...config import DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE, MEMORYLAYER_AUTHORIZATION_SERVICE
+from ...models.authz import AuthorizationContext, AuthorizationDecision
 
 if TYPE_CHECKING:
     from ...models.auth import RequestContext
@@ -24,11 +26,11 @@ class AuthorizationService(ABC):
 
     async def require_authorization(
         self,
-        ctx: 'RequestContext',
+        ctx: "RequestContext",
         resource: str,
         action: str,
-        resource_id: Optional[str] = None,
-        workspace_id: Optional[str] = None,
+        resource_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         """Check authorization and raise HTTPException(403) if denied.
 
@@ -57,15 +59,12 @@ class AuthorizationService(ABC):
             resource=resource,
             action=action,
             resource_id=resource_id,
-            metadata=getattr(ctx, 'metadata', None) or {},
+            metadata=getattr(ctx, "metadata", None) or {},
         )
 
         decision = await self.authorize(authz_ctx)
         if decision == AuthorizationDecision.DENY:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied to {resource}"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Access denied to {resource}")
 
     @abstractmethod
     async def authorize(self, context: AuthorizationContext) -> AuthorizationDecision:
@@ -80,11 +79,7 @@ class AuthorizationService(ABC):
         pass
 
     @abstractmethod
-    async def get_allowed_workspaces(
-            self,
-            tenant_id: str,
-            user_id: str
-    ) -> list[str]:
+    async def get_allowed_workspaces(self, tenant_id: str, user_id: str) -> list[str]:
         """Get list of workspace IDs user can access.
 
         Args:
@@ -97,12 +92,7 @@ class AuthorizationService(ABC):
         pass
 
     @abstractmethod
-    async def get_user_role(
-            self,
-            tenant_id: str,
-            workspace_id: str,
-            user_id: str
-    ) -> Optional[str]:
+    async def get_user_role(self, tenant_id: str, workspace_id: str, user_id: str) -> str | None:
         """Get user's role in a workspace.
 
         Args:

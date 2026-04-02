@@ -1,19 +1,19 @@
 """LLM Service - Pluggable LLM provider interface."""
+
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
-
-from .._constants import EXT_LLM_PROVIDER, EXT_LLM_SERVICE, EXT_LLM_REGISTRY
+from .._constants import EXT_LLM_REGISTRY, EXT_LLM_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
 # Registry config constants
-MEMORYLAYER_LLM_REGISTRY = 'MEMORYLAYER_LLM_REGISTRY'
-DEFAULT_MEMORYLAYER_LLM_REGISTRY = 'default'
+MEMORYLAYER_LLM_REGISTRY = "MEMORYLAYER_LLM_REGISTRY"
+DEFAULT_MEMORYLAYER_LLM_REGISTRY = "default"
 
 # Service config constants
-MEMORYLAYER_LLM_SERVICE = 'MEMORYLAYER_LLM_SERVICE'
-DEFAULT_MEMORYLAYER_LLM_SERVICE = 'default'
+MEMORYLAYER_LLM_SERVICE = "MEMORYLAYER_LLM_SERVICE"
+DEFAULT_MEMORYLAYER_LLM_SERVICE = "default"
 
 
 class LLMProvider(ABC):
@@ -58,10 +58,7 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    async def complete_stream(
-            self,
-            request: LLMRequest
-    ) -> AsyncIterator[LLMStreamChunk]:
+    async def complete_stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
         """Generate streaming completion.
 
         Args:

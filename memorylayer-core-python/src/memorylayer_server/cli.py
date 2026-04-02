@@ -2,8 +2,9 @@
 
 import json
 import logging
-import click
+from datetime import UTC
 
+import click
 from scitrera_app_framework import get_variables
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,12 @@ def cli(verbose: bool):
 def serve(host: str, port: int):
     """Start the HTTP REST API server."""
     import uvicorn
+
     from memorylayer_server.config import (
-        MEMORYLAYER_SERVER_HOST, MEMORYLAYER_SERVER_PORT, DEFAULT_MEMORYLAYER_SERVER_HOST, DEFAULT_MEMORYLAYER_SERVER_PORT
+        DEFAULT_MEMORYLAYER_SERVER_HOST,
+        DEFAULT_MEMORYLAYER_SERVER_PORT,
+        MEMORYLAYER_SERVER_HOST,
+        MEMORYLAYER_SERVER_PORT,
     )
     from memorylayer_server.dependencies import preconfigure
     from memorylayer_server.lifecycle.fastapi import fastapi_app_factory
@@ -53,28 +58,26 @@ def serve(host: str, port: int):
 def version():
     """Show version information."""
     from memorylayer_server import __version__
+
     click.echo(f"memorylayer.ai v{__version__}")
 
 
 @cli.command()
-@click.option('--workspace', '-w', required=True, help='Workspace ID to export')
-@click.option('--output', '-o', default=None, help='Output file (default: stdout)')
-@click.option('--offset', default=0, type=int, help='Skip first N memories (default: 0)')
-@click.option('--limit', default=0, type=int, help='Export at most N memories (default: 0 = unlimited)')
-@click.option('--include-associations/--no-associations', default=True, help='Include associations')
-@click.option('--server-url', default='http://localhost:61001', help='MemoryLayer server URL')
-@click.option('--api-key', default=None, help='API key for authentication')
+@click.option("--workspace", "-w", required=True, help="Workspace ID to export")
+@click.option("--output", "-o", default=None, help="Output file (default: stdout)")
+@click.option("--offset", default=0, type=int, help="Skip first N memories (default: 0)")
+@click.option("--limit", default=0, type=int, help="Export at most N memories (default: 0 = unlimited)")
+@click.option("--include-associations/--no-associations", default=True, help="Include associations")
+@click.option("--server-url", default="http://localhost:61001", help="MemoryLayer server URL")
+@click.option("--api-key", default=None, help="API key for authentication")
 def export(workspace, output, offset, limit, include_associations, server_url, api_key):
     """Export workspace memories to NDJSON (streaming)."""
-    import httpx
     import json
 
+    import httpx
+
     url = f"{server_url}/v1/workspaces/{workspace}/export"
-    params = {
-        "offset": offset,
-        "limit": limit,
-        "include_associations": str(include_associations).lower()
-    }
+    params = {"offset": offset, "limit": limit, "include_associations": str(include_associations).lower()}
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -88,11 +91,11 @@ def export(workspace, output, offset, limit, include_associations, server_url, a
                 associations_count = 0
 
                 if output:
-                    with open(output, 'w') as f:
+                    with open(output, "w") as f:
                         for line in response.iter_lines():
                             if not line.strip():
                                 continue
-                            f.write(line + '\n')
+                            f.write(line + "\n")
 
                             # Parse footer to get counts
                             try:
@@ -113,19 +116,20 @@ def export(workspace, output, offset, limit, include_associations, server_url, a
         raise SystemExit(1)
 
 
-@cli.command(name='import')
-@click.argument('file', type=click.Path(exists=True))
-@click.option('--workspace', '-w', required=True, help='Target workspace ID')
-@click.option('--dry-run', is_flag=True, help='Show what would be imported without writing')
-@click.option('--server-url', default='http://localhost:61001', help='MemoryLayer server URL')
-@click.option('--api-key', default=None, help='API key for authentication')
+@cli.command(name="import")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--workspace", "-w", required=True, help="Target workspace ID")
+@click.option("--dry-run", is_flag=True, help="Show what would be imported without writing")
+@click.option("--server-url", default="http://localhost:61001", help="MemoryLayer server URL")
+@click.option("--api-key", default=None, help="API key for authentication")
 def import_cmd(file, workspace, dry_run, server_url, api_key):
     """Import memories from JSON or NDJSON file into workspace."""
-    import httpx
     import json
 
+    import httpx
+
     # Auto-detect format by reading first line
-    with open(file, 'r') as f:
+    with open(file) as f:
         first_line = f.readline().strip()
 
     is_ndjson = False
@@ -140,7 +144,7 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
         # NDJSON format
         memories = []
         associations = []
-        with open(file, 'r') as f:
+        with open(file) as f:
             for line in f:
                 if not line.strip():
                     continue
@@ -155,10 +159,10 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
                     logger.debug("Skipped item during processing: %s", e)
     else:
         # JSON format
-        with open(file, 'r') as f:
+        with open(file) as f:
             data = json.load(f)
-        memories = data.get('memories', [])
-        associations = data.get('associations', [])
+        memories = data.get("memories", [])
+        associations = data.get("associations", [])
 
     if dry_run:
         click.echo(f"Would import {len(memories)} memories and {len(associations)} associations into workspace {workspace}")
@@ -178,7 +182,7 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
             if is_ndjson:
                 # Send as NDJSON
                 headers["Content-Type"] = "application/x-ndjson"
-                with open(file, 'rb') as f:
+                with open(file, "rb") as f:
                     response = client.post(url, content=f.read(), headers=headers)
             else:
                 # Send as JSON
@@ -191,11 +195,11 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
         click.echo(f"Error: Failed to import: {e}", err=True)
         raise SystemExit(1)
 
-    click.echo(f"Import complete:")
+    click.echo("Import complete:")
     click.echo(f"  Imported: {result.get('imported', 0)}")
     click.echo(f"  Skipped (duplicates): {result.get('skipped_duplicates', 0)}")
     click.echo(f"  Errors: {result.get('errors', 0)}")
-    for detail in result.get('details', []):
+    for detail in result.get("details", []):
         click.echo(f"  {detail}")
 
 
@@ -205,9 +209,11 @@ def import_cmd(file, workspace, dry_run, server_url, api_key):
 def info(output_format: str, reveal_secrets: bool):
     """Show system information and configuration."""
 
+    from datetime import datetime
+
     from memorylayer_server import __version__
     from memorylayer_server.dependencies import _initialize_sync
-    from datetime import datetime, timezone
+
     v = get_variables()
     v.set("LOGGING_LEVEL", "ERROR")  # suppress logs during info output
     v = _initialize_sync(v)
@@ -216,21 +222,35 @@ def info(output_format: str, reveal_secrets: bool):
 
     # TODO: move redaction log to scitrera_app_framework and share with log_framework_variables
     def _redacted(k, val):
-        return '(redacted)' if any(
-            (not 'max_tokens' in k.lower()) and x in k.lower() for x in ('password', 'secret', 'credentials', 'token', 'key',)) else val
+        return (
+            "(redacted)"
+            if any(
+                ("max_tokens" not in k.lower()) and x in k.lower()
+                for x in (
+                    "password",
+                    "secret",
+                    "credentials",
+                    "token",
+                    "key",
+                )
+            )
+            else val
+        )
 
-    settings = ({k: _redacted(k, v) for (k, v) in sorted(v.export_all_variables().items(), key=lambda kv: kv[0])
-                 if k.startswith('MEMORYLAYER')} if redact_keys else
-                {k: v for k, v in sorted(v.export_all_variables().items(), key=lambda kv: kv[0]) if k.startswith('MEMORYLAYER')})
+    settings = (
+        {k: _redacted(k, v) for (k, v) in sorted(v.export_all_variables().items(), key=lambda kv: kv[0]) if k.startswith("MEMORYLAYER")}
+        if redact_keys
+        else {k: v for k, v in sorted(v.export_all_variables().items(), key=lambda kv: kv[0]) if k.startswith("MEMORYLAYER")}
+    )
 
     if output_format == "json":
-        click.echo(json.dumps({k.removeprefix('MEMORYLAYER_').lower(): v for k, v in settings.items()}, indent=2))
+        click.echo(json.dumps({k.removeprefix("MEMORYLAYER_").lower(): v for k, v in settings.items()}, indent=2))
     else:
-        click.echo('# ' + "=" * 50)
+        click.echo("# " + "=" * 50)
         click.echo("# MemoryLayer.ai Configuration")
-        click.echo(f"# exported at {datetime.now(tz=timezone.utc).isoformat()}")
+        click.echo(f"# exported at {datetime.now(tz=UTC).isoformat()}")
         click.echo(f"# version = v{__version__}")
-        click.echo('# ' + "=" * 50)
+        click.echo("# " + "=" * 50)
         for k, v in settings.items():
             click.echo(f"{k}={v}")
         click.echo("")

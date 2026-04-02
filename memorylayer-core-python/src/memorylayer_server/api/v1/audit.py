@@ -8,19 +8,17 @@ Endpoints:
 
 import logging
 from datetime import datetime
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Request, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from scitrera_app_framework import Plugin, Variables
 
-from .. import EXT_MULTI_API_ROUTERS
 from ...lifecycle.fastapi import get_logger
 from ...services.audit import AuditService
-from ...services.authentication import AuthenticationService, AuthenticationError
+from ...services.authentication import AuthenticationError, AuthenticationService
 from ...services.authorization import AuthorizationService
-
-from .deps import get_auth_service, get_authz_service, get_audit_service
+from .. import EXT_MULTI_API_ROUTERS
+from .deps import get_audit_service, get_auth_service, get_authz_service
 from .schemas import ErrorResponse
 
 router = APIRouter(prefix="/v1/audit", tags=["audit"])
@@ -30,6 +28,7 @@ router = APIRouter(prefix="/v1/audit", tags=["audit"])
 # Response schemas
 # ---------------------------------------------------------------------------
 
+
 class AuditEventResponse(BaseModel):
     """Response schema for a single audit event."""
 
@@ -37,10 +36,10 @@ class AuditEventResponse(BaseModel):
     event_type: str
     action: str
     tenant_id: str
-    workspace_id: Optional[str] = None
-    user_id: Optional[str] = None
-    resource_type: Optional[str] = None
-    resource_id: Optional[str] = None
+    workspace_id: str | None = None
+    user_id: str | None = None
+    resource_type: str | None = None
+    resource_id: str | None = None
     metadata: dict = {}
     timestamp: datetime
 
@@ -56,6 +55,7 @@ class AuditEventsListResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/events",
     response_model=AuditEventsListResponse,
@@ -68,9 +68,9 @@ class AuditEventsListResponse(BaseModel):
 )
 async def query_audit_events(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Filter by workspace ID"),
-    event_type: Optional[str] = Query(None, description="Filter by event type"),
-    since: Optional[str] = Query(None, description="Return events at or after this ISO datetime"),
+    workspace_id: str | None = Query(None, description="Filter by workspace ID"),
+    event_type: str | None = Query(None, description="Filter by event type"),
+    since: str | None = Query(None, description="Return events at or after this ISO datetime"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum events to return"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
@@ -102,7 +102,7 @@ async def query_audit_events(
         ctx = await auth_service.build_context(http_request, None)
         await authz_service.require_authorization(ctx, "admin", "read")
 
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since is not None:
             try:
                 since_dt = datetime.fromisoformat(since)
@@ -114,7 +114,11 @@ async def query_audit_events(
 
         logger.info(
             "Querying audit events: tenant=%s, workspace=%s, event_type=%s, since=%s, limit=%d",
-            ctx.tenant_id, workspace_id, event_type, since_dt, limit,
+            ctx.tenant_id,
+            workspace_id,
+            event_type,
+            since_dt,
+            limit,
         )
 
         events = await audit_service.query(
@@ -170,8 +174,8 @@ async def query_audit_events(
 )
 async def audit_events_summary(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Filter by workspace ID"),
-    since: Optional[str] = Query(None, description="Return events at or after this ISO datetime"),
+    workspace_id: str | None = Query(None, description="Filter by workspace ID"),
+    since: str | None = Query(None, description="Return events at or after this ISO datetime"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     audit_service: AuditService = Depends(get_audit_service),
@@ -200,7 +204,7 @@ async def audit_events_summary(
         ctx = await auth_service.build_context(http_request, None)
         await authz_service.require_authorization(ctx, "admin", "read")
 
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since is not None:
             try:
                 since_dt = datetime.fromisoformat(since)
@@ -212,7 +216,9 @@ async def audit_events_summary(
 
         logger.info(
             "Querying audit summary: tenant=%s, workspace=%s, since=%s",
-            ctx.tenant_id, workspace_id, since_dt,
+            ctx.tenant_id,
+            workspace_id,
+            since_dt,
         )
 
         # Fetch up to 10 000 events to build the summary; this is an admin-only
@@ -249,6 +255,7 @@ async def audit_events_summary(
 # ---------------------------------------------------------------------------
 # Plugin registration
 # ---------------------------------------------------------------------------
+
 
 class AuditAPIPlugin(Plugin):
     """Plugin to register audit query routes."""

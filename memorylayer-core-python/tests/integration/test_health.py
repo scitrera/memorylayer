@@ -1,6 +1,5 @@
 """Integration tests for health check endpoints."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 

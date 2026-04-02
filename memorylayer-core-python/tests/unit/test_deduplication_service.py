@@ -1,8 +1,9 @@
 """Tests for DeduplicationService."""
+
 import pytest
 
-from memorylayer_server.services.deduplication import DeduplicationAction
 from memorylayer_server.models import RememberInput
+from memorylayer_server.services.deduplication import DeduplicationAction
 from memorylayer_server.utils import compute_content_hash
 
 
@@ -10,10 +11,7 @@ from memorylayer_server.utils import compute_content_hash
 async def test_check_duplicate_new_memory(deduplication_service):
     """Test that new unique content returns CREATE."""
     result = await deduplication_service.check_duplicate(
-        content="test content for dedup",
-        content_hash="unique_hash_abc123",
-        embedding=[0.1] * 384,
-        workspace_id="ws-dedup-1"
+        content="test content for dedup", content_hash="unique_hash_abc123", embedding=[0.1] * 384, workspace_id="ws-dedup-1"
     )
 
     assert result.action == DeduplicationAction.CREATE
@@ -35,10 +33,7 @@ async def test_check_duplicate_exact_match(storage_backend, deduplication_servic
 
     # Try to add duplicate with same content (same hash)
     result = await deduplication_service.check_duplicate(
-        content=existing_content,
-        content_hash=existing_hash,
-        embedding=existing_embedding,
-        workspace_id="ws-dedup-2"
+        content=existing_content, content_hash=existing_hash, embedding=existing_embedding, workspace_id="ws-dedup-2"
     )
 
     assert result.action == DeduplicationAction.SKIP
@@ -64,7 +59,7 @@ async def test_check_duplicate_semantic_match(storage_backend, deduplication_ser
         content="similar content there for semantic test",
         content_hash="new_hash_789",
         embedding=existing_embedding,  # Same embedding = similarity 1.0
-        workspace_id="ws-dedup-3"
+        workspace_id="ws-dedup-3",
     )
 
     assert result.action == DeduplicationAction.UPDATE
@@ -81,10 +76,7 @@ async def test_deduplicate_batch(deduplication_service):
         ("batch content 3", "batch_hash_3", [0.3] * 384),
     ]
 
-    results = await deduplication_service.deduplicate_batch(
-        candidates=candidates,
-        workspace_id="ws-dedup-batch"
-    )
+    results = await deduplication_service.deduplicate_batch(candidates=candidates, workspace_id="ws-dedup-batch")
 
     assert len(results) == 3
     # All should be CREATE since workspace is empty

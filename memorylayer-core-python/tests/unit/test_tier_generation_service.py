@@ -7,18 +7,20 @@ Tests:
 - TierGenerationTaskHandler: background task handler
 - Integration with remember() flow
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from memorylayer_server.models.memory import Memory, MemoryType
-from memorylayer_server.services.semantic_tiering.default import DefaultSemanticTieringService
-from memorylayer_server.services.semantic_tiering.base import SemanticTieringService
-from memorylayer_server.tasks.semantic_tiering_task_handler import TierGenerationTaskHandler
+import pytest
 
+from memorylayer_server.models.memory import Memory, MemoryType
+from memorylayer_server.services.semantic_tiering.base import SemanticTieringService
+from memorylayer_server.services.semantic_tiering.default import DefaultSemanticTieringService
+from memorylayer_server.tasks.semantic_tiering_task_handler import TierGenerationTaskHandler
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_llm_service():
@@ -111,6 +113,7 @@ def tier_service_no_task_service(mock_llm_service, mock_storage, mock_variables)
 # request_tier_generation() Tests
 # ---------------------------------------------------------------------------
 
+
 class TestRequestTierGeneration:
     """Tests for request_tier_generation() dispatch logic."""
 
@@ -121,8 +124,8 @@ class TestRequestTierGeneration:
 
         assert task_id == "task_001"
         mock_task_service.schedule_task.assert_called_once_with(
-            task_type='generate_tiers',
-            payload={'memory_id': 'mem_123', 'workspace_id': 'ws_test'},
+            task_type="generate_tiers",
+            payload={"memory_id": "mem_123", "workspace_id": "ws_test"},
         )
 
     @pytest.mark.asyncio
@@ -134,9 +137,7 @@ class TestRequestTierGeneration:
         mock_task_service.schedule_task.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_inline_without_task_service(
-        self, tier_service_no_task_service, mock_storage, mock_llm_service
-    ):
+    async def test_falls_back_to_inline_without_task_service(self, tier_service_no_task_service, mock_storage, mock_llm_service):
         """Without task service, should generate tiers inline."""
         result = await tier_service_no_task_service.request_tier_generation("mem_test123", "ws_test")
 
@@ -171,6 +172,7 @@ class TestRequestTierGeneration:
 # Config Toggle Tests
 # ---------------------------------------------------------------------------
 
+
 class TestTierGenerationConfig:
     """Tests for MEMORYLAYER_TIER_GENERATION_ENABLED config behavior."""
 
@@ -188,22 +190,14 @@ class TestTierGenerationConfig:
 
     def test_service_stores_enabled_flag(self, mock_llm_service, mock_storage, mock_variables):
         """Verify the enabled flag is properly stored on the service."""
-        service_on = DefaultSemanticTieringService(
-            llm_service=mock_llm_service, storage=mock_storage,
-            v=mock_variables, enabled=True
-        )
-        service_off = DefaultSemanticTieringService(
-            llm_service=mock_llm_service, storage=mock_storage,
-            v=mock_variables, enabled=False
-        )
+        service_on = DefaultSemanticTieringService(llm_service=mock_llm_service, storage=mock_storage, v=mock_variables, enabled=True)
+        service_off = DefaultSemanticTieringService(llm_service=mock_llm_service, storage=mock_storage, v=mock_variables, enabled=False)
         assert service_on.enabled is True
         assert service_off.enabled is False
 
     def test_service_defaults_to_enabled(self, mock_llm_service, mock_storage, mock_variables):
         """Default constructor should have enabled=True."""
-        service = DefaultSemanticTieringService(
-            llm_service=mock_llm_service, storage=mock_storage, v=mock_variables
-        )
+        service = DefaultSemanticTieringService(llm_service=mock_llm_service, storage=mock_storage, v=mock_variables)
         assert service.enabled is True
 
 
@@ -211,13 +205,14 @@ class TestTierGenerationConfig:
 # TierGenerationTaskHandler Tests
 # ---------------------------------------------------------------------------
 
+
 class TestTierGenerationTaskHandler:
     """Tests for the background task handler."""
 
     def test_task_type_is_generate_tiers(self):
         """Handler should register for 'generate_tiers' task type."""
         handler = TierGenerationTaskHandler()
-        assert handler.get_task_type() == 'generate_tiers'
+        assert handler.get_task_type() == "generate_tiers"
 
     def test_schedule_returns_none(self):
         """Handler is on-demand only, no recurring schedule."""
@@ -232,13 +227,16 @@ class TestTierGenerationTaskHandler:
         mock_tier_service = AsyncMock()
         mock_v = MagicMock()
 
-        with patch.object(handler, 'get_extension', return_value=mock_tier_service):
-            await handler.handle(mock_v, {
-                'memory_id': 'mem_abc',
-                'workspace_id': 'ws_xyz',
-            })
+        with patch.object(handler, "get_extension", return_value=mock_tier_service):
+            await handler.handle(
+                mock_v,
+                {
+                    "memory_id": "mem_abc",
+                    "workspace_id": "ws_xyz",
+                },
+            )
 
-        mock_tier_service.generate_tiers.assert_called_once_with('mem_abc', 'ws_xyz')
+        mock_tier_service.generate_tiers.assert_called_once_with("mem_abc", "ws_xyz")
 
     def test_initialize_returns_self(self):
         """initialize() should return handler instance."""
@@ -254,6 +252,7 @@ class TestTierGenerationTaskHandler:
 # ---------------------------------------------------------------------------
 # Integration with remember() flow
 # ---------------------------------------------------------------------------
+
 
 class TestRememberTierGenerationIntegration:
     """Tests verifying remember() delegates to tier generation service."""
@@ -285,7 +284,7 @@ class TestRememberTierGenerationIntegration:
                 mock_request.assert_called_once_with(memory.id, unique_workspace_id)
         finally:
             # Restore original if we patched it
-            if original_service and hasattr(original_service, 'request_tier_generation'):
+            if original_service and hasattr(original_service, "request_tier_generation"):
                 # The base class method will be restored since we only patched the instance
                 pass
 
@@ -323,9 +322,7 @@ class TestRememberTierGenerationIntegration:
         original_service = memory_service.tier_generation_service
         try:
             if original_service:
-                original_service.request_tier_generation = AsyncMock(
-                    side_effect=RuntimeError("LLM unavailable")
-                )
+                original_service.request_tier_generation = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
 
                 input_data = RememberInput(
                     content="Test content with tier error",
@@ -343,17 +340,20 @@ class TestRememberTierGenerationIntegration:
 # RememberInput model tests
 # ---------------------------------------------------------------------------
 
+
 class TestRememberInputModel:
     """Verify generate_tiers field has been removed from RememberInput."""
 
     def test_no_generate_tiers_field(self):
         """RememberInput should not have a generate_tiers field."""
         from memorylayer_server.models.memory import RememberInput
+
         fields = RememberInput.model_fields
-        assert 'generate_tiers' not in fields
+        assert "generate_tiers" not in fields
 
     def test_remember_input_ignores_generate_tiers_kwarg(self):
         """RememberInput should not store generate_tiers even if passed."""
         from memorylayer_server.models.memory import RememberInput
+
         input_data = RememberInput(content="test")
-        assert not hasattr(input_data, 'generate_tiers') or 'generate_tiers' not in input_data.model_fields
+        assert not hasattr(input_data, "generate_tiers") or "generate_tiers" not in input_data.model_fields

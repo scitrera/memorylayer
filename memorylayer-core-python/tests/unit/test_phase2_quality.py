@@ -4,29 +4,34 @@ Tests for Phase 2 quality improvements:
 - 2b: LLM query rewriting gated by config flag
 - 2c: Trust score computation and annotation
 """
-import math
-import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
 
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
+
+import pytest
 from scitrera_app_framework import Variables
 
-from memorylayer_server.models.memory import (
-    Memory, MemoryType, MemoryStatus, RecallInput, RecallResult, RecallMode,
-)
-from memorylayer_server.services.memory import MemoryService
-from memorylayer_server.services.deduplication import DeduplicationAction, DeduplicationResult
 from memorylayer_server.config import (
-    MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED,
     DEFAULT_MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED,
+    MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED,
+)
+from memorylayer_server.models.memory import (
+    Memory,
+    MemoryStatus,
+    MemoryType,
+    RecallInput,
+    RecallMode,
+    RecallResult,
 )
 from memorylayer_server.services.association.base import MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD
+from memorylayer_server.services.deduplication import DeduplicationAction, DeduplicationResult
+from memorylayer_server.services.memory import MemoryService
 from memorylayer_server.services.memory.base import MEMORYLAYER_MEMORY_RECALL_OVERFETCH
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_v(**overrides):
     v = Variables()
@@ -36,6 +41,7 @@ def _make_v(**overrides):
         MEMORYLAYER_FACT_DECOMPOSITION_ENABLED,
         MEMORYLAYER_FACT_DECOMPOSITION_MIN_LENGTH,
     )
+
     v.set(MEMORYLAYER_FACT_DECOMPOSITION_ENABLED, True)
     v.set(MEMORYLAYER_FACT_DECOMPOSITION_MIN_LENGTH, 20)
     for k, val in overrides.items():
@@ -64,8 +70,7 @@ def _make_memory(memory_id="mem_test", content="original content", **kwargs):
     return Memory(**defaults)
 
 
-def _make_service(v=None, storage=None, embedding=None, dedup=None,
-                  tier_gen=None, llm=None, **kwargs):
+def _make_service(v=None, storage=None, embedding=None, dedup=None, tier_gen=None, llm=None, **kwargs):
     if v is None:
         v = _make_v()
     if storage is None:
@@ -79,10 +84,12 @@ def _make_service(v=None, storage=None, embedding=None, dedup=None,
         embedding.embed = AsyncMock(return_value=[0.2] * 384)
     if dedup is None:
         dedup = AsyncMock()
-        dedup.check_duplicate = AsyncMock(return_value=DeduplicationResult(
-            action=DeduplicationAction.CREATE,
-            reason="new",
-        ))
+        dedup.check_duplicate = AsyncMock(
+            return_value=DeduplicationResult(
+                action=DeduplicationAction.CREATE,
+                reason="new",
+            )
+        )
     if tier_gen is None:
         tier_gen = AsyncMock()
         tier_gen.generate_tiers = AsyncMock(return_value=None)
@@ -103,8 +110,8 @@ def _make_service(v=None, storage=None, embedding=None, dedup=None,
 # 2a: _merge_memories tests
 # ---------------------------------------------------------------------------
 
-class TestMergeMemories:
 
+class TestMergeMemories:
     @pytest.mark.asyncio
     async def test_merge_uses_new_content_as_primary(self):
         """Merged memory should use the new content (not naive concatenation)."""
@@ -118,7 +125,7 @@ class TestMergeMemories:
 
         svc = _make_service(storage=storage, embedding=embedding)
 
-        result = await svc._merge_memories(
+        await svc._merge_memories(
             workspace_id="ws_test",
             existing=existing,
             new_content="new content",
@@ -317,8 +324,8 @@ class TestMergeMemories:
 # 2b: LLM query rewriting tests
 # ---------------------------------------------------------------------------
 
-class TestQueryRewriting:
 
+class TestQueryRewriting:
     @pytest.mark.asyncio
     async def test_query_rewrite_called_when_enabled(self):
         """When enabled and LLM available, _rewrite_query_with_llm should be called."""
@@ -333,10 +340,17 @@ class TestQueryRewriting:
 
         svc = _make_service(v=v, storage=storage, llm=llm)
 
-        with patch.object(svc, '_rewrite_query_with_llm', wraps=svc._rewrite_query_with_llm) as mock_rewrite:
-            with patch.object(svc, '_recall_rag', return_value=RecallResult(
-                memories=[], total_count=0, search_latency_ms=0, mode_used=RecallMode.LLM,
-            )):
+        with patch.object(svc, "_rewrite_query_with_llm", wraps=svc._rewrite_query_with_llm) as mock_rewrite:
+            with patch.object(
+                svc,
+                "_recall_rag",
+                return_value=RecallResult(
+                    memories=[],
+                    total_count=0,
+                    search_latency_ms=0,
+                    mode_used=RecallMode.LLM,
+                ),
+            ):
                 input_ = RecallInput(query="test query", context=[])
                 await svc._recall_llm("ws_test", input_, 0.5)
 
@@ -355,10 +369,17 @@ class TestQueryRewriting:
 
         svc = _make_service(v=v, storage=storage, llm=llm)
 
-        with patch.object(svc, '_rewrite_query_with_llm', wraps=svc._rewrite_query_with_llm) as mock_rewrite:
-            with patch.object(svc, '_recall_rag', return_value=RecallResult(
-                memories=[], total_count=0, search_latency_ms=0, mode_used=RecallMode.LLM,
-            )):
+        with patch.object(svc, "_rewrite_query_with_llm", wraps=svc._rewrite_query_with_llm) as mock_rewrite:
+            with patch.object(
+                svc,
+                "_recall_rag",
+                return_value=RecallResult(
+                    memories=[],
+                    total_count=0,
+                    search_latency_ms=0,
+                    mode_used=RecallMode.LLM,
+                ),
+            ):
                 input_ = RecallInput(query="test query", context=[])
                 await svc._recall_llm("ws_test", input_, 0.5)
 
@@ -397,21 +418,28 @@ class TestQueryRewriting:
         captured_prompt = {}
 
         async def capture_synthesize(prompt, **kwargs):
-            captured_prompt['value'] = prompt
+            captured_prompt["value"] = prompt
             return "rewritten query"
 
         llm.synthesize = capture_synthesize
 
         context = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]
-        with patch.object(svc, '_recall_rag', return_value=RecallResult(
-            memories=[], total_count=0, search_latency_ms=0, mode_used=RecallMode.LLM,
-        )):
+        with patch.object(
+            svc,
+            "_recall_rag",
+            return_value=RecallResult(
+                memories=[],
+                total_count=0,
+                search_latency_ms=0,
+                mode_used=RecallMode.LLM,
+            ),
+        ):
             input_ = RecallInput(query="test query", context=context)
             await svc._recall_llm("ws_test", input_, 0.5)
 
         # The LLM synthesize should have been called with context serialized as string
-        assert 'value' in captured_prompt
-        assert "user: hello" in captured_prompt['value'] or "hello" in captured_prompt['value']
+        assert "value" in captured_prompt
+        assert "user: hello" in captured_prompt["value"] or "hello" in captured_prompt["value"]
 
     def test_llm_query_rewrite_default_enabled(self):
         """The default value for LLM query rewrite should be True."""
@@ -422,8 +450,8 @@ class TestQueryRewriting:
 # 2c: Trust scoring tests
 # ---------------------------------------------------------------------------
 
-class TestTrustScoring:
 
+class TestTrustScoring:
     def _fresh_memory(self, **kwargs):
         """A very recently created memory."""
         defaults = dict(
@@ -440,7 +468,7 @@ class TestTrustScoring:
             access_count=0,
             decay_factor=1.0,
             pinned=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         defaults.update(kwargs)
         return Memory(**defaults)
@@ -461,7 +489,7 @@ class TestTrustScoring:
             access_count=0,
             decay_factor=0.2,
             pinned=False,
-            created_at=datetime.now(timezone.utc) - timedelta(days=365),
+            created_at=datetime.now(UTC) - timedelta(days=365),
         )
         defaults.update(kwargs)
         return Memory(**defaults)
@@ -487,28 +515,28 @@ class TestTrustScoring:
         svc = _make_service()
         pinned = self._fresh_memory(pinned=True)
         _, signals = svc._compute_trust_score(pinned)
-        assert signals['verification'] == 1.0
+        assert signals["verification"] == 1.0
 
     def test_trust_score_verified_metadata_has_full_verification(self):
         """Memory with metadata.verified=True should have verification=1.0."""
         svc = _make_service()
         mem = self._fresh_memory(metadata={"verified": True})
         _, signals = svc._compute_trust_score(mem)
-        assert signals['verification'] == 1.0
+        assert signals["verification"] == 1.0
 
     def test_trust_score_unverified_memory_has_half_verification(self):
         """Unverified, unpinned memory should have verification=0.5."""
         svc = _make_service()
         mem = self._fresh_memory(pinned=False, metadata={})
         _, signals = svc._compute_trust_score(mem)
-        assert signals['verification'] == 0.5
+        assert signals["verification"] == 0.5
 
     def test_trust_score_session_source_has_high_reliability(self):
         """Memory from session commit (source_memory_id set) should have reliability=1.0."""
         svc = _make_service()
         mem = self._fresh_memory(source_memory_id="parent_mem_id")
         _, signals = svc._compute_trust_score(mem)
-        assert signals['source_reliability'] == 1.0
+        assert signals["source_reliability"] == 1.0
 
     def test_trust_score_manual_memory_has_moderate_reliability(self):
         """Memory without any source links should have reliability=0.8 (manual)."""
@@ -519,7 +547,7 @@ class TestTrustScoring:
             source_thread_id=None,
         )
         _, signals = svc._compute_trust_score(mem)
-        assert signals['source_reliability'] == 0.8
+        assert signals["source_reliability"] == 0.8
 
     def test_trust_score_extracted_memory_has_lower_reliability(self):
         """Memory extracted from a document should have reliability=0.6."""
@@ -530,25 +558,25 @@ class TestTrustScoring:
             source_thread_id=None,
         )
         _, signals = svc._compute_trust_score(mem)
-        assert signals['source_reliability'] == 0.6
+        assert signals["source_reliability"] == 0.6
 
     def test_trust_score_access_frequency_capped_at_1(self):
         """access_frequency component should be capped at 1.0."""
         svc = _make_service()
         mem = self._fresh_memory(access_count=100)
         _, signals = svc._compute_trust_score(mem)
-        assert signals['access_frequency'] == 1.0
+        assert signals["access_frequency"] == 1.0
 
     def test_trust_score_signals_have_all_components(self):
         """trust_signals should contain all 5 component keys."""
         svc = _make_service()
         mem = self._fresh_memory()
         _, signals = svc._compute_trust_score(mem)
-        assert 'freshness' in signals
-        assert 'access_frequency' in signals
-        assert 'decay_factor' in signals
-        assert 'verification' in signals
-        assert 'source_reliability' in signals
+        assert "freshness" in signals
+        assert "access_frequency" in signals
+        assert "decay_factor" in signals
+        assert "verification" in signals
+        assert "source_reliability" in signals
 
     def test_annotate_trust_sets_fields_on_memories(self):
         """_annotate_trust should set trust_score and trust_signals on each memory."""
@@ -570,17 +598,21 @@ class TestTrustScoring:
             id="m_old",
             access_count=0,
             decay_factor=0.05,
-            created_at=datetime.now(timezone.utc) - timedelta(days=730),
+            created_at=datetime.now(UTC) - timedelta(days=730),
         )
         old_mem_with_score = old_mem.model_copy(deep=True)
 
-        with patch.object(svc, '_recall_rag', return_value=RecallResult(
-            memories=[old_mem_with_score],
-            total_count=1,
-            search_latency_ms=0,
-            mode_used=RecallMode.RAG,
-        )):
-            with patch.object(svc, 'increment_access', new_callable=AsyncMock):
+        with patch.object(
+            svc,
+            "_recall_rag",
+            return_value=RecallResult(
+                memories=[old_mem_with_score],
+                total_count=1,
+                search_latency_ms=0,
+                mode_used=RecallMode.RAG,
+            ),
+        ):
+            with patch.object(svc, "increment_access", new_callable=AsyncMock):
                 input_ = RecallInput(query="test", include_associations=False)
                 result = await svc.recall("ws_test", input_)
 
@@ -599,16 +631,20 @@ class TestTrustScoring:
             access_count=5,
             decay_factor=1.0,
             pinned=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
-        with patch.object(svc, '_recall_rag', return_value=RecallResult(
-            memories=[fresh_mem],
-            total_count=1,
-            search_latency_ms=0,
-            mode_used=RecallMode.RAG,
-        )):
-            with patch.object(svc, 'increment_access', new_callable=AsyncMock):
+        with patch.object(
+            svc,
+            "_recall_rag",
+            return_value=RecallResult(
+                memories=[fresh_mem],
+                total_count=1,
+                search_latency_ms=0,
+                mode_used=RecallMode.RAG,
+            ),
+        ):
+            with patch.object(svc, "increment_access", new_callable=AsyncMock):
                 input_ = RecallInput(query="test", include_associations=False)
                 result = await svc.recall("ws_test", input_)
 

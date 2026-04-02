@@ -18,11 +18,13 @@ Operations:
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Optional, Any, List, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...config import (
-    MEMORYLAYER_SESSION_SERVICE, DEFAULT_MEMORYLAYER_SESSION_SERVICE,
-    MEMORYLAYER_SESSION_TOUCH_TTL, DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL,
+    DEFAULT_MEMORYLAYER_SESSION_SERVICE,
+    DEFAULT_MEMORYLAYER_SESSION_TOUCH_TTL,
+    MEMORYLAYER_SESSION_SERVICE,
+    MEMORYLAYER_SESSION_TOUCH_TTL,
 )
 from ...models import Session, WorkingMemory
 
@@ -37,16 +39,16 @@ class CommitResult:
     """Result of a session commit operation."""
 
     def __init__(
-            self,
-            session_id: str,
-            committed_at: datetime,
-            memories_committed: int = 0,
-            associations_committed: int = 0,
-            success: bool = True,
-            error: Optional[str] = None,
-            memories_extracted: int = 0,
-            memories_deduplicated: int = 0,
-            extraction_summary: Optional[Dict[str, Any]] = None
+        self,
+        session_id: str,
+        committed_at: datetime,
+        memories_committed: int = 0,
+        associations_committed: int = 0,
+        success: bool = True,
+        error: str | None = None,
+        memories_extracted: int = 0,
+        memories_deduplicated: int = 0,
+        extraction_summary: dict[str, Any] | None = None,
     ):
         self.session_id = session_id
         self.committed_at = committed_at
@@ -63,11 +65,11 @@ class CommitOptions:
     """Options for session commit operation."""
 
     def __init__(
-            self,
-            include_working_memory: bool = True,
-            importance_threshold: Optional[float] = None,
-            delete_after_commit: bool = False,
-            tags: Optional[List[str]] = None
+        self,
+        include_working_memory: bool = True,
+        importance_threshold: float | None = None,
+        delete_after_commit: bool = False,
+        tags: list[str] | None = None,
     ):
         self.include_working_memory = include_working_memory
         self.importance_threshold = importance_threshold
@@ -82,12 +84,7 @@ class SessionService(ABC):
     default_touch_ttl: int = 3600
 
     @abstractmethod
-    async def create_session(
-            self,
-            workspace_id: str,
-            session: Session,
-            context_id: Optional[str] = None
-    ) -> Session:
+    async def create_session(self, workspace_id: str, session: Session, context_id: str | None = None) -> Session:
         """Store a new session.
 
         Args:
@@ -101,12 +98,12 @@ class SessionService(ABC):
         pass
 
     @abstractmethod
-    async def get_session(self, workspace_id: str, session_id: str) -> Optional[Session]:
+    async def get_session(self, workspace_id: str, session_id: str) -> Session | None:
         """Retrieve session if not expired."""
         pass
 
     @abstractmethod
-    async def get(self, session_id: str) -> Optional[Session]:
+    async def get(self, session_id: str) -> Session | None:
         """Retrieve session by ID without workspace filter.
 
         This method allows looking up a session when the workspace is not known,
@@ -135,36 +132,31 @@ class SessionService(ABC):
 
     @abstractmethod
     async def set_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str,
-            key: str,
-            value: Any,
-            ttl_seconds: Optional[int] = None
+        self, workspace_id: str, session_id: str, key: str, value: Any, ttl_seconds: int | None = None
     ) -> WorkingMemory:
         """Store key-value data within a session's working memory."""
         pass
 
     @abstractmethod
-    async def get_working_memory(self, workspace_id: str, session_id: str, key: str) -> Optional[WorkingMemory]:
+    async def get_working_memory(self, workspace_id: str, session_id: str, key: str) -> WorkingMemory | None:
         """Retrieve specific working memory entry."""
         pass
 
     @abstractmethod
-    async def get_all_working_memory(self, workspace_id: str, session_id: str) -> List[WorkingMemory]:
+    async def get_all_working_memory(self, workspace_id: str, session_id: str) -> list[WorkingMemory]:
         """Get all working memory entries for a session."""
         pass
 
     @abstractmethod
     async def get_briefing(
-            self,
-            workspace_id: str,
-            lookback_minutes: int = 60,
-            detail_level: str = "abstract",
-            limit: int = 10,
-            include_memories: bool = True,
-            include_contradictions: bool = True,
-    ) -> 'SessionBriefing':
+        self,
+        workspace_id: str,
+        lookback_minutes: int = 60,
+        detail_level: str = "abstract",
+        limit: int = 10,
+        include_memories: bool = True,
+        include_contradictions: bool = True,
+    ) -> "SessionBriefing":
         """Generate a session briefing with workspace summary and recent activity.
 
         Args:
@@ -182,12 +174,7 @@ class SessionService(ABC):
     # ========================================
 
     @abstractmethod
-    async def commit_session(
-            self,
-            workspace_id: str,
-            session_id: str,
-            options: Optional[CommitOptions] = None
-    ) -> CommitResult:
+    async def commit_session(self, workspace_id: str, session_id: str, options: CommitOptions | None = None) -> CommitResult:
         """Commit session working memory to long-term storage.
 
         This moves working memory entries to persistent memory storage,
@@ -204,12 +191,7 @@ class SessionService(ABC):
         pass
 
     @abstractmethod
-    async def touch_session(
-            self,
-            workspace_id: str,
-            session_id: str,
-            extend_seconds: Optional[int] = None
-    ) -> Session:
+    async def touch_session(self, workspace_id: str, session_id: str, extend_seconds: int | None = None) -> Session:
         """Extend session TTL using sliding window.
 
         Resets expires_at to now + TTL. If extend_seconds is provided,
@@ -229,12 +211,7 @@ class SessionService(ABC):
         pass
 
     @abstractmethod
-    async def list_sessions(
-            self,
-            workspace_id: str,
-            context_id: Optional[str] = None,
-            include_expired: bool = False
-    ) -> List[Session]:
+    async def list_sessions(self, workspace_id: str, context_id: str | None = None, include_expired: bool = False) -> list[Session]:
         """List sessions in a workspace.
 
         Args:

@@ -1,15 +1,15 @@
 """Default workspace service implementation."""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
+from ...config import DEFAULT_CONTEXT_ID, DEFAULT_TENANT_ID
 from ...models import Workspace
 from ...models.workspace import Context
 from ..storage import EXT_STORAGE_BACKEND, StorageBackend
-from ...config import DEFAULT_TENANT_ID, DEFAULT_CONTEXT_ID
 from .base import WorkspaceServicePluginBase
 
 
@@ -45,11 +45,7 @@ class WorkspaceService:
         Raises:
             ValueError: If workspace validation fails
         """
-        self.logger.info(
-            "Creating workspace: %s for tenant: %s",
-            workspace.name,
-            workspace.tenant_id
-        )
+        self.logger.info("Creating workspace: %s for tenant: %s", workspace.name, workspace.tenant_id)
 
         # Create workspace via storage backend
         created = await self._storage.create_workspace(workspace)
@@ -57,7 +53,7 @@ class WorkspaceService:
         self.logger.info("Created workspace: %s", created.id)
         return created
 
-    async def get_workspace(self, workspace_id: str) -> Optional[Workspace]:
+    async def get_workspace(self, workspace_id: str) -> Workspace | None:
         """
         Get workspace by ID.
 
@@ -81,11 +77,11 @@ class WorkspaceService:
         return await self._storage.list_workspaces()
 
     async def ensure_workspace(
-            self,
-            workspace_id: str,
-            tenant_id: str = None,
-            auto_create: bool = True,
-    ) -> Optional[Workspace]:
+        self,
+        workspace_id: str,
+        tenant_id: str = None,
+        auto_create: bool = True,
+    ) -> Workspace | None:
         """
         Ensure a workspace exists, optionally creating it if missing.
 
@@ -114,7 +110,7 @@ class WorkspaceService:
         # Auto-create workspace
         self.logger.info("Auto-creating workspace: %s", workspace_id)
         tenant_id = tenant_id or DEFAULT_TENANT_ID
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         workspace = Workspace(
             id=workspace_id,
@@ -135,11 +131,11 @@ class WorkspaceService:
         Creates it via storage if missing.  This is a lightweight
         bootstrapping step — no separate ContextService required.
         """
-        if hasattr(self._storage, 'get_context'):
+        if hasattr(self._storage, "get_context"):
             existing = await self._storage.get_context(workspace_id, f"{workspace_id}:{DEFAULT_CONTEXT_ID}")
             if existing:
                 return
-        if hasattr(self._storage, 'create_context'):
+        if hasattr(self._storage, "create_context"):
             default_context = Context(
                 id=f"{workspace_id}:{DEFAULT_CONTEXT_ID}",
                 workspace_id=workspace_id,
@@ -167,7 +163,7 @@ class WorkspaceService:
         if not existing:
             return False
 
-        if hasattr(self._storage, 'delete_workspace'):
+        if hasattr(self._storage, "delete_workspace"):
             await self._storage.delete_workspace(workspace_id)
         else:
             self.logger.warning(
@@ -212,11 +208,9 @@ class WorkspaceService:
 
 class DefaultWorkspaceServicePlugin(WorkspaceServicePluginBase):
     """Default workspace service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> WorkspaceService:
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
-        return WorkspaceService(
-            storage=storage,
-            v=v
-        )
+        return WorkspaceService(storage=storage, v=v)

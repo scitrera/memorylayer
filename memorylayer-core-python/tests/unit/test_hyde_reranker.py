@@ -6,17 +6,17 @@ import pytest
 from scitrera_app_framework import Variables
 
 from memorylayer_server.config import RerankerProviderType
+from memorylayer_server.services.embedding import EXT_EMBEDDING_SERVICE
+from memorylayer_server.services.llm import EXT_LLM_SERVICE
 from memorylayer_server.services.reranker.hyde.provider import (
+    HYDE_PROMPT_TEMPLATE,
     HyDERerankerProvider,
     HyDERerankerProviderPlugin,
-    HYDE_PROMPT_TEMPLATE,
 )
 from memorylayer_server.utils import cosine_similarity
-from memorylayer_server.services.llm import EXT_LLM_SERVICE
-from memorylayer_server.services.embedding import EXT_EMBEDDING_SERVICE
-
 
 # --- Fixtures ---
+
 
 @pytest.fixture
 def mock_v():
@@ -39,11 +39,13 @@ def mock_embedding_service():
     # Hypothetical answer embedding
     service.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
     # Document embeddings - first doc is similar, second is orthogonal
-    service.embed_batch = AsyncMock(return_value=[
-        [0.9, 0.1, 0.0],  # Similar to hyp
-        [0.0, 0.0, 1.0],  # Orthogonal to hyp
-        [0.5, 0.5, 0.0],  # Partially similar
-    ])
+    service.embed_batch = AsyncMock(
+        return_value=[
+            [0.9, 0.1, 0.0],  # Similar to hyp
+            [0.0, 0.0, 1.0],  # Orthogonal to hyp
+            [0.5, 0.5, 0.0],  # Partially similar
+        ]
+    )
     return service
 
 
@@ -58,6 +60,7 @@ def provider(mock_v, mock_llm_service, mock_embedding_service):
 
 
 # --- Cosine similarity tests ---
+
 
 class TestCosineSimilarity:
     def test_identical_vectors(self):
@@ -81,6 +84,7 @@ class TestCosineSimilarity:
 
 
 # --- Provider tests ---
+
 
 class TestHyDERerankerProvider:
     @pytest.mark.asyncio
@@ -141,9 +145,7 @@ class TestHyDERerankerProvider:
         assert "my query" in prompt
 
     @pytest.mark.asyncio
-    async def test_rerank_llm_failure_returns_uniform_scores(
-            self, mock_v, mock_embedding_service
-    ):
+    async def test_rerank_llm_failure_returns_uniform_scores(self, mock_v, mock_embedding_service):
         """When LLM fails, should return uniform 0.5 scores."""
         llm = AsyncMock()
         llm.synthesize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
@@ -157,9 +159,7 @@ class TestHyDERerankerProvider:
         assert scores == [0.5, 0.5]
 
     @pytest.mark.asyncio
-    async def test_rerank_embedding_failure_returns_uniform_scores(
-            self, mock_v, mock_llm_service
-    ):
+    async def test_rerank_embedding_failure_returns_uniform_scores(self, mock_v, mock_llm_service):
         """When embedding fails, should return uniform 0.5 scores."""
         emb = AsyncMock()
         emb.embed = AsyncMock(side_effect=RuntimeError("Embedding unavailable"))
@@ -203,6 +203,7 @@ class TestHyDERerankerProvider:
 
 # --- Plugin tests ---
 
+
 class TestHyDERerankerPlugin:
     def test_provider_name(self):
         plugin = HyDERerankerProviderPlugin()
@@ -223,6 +224,7 @@ class TestHyDERerankerPlugin:
 
 # --- Prompt template tests ---
 
+
 class TestHyDEPromptTemplate:
     def test_prompt_contains_query_placeholder(self):
         assert "{query}" in HYDE_PROMPT_TEMPLATE
@@ -234,6 +236,7 @@ class TestHyDEPromptTemplate:
 
 
 # --- Integration-style test with rerank_with_indices ---
+
 
 class TestHyDERerankerWithIndices:
     @pytest.mark.asyncio

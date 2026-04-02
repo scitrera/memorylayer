@@ -1,13 +1,14 @@
 """Anthropic Claude LLM provider."""
-from typing import AsyncIterator
+
+from collections.abc import AsyncIterator
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from .base import LLMProvider
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
+from .base import LLMProvider
 
-DEFAULT_LLM_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514'
+DEFAULT_LLM_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 
 # Anthropic stop_reason -> our finish_reason
 _STOP_REASON_MAP = {
@@ -24,12 +25,12 @@ class AnthropicLLMProvider(LLMProvider):
     """
 
     def __init__(
-            self,
-            api_key: str,
-            model: str = DEFAULT_LLM_ANTHROPIC_MODEL,
-            default_max_tokens: int | None = None,
-            default_temperature: float | None = None,
-            v: Variables = None,
+        self,
+        api_key: str,
+        model: str = DEFAULT_LLM_ANTHROPIC_MODEL,
+        default_max_tokens: int | None = None,
+        default_temperature: float | None = None,
+        v: Variables = None,
     ):
         self.api_key = api_key
         self.model = model
@@ -37,22 +38,19 @@ class AnthropicLLMProvider(LLMProvider):
         self.default_temperature = default_temperature
         self._client = None
         self.logger = get_logger(v, name=self.__class__.__name__)
-        self.logger.info(
-            "Initialized AnthropicLLMProvider: model=%s", model
-        )
+        self.logger.info("Initialized AnthropicLLMProvider: model=%s", model)
 
     def _get_client(self):
         """Lazy-load Anthropic async client."""
         if self._client is None:
             try:
                 from anthropic import AsyncAnthropic
+
                 self._client = AsyncAnthropic(
                     api_key=self.api_key,
                 )
             except ImportError:
-                raise ImportError(
-                    "anthropic package not installed. Install with: pip install anthropic"
-                )
+                raise ImportError("anthropic package not installed. Install with: pip install anthropic")
         return self._client
 
     @staticmethod
@@ -117,10 +115,7 @@ class AnthropicLLMProvider(LLMProvider):
             finish_reason=_STOP_REASON_MAP.get(response.stop_reason, response.stop_reason or "stop"),
         )
 
-    async def complete_stream(
-            self,
-            request: LLMRequest
-    ) -> AsyncIterator[LLMStreamChunk]:
+    async def complete_stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
         """Generate streaming completion using Anthropic Messages API."""
         client = self._get_client()
 

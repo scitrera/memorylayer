@@ -1,16 +1,16 @@
 """Local reranker provider using sentence-transformers CrossEncoder."""
+
 import math
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ..base import RerankerProvider, RerankerProviderPluginBase
 from ....config import RerankerProviderType
+from ..base import RerankerProvider, RerankerProviderPluginBase
 
-MEMORYLAYER_RERANKER_LOCAL_MODEL = 'MEMORYLAYER_RERANKER_LOCAL_MODEL'
-DEFAULT_RERANKER_LOCAL_MODEL = 'cross-encoder/ms-marco-MiniLM-L-6-v2'
+MEMORYLAYER_RERANKER_LOCAL_MODEL = "MEMORYLAYER_RERANKER_LOCAL_MODEL"
+DEFAULT_RERANKER_LOCAL_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 
 def _sigmoid(x: float) -> float:
@@ -27,30 +27,26 @@ class LocalRerankerProvider(RerankerProvider):
     """
 
     def __init__(
-            self,
-            v: Variables = None,
-            model_name: str = DEFAULT_RERANKER_LOCAL_MODEL,
+        self,
+        v: Variables = None,
+        model_name: str = DEFAULT_RERANKER_LOCAL_MODEL,
     ):
         super().__init__(v)
         self.model_name = model_name
         self._model = None
         self.logger = get_logger(v, name=self.__class__.__name__)
-        self.logger.info(
-            "Initialized LocalRerankerProvider: model=%s", model_name
-        )
+        self.logger.info("Initialized LocalRerankerProvider: model=%s", model_name)
 
     def _get_model(self):
         """Lazy-load the CrossEncoder model."""
         if self._model is None:
             try:
                 from sentence_transformers import CrossEncoder
+
                 self.logger.info("Loading CrossEncoder model: %s", self.model_name)
                 self._model = CrossEncoder(self.model_name)
             except ImportError:
-                raise ImportError(
-                    "sentence-transformers package not installed. "
-                    "Install with: pip install sentence-transformers"
-                )
+                raise ImportError("sentence-transformers package not installed. Install with: pip install sentence-transformers")
         return self._model
 
     async def preload(self):
@@ -58,10 +54,10 @@ class LocalRerankerProvider(RerankerProvider):
         self._get_model()
 
     async def rerank(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
     ) -> list[float]:
         """Score documents by relevance to query using CrossEncoder.
 
@@ -84,7 +80,8 @@ class LocalRerankerProvider(RerankerProvider):
 
         self.logger.debug(
             "Reranking %d documents for query: %s chars",
-            len(documents), len(effective_query),
+            len(documents),
+            len(effective_query),
         )
 
         # CrossEncoder expects list of (query, document) pairs
@@ -99,6 +96,7 @@ class LocalRerankerProvider(RerankerProvider):
 
 class LocalRerankerProviderPlugin(RerankerProviderPluginBase):
     """Plugin for local CrossEncoder reranker."""
+
     PROVIDER_NAME = RerankerProviderType.LOCAL
 
     def initialize(self, v: Variables, logger: Logger) -> RerankerProvider:

@@ -4,19 +4,20 @@ In-memory storage backend for testing.
 Provides a complete storage implementation that stores all data in memory.
 Data is lost on service restart - use only for testing.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Any, Optional
+from typing import Any
 
 from scitrera_app_framework import Variables
 
-from .base import StorageBackend, StoragePluginBase
-from ...models.memory import Memory, RememberInput, MemoryType, MemorySubtype
-from ...models.association import Association, AssociateInput, GraphQueryResult, GraphPath
-from ...models.workspace import Workspace, Context
+from ...config import DEFAULT_CONTEXT_ID, DEFAULT_TENANT_ID
+from ...models.association import AssociateInput, Association, GraphPath, GraphQueryResult
+from ...models.memory import Memory, MemoryType, RememberInput
 from ...models.session import Session, WorkingMemory
-from ...config import DEFAULT_TENANT_ID, DEFAULT_CONTEXT_ID
-from ...utils import generate_id, utc_now_iso, compute_content_hash, cosine_similarity
+from ...models.workspace import Context, Workspace
+from ...utils import compute_content_hash, cosine_similarity, generate_id, utc_now_iso
+from .base import StorageBackend, StoragePluginBase
 
 
 class MemoryStorageBackend(StorageBackend):
@@ -65,15 +66,15 @@ class MemoryStorageBackend(StorageBackend):
         memory = Memory(
             id=generate_id("mem"),
             workspace_id=workspace_id,
-            tenant_id=getattr(input, 'tenant_id', None) or DEFAULT_TENANT_ID,
-            context_id=getattr(input, 'context_id', None) or DEFAULT_CONTEXT_ID,
+            tenant_id=getattr(input, "tenant_id", None) or DEFAULT_TENANT_ID,
+            context_id=getattr(input, "context_id", None) or DEFAULT_CONTEXT_ID,
             user_id=input.user_id,
-            observer_id=getattr(input, 'observer_id', None),
-            subject_id=getattr(input, 'subject_id', None),
-            source_document_id=getattr(input, 'source_document_id', None),
-            source_page_id=getattr(input, 'source_page_id', None),
-            source_dataset_id=getattr(input, 'source_dataset_id', None),
-            source_thread_id=getattr(input, 'source_thread_id', None),
+            observer_id=getattr(input, "observer_id", None),
+            subject_id=getattr(input, "subject_id", None),
+            source_document_id=getattr(input, "source_document_id", None),
+            source_page_id=getattr(input, "source_page_id", None),
+            source_dataset_id=getattr(input, "source_dataset_id", None),
+            source_thread_id=getattr(input, "source_thread_id", None),
             content=input.content,
             content_hash=content_hash,
             type=input.type or MemoryType.SEMANTIC,
@@ -90,7 +91,7 @@ class MemoryStorageBackend(StorageBackend):
         self.logger.debug("Created memory: %s in workspace: %s", memory.id, workspace_id)
         return memory
 
-    async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+    async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Memory | None:
         """Get memory by ID within a workspace."""
         ws_memories = self._memories.get(workspace_id, {})
         memory = ws_memories.get(memory_id)
@@ -98,7 +99,7 @@ class MemoryStorageBackend(StorageBackend):
             return None
         return memory
 
-    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Memory | None:
         """Get memory by ID without workspace filter. Memory IDs are globally unique."""
         if memory_id in self._deleted_memories:
             return None
@@ -107,7 +108,7 @@ class MemoryStorageBackend(StorageBackend):
                 return ws_memories[memory_id]
         return None
 
-    async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Optional[Memory]:
+    async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Memory | None:
         """Update memory fields."""
         memory = await self.get_memory(workspace_id, memory_id, track_access=False)
         if not memory:
@@ -133,21 +134,21 @@ class MemoryStorageBackend(StorageBackend):
         return True
 
     async def search_memories(
-            self,
-            workspace_id: str,
-            query_embedding: list[float],
-            limit: int = 10,
-            offset: int = 0,
-            min_relevance: float = 0.5,
-            types: Optional[list[str]] = None,
-            subtypes: Optional[list[str]] = None,
-            tags: Optional[list[str]] = None,
-            include_archived: bool = False,
-            observer_id: Optional[str] = None,
-            subject_id: Optional[str] = None,
-            created_after: Optional[str] = None,
-            created_before: Optional[str] = None,
-            user_id: Optional[str] = None,
+        self,
+        workspace_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+        offset: int = 0,
+        min_relevance: float = 0.5,
+        types: list[str] | None = None,
+        subtypes: list[str] | None = None,
+        tags: list[str] | None = None,
+        include_archived: bool = False,
+        observer_id: str | None = None,
+        subject_id: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        user_id: str | None = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search using cosine similarity."""
         ws_memories = self._memories.get(workspace_id, {})
@@ -173,11 +174,11 @@ class MemoryStorageBackend(StorageBackend):
                     continue
 
             # Filter by entity attribution
-            if observer_id is not None and getattr(memory, 'observer_id', None) != observer_id:
+            if observer_id is not None and getattr(memory, "observer_id", None) != observer_id:
                 continue
-            if subject_id is not None and getattr(memory, 'subject_id', None) != subject_id:
+            if subject_id is not None and getattr(memory, "subject_id", None) != subject_id:
                 continue
-            if user_id is not None and getattr(memory, 'user_id', None) != user_id:
+            if user_id is not None and getattr(memory, "user_id", None) != user_id:
                 continue
 
             # Calculate cosine similarity
@@ -190,14 +191,14 @@ class MemoryStorageBackend(StorageBackend):
         results.sort(key=lambda x: x[1], reverse=True)
 
         # Apply offset and limit
-        return results[offset:offset + limit]
+        return results[offset : offset + limit]
 
     async def full_text_search(
-            self,
-            workspace_id: str,
-            query: str,
-            limit: int = 10,
-            offset: int = 0,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[Memory]:
         """Full-text search on memory content."""
         ws_memories = self._memories.get(workspace_id, {})
@@ -210,9 +211,9 @@ class MemoryStorageBackend(StorageBackend):
             if query_lower in memory.content.lower():
                 results.append(memory)
 
-        return results[offset:offset + limit]
+        return results[offset : offset + limit]
 
-    async def get_memory_by_hash(self, workspace_id: str, content_hash: str) -> Optional[Memory]:
+    async def get_memory_by_hash(self, workspace_id: str, content_hash: str) -> Memory | None:
         """Get memory by content hash for deduplication."""
         ws_memories = self._memories.get(workspace_id, {})
         for memory in ws_memories.values():
@@ -237,8 +238,8 @@ class MemoryStorageBackend(StorageBackend):
             if memory.id in self._deleted_memories:
                 continue
             # Check status
-            status = getattr(memory, 'status', None)
-            if status and str(status) != 'active':
+            status = getattr(memory, "status", None)
+            if status and str(status) != "active":
                 continue
             if memory.created_at > created_after:
                 candidates.append(memory)
@@ -248,7 +249,7 @@ class MemoryStorageBackend(StorageBackend):
 
         # Apply offset and limit
         if limit > 0:
-            candidates = candidates[offset:offset + limit]
+            candidates = candidates[offset : offset + limit]
         else:
             candidates = candidates[offset:]
 
@@ -257,40 +258,58 @@ class MemoryStorageBackend(StorageBackend):
         for memory in candidates:
             if detail_level == "abstract":
                 # Return only id, abstract, type, subtype, importance, tags, created_at
-                results.append({
-                    "id": memory.id,
-                    "abstract": getattr(memory, 'abstract', None),
-                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
-                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(memory.subtype) if memory.subtype else None,
-                    "importance": memory.importance,
-                    "tags": memory.tags if memory.tags else [],
-                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
-                })
+                results.append(
+                    {
+                        "id": memory.id,
+                        "abstract": getattr(memory, "abstract", None),
+                        "type": memory.type.value if hasattr(memory.type, "value") else str(memory.type),
+                        "subtype": memory.subtype.value
+                        if memory.subtype and hasattr(memory.subtype, "value")
+                        else str(memory.subtype)
+                        if memory.subtype
+                        else None,
+                        "importance": memory.importance,
+                        "tags": memory.tags if memory.tags else [],
+                        "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                    }
+                )
             elif detail_level == "overview":
                 # Add overview field
-                results.append({
-                    "id": memory.id,
-                    "abstract": getattr(memory, 'abstract', None),
-                    "overview": getattr(memory, 'overview', None),
-                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
-                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(memory.subtype) if memory.subtype else None,
-                    "importance": memory.importance,
-                    "tags": memory.tags if memory.tags else [],
-                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
-                })
+                results.append(
+                    {
+                        "id": memory.id,
+                        "abstract": getattr(memory, "abstract", None),
+                        "overview": getattr(memory, "overview", None),
+                        "type": memory.type.value if hasattr(memory.type, "value") else str(memory.type),
+                        "subtype": memory.subtype.value
+                        if memory.subtype and hasattr(memory.subtype, "value")
+                        else str(memory.subtype)
+                        if memory.subtype
+                        else None,
+                        "importance": memory.importance,
+                        "tags": memory.tags if memory.tags else [],
+                        "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                    }
+                )
             else:  # "full"
                 # Return everything
-                results.append({
-                    "id": memory.id,
-                    "content": memory.content,
-                    "abstract": getattr(memory, 'abstract', None),
-                    "overview": getattr(memory, 'overview', None),
-                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
-                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(memory.subtype) if memory.subtype else None,
-                    "importance": memory.importance,
-                    "tags": memory.tags if memory.tags else [],
-                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
-                })
+                results.append(
+                    {
+                        "id": memory.id,
+                        "content": memory.content,
+                        "abstract": getattr(memory, "abstract", None),
+                        "overview": getattr(memory, "overview", None),
+                        "type": memory.type.value if hasattr(memory.type, "value") else str(memory.type),
+                        "subtype": memory.subtype.value
+                        if memory.subtype and hasattr(memory.subtype, "value")
+                        else str(memory.subtype)
+                        if memory.subtype
+                        else None,
+                        "importance": memory.importance,
+                        "tags": memory.tags if memory.tags else [],
+                        "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                    }
+                )
 
         return results
 
@@ -315,11 +334,11 @@ class MemoryStorageBackend(StorageBackend):
         return assoc
 
     async def get_associations(
-            self,
-            workspace_id: str,
-            memory_id: str,
-            direction: str = "both",
-            relationships: Optional[list[str]] = None,
+        self,
+        workspace_id: str,
+        memory_id: str,
+        direction: str = "both",
+        relationships: list[str] | None = None,
     ) -> list[Association]:
         """Get associations for a memory."""
         ws_assocs = self._associations.get(workspace_id, {})
@@ -344,12 +363,12 @@ class MemoryStorageBackend(StorageBackend):
         return results
 
     async def traverse_graph(
-            self,
-            workspace_id: str,
-            start_id: str,
-            max_depth: int = 3,
-            relationships: Optional[list[str]] = None,
-            direction: str = "both",
+        self,
+        workspace_id: str,
+        start_id: str,
+        max_depth: int = 3,
+        relationships: list[str] | None = None,
+        direction: str = "both",
     ) -> GraphQueryResult:
         """Multi-hop graph traversal."""
         visited = set()
@@ -368,9 +387,7 @@ class MemoryStorageBackend(StorageBackend):
                 paths.append(GraphPath(nodes=current_path, depth=depth))
 
             if depth < max_depth:
-                associations = await self.get_associations(
-                    workspace_id, current_id, direction, relationships
-                )
+                associations = await self.get_associations(workspace_id, current_id, direction, relationships)
                 for assoc in associations:
                     next_id = assoc.target_id if assoc.source_id == current_id else assoc.source_id
                     await traverse(next_id, current_path, depth + 1)
@@ -390,7 +407,7 @@ class MemoryStorageBackend(StorageBackend):
         self._workspaces[workspace.id] = workspace
         return workspace
 
-    async def get_workspace(self, workspace_id: str) -> Optional[Workspace]:
+    async def get_workspace(self, workspace_id: str) -> Workspace | None:
         """Get workspace by ID."""
         return self._workspaces.get(workspace_id)
 
@@ -407,7 +424,7 @@ class MemoryStorageBackend(StorageBackend):
         self._contexts[workspace_id][context.id] = context
         return context
 
-    async def get_context(self, workspace_id: str, context_id: str) -> Optional[Context]:
+    async def get_context(self, workspace_id: str, context_id: str) -> Context | None:
         """Get context by ID."""
         ws_contexts = self._contexts.get(workspace_id, {})
         return ws_contexts.get(context_id)
@@ -439,7 +456,7 @@ class MemoryStorageBackend(StorageBackend):
         self._sessions[workspace_id][session.id] = session
         return session
 
-    async def get_session(self, workspace_id: str, session_id: str) -> Optional[Session]:
+    async def get_session(self, workspace_id: str, session_id: str) -> Session | None:
         """Get session by ID."""
         ws_sessions = self._sessions.get(workspace_id, {})
         session = ws_sessions.get(session_id)
@@ -447,7 +464,7 @@ class MemoryStorageBackend(StorageBackend):
             return None
         return session
 
-    async def get_session_by_id(self, session_id: str) -> Optional[Session]:
+    async def get_session_by_id(self, session_id: str) -> Session | None:
         """Get session by ID without workspace filter.
 
         Searches all workspaces. Within a tenant's storage backend,
@@ -474,12 +491,7 @@ class MemoryStorageBackend(StorageBackend):
         return False
 
     async def set_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str,
-            key: str,
-            value: Any,
-            ttl_seconds: Optional[int] = None
+        self, workspace_id: str, session_id: str, key: str, value: Any, ttl_seconds: int | None = None
     ) -> WorkingMemory:
         """Set working memory key-value within session."""
         if workspace_id not in self._working_memory:
@@ -487,7 +499,7 @@ class MemoryStorageBackend(StorageBackend):
         if session_id not in self._working_memory[workspace_id]:
             self._working_memory[workspace_id][session_id] = {}
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing = self._working_memory[workspace_id][session_id].get(key)
 
         wm = WorkingMemory(
@@ -501,22 +513,13 @@ class MemoryStorageBackend(StorageBackend):
         self._working_memory[workspace_id][session_id][key] = wm
         return wm
 
-    async def get_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str,
-            key: str
-    ) -> Optional[WorkingMemory]:
+    async def get_working_memory(self, workspace_id: str, session_id: str, key: str) -> WorkingMemory | None:
         """Get specific working memory entry."""
         ws_wm = self._working_memory.get(workspace_id, {})
         sess_wm = ws_wm.get(session_id, {})
         return sess_wm.get(key)
 
-    async def get_all_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str
-    ) -> list[WorkingMemory]:
+    async def get_all_working_memory(self, workspace_id: str, session_id: str) -> list[WorkingMemory]:
         """Get all working memory entries for session."""
         ws_wm = self._working_memory.get(workspace_id, {})
         sess_wm = ws_wm.get(session_id, {})
@@ -531,11 +534,10 @@ class MemoryStorageBackend(StorageBackend):
         return len(expired)
 
 
-
 class MemoryStoragePlugin(StoragePluginBase):
     """Plugin for in-memory storage backend."""
 
-    PROVIDER_NAME = 'memory'
+    PROVIDER_NAME = "memory"
 
     def initialize(self, v: Variables, logger: Logger) -> MemoryStorageBackend:
         return MemoryStorageBackend(v=v)

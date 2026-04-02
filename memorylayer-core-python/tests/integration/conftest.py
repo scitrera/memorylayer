@@ -5,7 +5,7 @@ The `fastapi_app` fixture is inherited from the parent conftest and provides
 a properly initialized FastAPI app using the test framework's Variables instance.
 """
 
-from typing import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 from fastapi import FastAPI

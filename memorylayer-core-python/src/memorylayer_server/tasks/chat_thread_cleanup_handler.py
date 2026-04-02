@@ -2,6 +2,7 @@
 
 Periodic background task that cleans up expired chat threads.
 """
+
 from logging import Logger
 from typing import Optional
 
@@ -10,13 +11,13 @@ from scitrera_app_framework import Variables, get_logger
 from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
 from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 
-MEMORYLAYER_BACKGROUND_CHAT_THREAD_CLEANUP_INTERVAL = 'MEMORYLAYER_BACKGROUND_CHAT_THREAD_CLEANUP_INTERVAL'
+MEMORYLAYER_BACKGROUND_CHAT_THREAD_CLEANUP_INTERVAL = "MEMORYLAYER_BACKGROUND_CHAT_THREAD_CLEANUP_INTERVAL"
 DEFAULT_CLEANUP_INTERVAL: int = 3600
 
 
 async def periodic_chat_thread_cleanup_task(
-        storage: StorageBackend,
-        logger: Logger,
+    storage: StorageBackend,
+    logger: Logger,
 ) -> None:
     """
     Task to clean up expired chat threads.
@@ -40,19 +41,11 @@ async def periodic_chat_thread_cleanup_task(
 
             for thread in expired_threads:
                 try:
-                    logger.debug(
-                        "Deleting expired chat thread %s from workspace %s",
-                        thread.id,
-                        thread.workspace_id
-                    )
+                    logger.debug("Deleting expired chat thread %s from workspace %s", thread.id, thread.workspace_id)
                     await storage.delete_thread(thread.workspace_id, thread.id)
                     cleaned_count += 1
                 except Exception as e:
-                    logger.warning(
-                        "Failed to delete expired thread %s: %s",
-                        thread.id,
-                        e
-                    )
+                    logger.warning("Failed to delete expired thread %s: %s", thread.id, e)
 
         if cleaned_count > 0:
             logger.info("Background cleanup removed %d expired chat threads", cleaned_count)
@@ -65,14 +58,10 @@ class ChatThreadCleanupTaskHandlerPlugin(TaskHandlerPlugin):
     """Task handler for periodic chat thread cleanup."""
 
     def get_task_type(self) -> str:
-        return 'cleanup_expired_threads'
+        return "cleanup_expired_threads"
 
-    def get_schedule(self, v: Variables) -> Optional['TaskSchedule']:
-        interval: int = v.environ(
-            MEMORYLAYER_BACKGROUND_CHAT_THREAD_CLEANUP_INTERVAL,
-            default=DEFAULT_CLEANUP_INTERVAL,
-            type_fn=int
-        )
+    def get_schedule(self, v: Variables) -> Optional["TaskSchedule"]:
+        interval: int = v.environ(MEMORYLAYER_BACKGROUND_CHAT_THREAD_CLEANUP_INTERVAL, default=DEFAULT_CLEANUP_INTERVAL, type_fn=int)
         return TaskSchedule(interval_seconds=interval, default_payload={})
 
     async def handle(self, v: Variables, payload: dict):

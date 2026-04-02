@@ -13,17 +13,19 @@ Enterprise implementations can extend this for:
 - RBAC integration
 - Gateway-injected identity headers (e.g. Aether auth-proxy)
 """
+
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import Request
 from pydantic import BaseModel
-from ...models.auth import AuthIdentity, RequestContext
+
 from ...config import (
-    MEMORYLAYER_AUTHENTICATION_SERVICE,
     DEFAULT_MEMORYLAYER_AUTHENTICATION_SERVICE,
+    MEMORYLAYER_AUTHENTICATION_SERVICE,
 )
+from ...models.auth import AuthIdentity, RequestContext
 
 if TYPE_CHECKING:
     from ...models.session import Session
@@ -55,11 +57,11 @@ class AuthenticationService(ABC):
     - Building RequestContext with resolved workspace
     """
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: logging.Logger | None = None):
         self.logger = logger or logging.getLogger(__name__)
 
     @abstractmethod
-    async def verify_api_key(self, api_key: Optional[str]) -> AuthIdentity:
+    async def verify_api_key(self, api_key: str | None) -> AuthIdentity:
         """
         Verify API key and return identity.
 
@@ -75,7 +77,7 @@ class AuthenticationService(ABC):
         pass
 
     @abstractmethod
-    async def resolve_session(self, session_id: Optional[str]) -> Optional["Session"]:
+    async def resolve_session(self, session_id: str | None) -> Optional["Session"]:
         """
         Resolve session from session ID.
 
@@ -90,7 +92,7 @@ class AuthenticationService(ABC):
     @abstractmethod
     async def resolve_workspace(
         self,
-        request_workspace_id: Optional[str],
+        request_workspace_id: str | None,
         session: Optional["Session"],
         tenant_id: str,
     ) -> str:
@@ -143,7 +145,7 @@ class AuthenticationService(ABC):
     async def build_context(
         self,
         request: Request,
-        body: Optional[BaseModel] = None,
+        body: BaseModel | None = None,
     ) -> RequestContext:
         """
         Build full RequestContext from request headers and body.
@@ -185,9 +187,7 @@ class AuthenticationService(ABC):
         # Implicit session creation: if session_id was provided but session
         # not found, and client explicitly provided a workspace, auto-create
         if session_id and session is None and request_workspace_id:
-            session = await self.ensure_session(
-                session_id, workspace_id, identity.tenant_id
-            )
+            session = await self.ensure_session(session_id, workspace_id, identity.tenant_id)
 
         self.logger.debug(
             "Built context: tenant=%s, workspace=%s, session=%s",
@@ -203,7 +203,7 @@ class AuthenticationService(ABC):
             session=session,
         )
 
-    def _extract_api_key(self, request: Request) -> Optional[str]:
+    def _extract_api_key(self, request: Request) -> str | None:
         """Extract API key from Authorization header."""
         auth_header = request.headers.get(HEADER_AUTHORIZATION)
         if not auth_header:

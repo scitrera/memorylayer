@@ -1,4 +1,4 @@
-from typing import Iterable
+from collections.abc import Iterable
 
 from fastapi.middleware.cors import CORSMiddleware
 from scitrera_app_framework import Variables as Variables
@@ -6,17 +6,17 @@ from scitrera_app_framework.api import Plugin, ext_parse_bool, ext_parse_csv
 
 from .fastapi import EXT_FASTAPI_SERVER
 
-MEMORYLAYER_SERVER_CORS_ALLOW_ORIGINS = 'MEMORYLAYER_SERVER_CORS_ALLOW_ORIGINS'
-MEMORYLAYER_SERVER_CORS_ALLOW_CREDENTIALS = 'MEMORYLAYER_SERVER_CORS_ALLOW_CREDENTIALS'
-MEMORYLAYER_SERVER_CORS_ALLOW_METHODS = 'MEMORYLAYER_SERVER_CORS_ALLOW_METHODS'
-MEMORYLAYER_SERVER_CORS_ALLOW_HEADERS = 'MEMORYLAYER_SERVER_CORS_ALLOW_HEADERS'
+MEMORYLAYER_SERVER_CORS_ALLOW_ORIGINS = "MEMORYLAYER_SERVER_CORS_ALLOW_ORIGINS"
+MEMORYLAYER_SERVER_CORS_ALLOW_CREDENTIALS = "MEMORYLAYER_SERVER_CORS_ALLOW_CREDENTIALS"
+MEMORYLAYER_SERVER_CORS_ALLOW_METHODS = "MEMORYLAYER_SERVER_CORS_ALLOW_METHODS"
+MEMORYLAYER_SERVER_CORS_ALLOW_HEADERS = "MEMORYLAYER_SERVER_CORS_ALLOW_HEADERS"
 
-DEFAULT_CORS_ALLOW_ORIGINS = ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000']
+DEFAULT_CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"]
 DEFAULT_CORS_ALLOW_CREDENTIALS = False
-DEFAULT_CORS_ALLOW_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-DEFAULT_CORS_ALLOW_HEADERS = ['Authorization', 'Content-Type', 'X-API-Key', 'X-Session-ID', 'X-Workspace-ID']
+DEFAULT_CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+DEFAULT_CORS_ALLOW_HEADERS = ["Authorization", "Content-Type", "X-API-Key", "X-Session-ID", "X-Workspace-ID"]
 
-EXT_CORS = 'memorylayer-server-fastapi-middleware-cors'
+EXT_CORS = "memorylayer-server-fastapi-middleware-cors"
 
 
 class CORSMiddlewarePlugin(Plugin):
@@ -30,14 +30,12 @@ class CORSMiddlewarePlugin(Plugin):
     def initialize(self, v, logger) -> object | None:
         app = self.get_extension(EXT_FASTAPI_SERVER, v)
 
-        allow_origins = v.environ(MEMORYLAYER_SERVER_CORS_ALLOW_ORIGINS,
-                                  default=DEFAULT_CORS_ALLOW_ORIGINS, type_fn=ext_parse_csv)
-        allow_credentials = v.environ(MEMORYLAYER_SERVER_CORS_ALLOW_CREDENTIALS,
-                                      default=DEFAULT_CORS_ALLOW_CREDENTIALS, type_fn=ext_parse_bool)
-        allow_methods = v.environ(MEMORYLAYER_SERVER_CORS_ALLOW_METHODS,
-                                  default=DEFAULT_CORS_ALLOW_METHODS, type_fn=ext_parse_csv)
-        allow_headers = v.environ(MEMORYLAYER_SERVER_CORS_ALLOW_HEADERS,
-                                  default=DEFAULT_CORS_ALLOW_HEADERS, type_fn=ext_parse_csv)
+        allow_origins = v.environ(MEMORYLAYER_SERVER_CORS_ALLOW_ORIGINS, default=DEFAULT_CORS_ALLOW_ORIGINS, type_fn=ext_parse_csv)
+        allow_credentials = v.environ(
+            MEMORYLAYER_SERVER_CORS_ALLOW_CREDENTIALS, default=DEFAULT_CORS_ALLOW_CREDENTIALS, type_fn=ext_parse_bool
+        )
+        allow_methods = v.environ(MEMORYLAYER_SERVER_CORS_ALLOW_METHODS, default=DEFAULT_CORS_ALLOW_METHODS, type_fn=ext_parse_csv)
+        allow_headers = v.environ(MEMORYLAYER_SERVER_CORS_ALLOW_HEADERS, default=DEFAULT_CORS_ALLOW_HEADERS, type_fn=ext_parse_csv)
 
         app.add_middleware(
             CORSMiddleware,

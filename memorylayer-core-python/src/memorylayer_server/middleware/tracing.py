@@ -1,23 +1,25 @@
 """OpenTelemetry tracing middleware — active only when opentelemetry-api is installed."""
-from typing import Iterable
+
+from collections.abc import Iterable
 
 from fastapi import Request
+from scitrera_app_framework import Variables
+from scitrera_app_framework.api import Plugin
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
-from scitrera_app_framework import Variables, get_logger
-from scitrera_app_framework.api import Plugin
 
 from ..lifecycle.fastapi import EXT_FASTAPI_SERVER
 
 try:
     from opentelemetry import trace
-    from opentelemetry.trace import StatusCode
     from opentelemetry.propagate import extract, inject
+    from opentelemetry.trace import StatusCode
+
     HAS_OTEL = True
 except ImportError:
     HAS_OTEL = False
 
-EXT_TRACING_MIDDLEWARE = 'memorylayer-server-fastapi-middleware-tracing'
+EXT_TRACING_MIDDLEWARE = "memorylayer-server-fastapi-middleware-tracing"
 
 
 class TracingMiddleware(BaseHTTPMiddleware):

@@ -1,13 +1,11 @@
 import hashlib
 import math
 import random
-
 from logging import Logger
 
-from scitrera_app_framework import Variables as Variables, get_logger
+from scitrera_app_framework import Variables as Variables
 
-from ...config import EmbeddingProviderType, MEMORYLAYER_EMBEDDING_DIMENSIONS
-
+from ...config import MEMORYLAYER_EMBEDDING_DIMENSIONS, EmbeddingProviderType
 from .base import EmbeddingProvider, EmbeddingProviderPluginBase
 
 DEFAULT_EMBEDDING_DIMENSIONS = 384
@@ -58,6 +56,5 @@ class MockEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
 
     def initialize(self, v: Variables, logger: Logger) -> MockEmbeddingProvider:
         return MockEmbeddingProvider(
-            v=v,
-            dimensions=v.environ(MEMORYLAYER_EMBEDDING_DIMENSIONS, default=DEFAULT_EMBEDDING_DIMENSIONS, type_fn=int)
+            v=v, dimensions=v.environ(MEMORYLAYER_EMBEDDING_DIMENSIONS, default=DEFAULT_EMBEDDING_DIMENSIONS, type_fn=int)
         )

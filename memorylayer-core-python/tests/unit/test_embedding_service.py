@@ -1,5 +1,7 @@
 """Unit tests for EmbeddingService."""
+
 import pytest
+
 from memorylayer_server.services.embedding import EmbeddingService
 
 # Mock provider default dimensions

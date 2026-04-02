@@ -1,15 +1,16 @@
 """Factory for generating service plugin base classes with common boilerplate."""
+
 from scitrera_app_framework import Plugin, Variables
 from scitrera_app_framework.api import enabled_option_pattern
 
 
 def make_service_plugin_base(
-        *,
-        ext_name: str,
-        config_key: str,
-        default_value: str,
-        dependencies: tuple[str, ...] = (),
-        extra_defaults: dict | None = None,
+    *,
+    ext_name: str,
+    config_key: str,
+    default_value: str,
+    dependencies: tuple[str, ...] = (),
+    extra_defaults: dict | None = None,
 ) -> type[Plugin]:
     """Create a PluginBase class with standard service plugin boilerplate.
 
@@ -46,7 +47,7 @@ def make_service_plugin_base(
             return ext_name
 
         def is_enabled(self, v: Variables) -> bool:
-            return enabled_option_pattern(self, v, config_key, self_attr='PROVIDER_NAME')
+            return enabled_option_pattern(self, v, config_key, self_attr="PROVIDER_NAME")
 
         def on_registration(self, v: Variables) -> None:
             v.set_default_value(config_key, default_value)

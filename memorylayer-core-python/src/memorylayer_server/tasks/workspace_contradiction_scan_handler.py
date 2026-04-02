@@ -1,11 +1,11 @@
 """Workspace contradiction scan task handler — daily scheduled scan."""
+
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ..services.contradiction import ContradictionService, EXT_CONTRADICTION_SERVICE
+from ..services.contradiction import EXT_CONTRADICTION_SERVICE, ContradictionService
 from ..services.storage import EXT_STORAGE_BACKEND
 from ..services.storage.base import StorageBackend
 from ..services.tasks import TaskHandlerPlugin, TaskSchedule
@@ -21,22 +21,20 @@ class WorkspaceContradictionScanHandler(TaskHandlerPlugin):
     """
 
     def get_task_type(self) -> str:
-        return 'workspace_contradiction_scan'
+        return "workspace_contradiction_scan"
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         return TaskSchedule(
             interval_seconds=86400,  # Once per day
             default_payload={},
         )
 
     async def handle(self, v: Variables, payload: dict) -> None:
-        contradiction_service: ContradictionService = self.get_extension(
-            EXT_CONTRADICTION_SERVICE, v
-        )
+        contradiction_service: ContradictionService = self.get_extension(EXT_CONTRADICTION_SERVICE, v)
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
         logger: Logger = get_logger(v, name=self.get_task_type())
 
-        workspace_id = payload.get('workspace_id')
+        workspace_id = payload.get("workspace_id")
 
         if workspace_id:
             # Single-workspace scan (e.g., triggered on-demand with a specific workspace)
@@ -44,7 +42,8 @@ class WorkspaceContradictionScanHandler(TaskHandlerPlugin):
             records = await contradiction_service.scan_workspace(workspace_id)
             logger.info(
                 "Contradiction scan complete for workspace %s: %d new contradiction(s) found",
-                workspace_id, len(records),
+                workspace_id,
+                len(records),
             )
         else:
             # Scan all workspaces
@@ -58,16 +57,19 @@ class WorkspaceContradictionScanHandler(TaskHandlerPlugin):
                     if records:
                         logger.info(
                             "Workspace %s: %d new contradiction(s) found",
-                            workspace.id, len(records),
+                            workspace.id,
+                            len(records),
                         )
                     else:
                         logger.debug("Workspace %s: no new contradictions found", workspace.id)
                 except Exception as exc:
                     logger.error(
                         "Contradiction scan failed for workspace %s: %s",
-                        workspace.id, exc,
+                        workspace.id,
+                        exc,
                     )
             logger.info(
                 "Contradiction scan complete: %d workspace(s) scanned, %d total contradiction(s) found",
-                len(workspaces), total_found,
+                len(workspaces),
+                total_found,
             )

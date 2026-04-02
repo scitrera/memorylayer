@@ -1,12 +1,12 @@
 """
 Unit tests for the metrics service — NoopMetricsService and PrometheusMetricsService.
 """
+
 import time
 
 import pytest
 
 from memorylayer_server.services.metrics.noop import NoopMetricsService
-
 
 # ============================================================================
 # NoopMetricsService tests
@@ -112,6 +112,7 @@ class TestNoopMetricsService:
 def _prometheus_available() -> bool:
     try:
         import prometheus_client  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -131,49 +132,43 @@ class TestPrometheusMetricsService:
     def _make_service(self):
         """Return a PrometheusMetricsService backed by a fresh registry."""
         import prometheus_client
+
         from memorylayer_server.services.metrics.prometheus import PrometheusMetricsService
 
         registry = prometheus_client.CollectorRegistry()
 
         service = PrometheusMetricsService.__new__(PrometheusMetricsService)
         import threading
+
         service._lock = threading.Lock()
         service._counters = {}
         service._histograms = {}
         service._gauges = {}
         # Monkey-patch _get_* to use the isolated registry
-        original_get_counter = PrometheusMetricsService._get_counter
-        original_get_histogram = PrometheusMetricsService._get_histogram
-        original_get_gauge = PrometheusMetricsService._get_gauge
 
         def _get_counter(self, name, label_names):
             if name not in self._counters:
                 with self._lock:
                     if name not in self._counters:
-                        self._counters[name] = prometheus_client.Counter(
-                            name, name, list(label_names), registry=registry
-                        )
+                        self._counters[name] = prometheus_client.Counter(name, name, list(label_names), registry=registry)
             return self._counters[name]
 
         def _get_histogram(self, name, label_names):
             if name not in self._histograms:
                 with self._lock:
                     if name not in self._histograms:
-                        self._histograms[name] = prometheus_client.Histogram(
-                            name, name, list(label_names), registry=registry
-                        )
+                        self._histograms[name] = prometheus_client.Histogram(name, name, list(label_names), registry=registry)
             return self._histograms[name]
 
         def _get_gauge(self, name, label_names):
             if name not in self._gauges:
                 with self._lock:
                     if name not in self._gauges:
-                        self._gauges[name] = prometheus_client.Gauge(
-                            name, name, list(label_names), registry=registry
-                        )
+                        self._gauges[name] = prometheus_client.Gauge(name, name, list(label_names), registry=registry)
             return self._gauges[name]
 
         import types
+
         service._get_counter = types.MethodType(_get_counter, service)
         service._get_histogram = types.MethodType(_get_histogram, service)
         service._get_gauge = types.MethodType(_get_gauge, service)
@@ -182,9 +177,9 @@ class TestPrometheusMetricsService:
 
     def test_instantiation_succeeds_when_prometheus_client_available(self):
         """PrometheusMetricsService can be instantiated when prometheus_client is present."""
-        from memorylayer_server.services.metrics.prometheus import PrometheusMetricsService
         import prometheus_client
-        registry = prometheus_client.CollectorRegistry()
+
+        prometheus_client.CollectorRegistry()
         # Use _make_service to avoid global registry pollution
         service = self._make_service()
         assert service is not None

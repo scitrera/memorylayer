@@ -1,6 +1,6 @@
 """Example usage of synchronous MemoryLayer client."""
 
-from memorylayer import SyncMemoryLayerClient, sync_client, MemoryType, MemorySubtype
+from memorylayer import MemorySubtype, MemoryType, SyncMemoryLayerClient, sync_client
 
 
 def example_with_context_manager():

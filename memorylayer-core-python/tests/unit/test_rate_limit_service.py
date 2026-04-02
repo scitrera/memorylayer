@@ -1,13 +1,13 @@
 """
 Unit tests for the rate limit service — RateLimitResult dataclass and NoopRateLimitService.
 """
+
 import time
 
 import pytest
 
 from memorylayer_server.services.rate_limit.base import RateLimitResult
 from memorylayer_server.services.rate_limit.noop import NoopRateLimitService
-
 
 # ============================================================================
 # RateLimitResult dataclass tests

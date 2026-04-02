@@ -15,38 +15,36 @@ Endpoints:
 import logging
 import time as _time
 
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from scitrera_app_framework import Plugin, Variables, get_extension
 
-from .. import EXT_MULTI_API_ROUTERS
 from ...lifecycle.fastapi import get_logger, get_variables_dep
-from ...models.memory import RememberInput, RecallInput, ReflectInput
-from ...models.auth import RequestContext
-from ...services.memory import MemoryService
-from ...services.reflect import ReflectService, EXT_REFLECT_SERVICE
-from ...services.authentication import AuthenticationService, AuthenticationError
+from ...models.memory import RecallInput, ReflectInput, RememberInput
+from ...services.audit import AuditEvent, AuditService
+from ...services.authentication import AuthenticationError, AuthenticationService
 from ...services.authorization import AuthorizationService
-
+from ...services.memory import MemoryService
+from ...services.metrics import MetricsService
+from ...services.reflect import EXT_REFLECT_SERVICE, ReflectService
+from .. import EXT_MULTI_API_ROUTERS
+from .deps import get_active_session, get_audit_service, get_auth_service, get_authz_service, get_memory_service, get_metrics_service
 from .schemas import (
-    MemoryCreateRequest,
-    MemoryUpdateRequest,
-    MemoryRecallRequest,
-    MemoryReflectRequest,
-    MemoryDecayRequest,
-    MemoryBatchRequest,
     BatchCreateOp,
-    BatchUpdateOp,
     BatchDeleteOp,
-    MemoryResponse,
-    RecallResult,
-    ReflectResult,
-    ErrorResponse,
     BatchOperationResponse,
     BatchOperationResult,
+    BatchUpdateOp,
+    ErrorResponse,
+    MemoryBatchRequest,
+    MemoryCreateRequest,
+    MemoryDecayRequest,
+    MemoryRecallRequest,
+    MemoryReflectRequest,
+    MemoryResponse,
+    MemoryUpdateRequest,
+    RecallResult,
+    ReflectResult,
 )
-from .deps import get_active_session, get_auth_service, get_authz_service, get_memory_service, get_audit_service, get_metrics_service
-from ...services.audit import AuditService, AuditEvent
-from ...services.metrics import MetricsService
 
 router = APIRouter(prefix="/v1/memories", tags=["memories"])
 
@@ -135,19 +133,23 @@ async def create_memory(
         logger.info("Created memory: %s", memory.id)
         try:
             metrics_service.counter("memorylayer_remember_total", labels={"workspace": ctx.workspace_id})
-            metrics_service.histogram("memorylayer_remember_duration_seconds", _time.monotonic() - _t0, labels={"workspace": ctx.workspace_id})
+            metrics_service.histogram(
+                "memorylayer_remember_duration_seconds", _time.monotonic() - _t0, labels={"workspace": ctx.workspace_id}
+            )
         except Exception:
             logger.debug("Metrics recording failed for memory create")
         try:
-            await audit_service.record(AuditEvent(
-                event_type="memory",
-                action="create",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="memory",
-                resource_id=memory.id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="create",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                    resource_id=memory.id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for memory create")
         return MemoryResponse(memory=memory)
@@ -212,15 +214,17 @@ async def get_memory(
         await authz_service.require_authorization(ctx, "memories", "read", resource_id=memory_id, workspace_id=memory.workspace_id)
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="memory",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=memory.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="memory",
-                resource_id=memory_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=memory.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                    resource_id=memory_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for memory read")
         return MemoryResponse(memory=memory)
@@ -280,7 +284,9 @@ async def update_memory(
         if not existing_memory:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
 
-        await authz_service.require_authorization(ctx, "memories", "write", resource_id=memory_id, workspace_id=existing_memory.workspace_id)
+        await authz_service.require_authorization(
+            ctx, "memories", "write", resource_id=memory_id, workspace_id=existing_memory.workspace_id
+        )
 
         # Build update kwargs from non-None fields
         update_kwargs = {}
@@ -307,15 +313,17 @@ async def update_memory(
 
         logger.info("Updated memory: %s", memory_id)
         try:
-            await audit_service.record(AuditEvent(
-                event_type="memory",
-                action="update",
-                tenant_id=ctx.tenant_id,
-                workspace_id=existing_memory.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="memory",
-                resource_id=memory_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="update",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=existing_memory.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                    resource_id=memory_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for memory update")
         return MemoryResponse(memory=updated_memory)
@@ -386,15 +394,17 @@ async def delete_memory(
         except Exception:
             logger.debug("Metrics recording failed for memory delete")
         try:
-            await audit_service.record(AuditEvent(
-                event_type="memory",
-                action="delete",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="memory",
-                resource_id=memory_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="delete",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                    resource_id=memory_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for memory delete")
 
@@ -490,20 +500,28 @@ async def recall_memories(
 
         try:
             metrics_service.counter("memorylayer_recall_total", labels={"workspace": ctx.workspace_id, "mode": request.mode or "default"})
-            metrics_service.histogram("memorylayer_recall_duration_seconds", _time.monotonic() - _t0, labels={"workspace": ctx.workspace_id})
-            metrics_service.histogram("memorylayer_recall_result_count", len(result.memories) if hasattr(result, "memories") else 0, labels={"workspace": ctx.workspace_id})
+            metrics_service.histogram(
+                "memorylayer_recall_duration_seconds", _time.monotonic() - _t0, labels={"workspace": ctx.workspace_id}
+            )
+            metrics_service.histogram(
+                "memorylayer_recall_result_count",
+                len(result.memories) if hasattr(result, "memories") else 0,
+                labels={"workspace": ctx.workspace_id},
+            )
         except Exception:
             logger.debug("Metrics recording failed for memory recall")
         try:
-            await audit_service.record(AuditEvent(
-                event_type="memory",
-                action="recall",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="memory",
-                metadata={"query_length": len(request.query), "mode": request.mode},
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="recall",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                    metadata={"query_length": len(request.query), "mode": request.mode},
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for memory recall")
         return result
@@ -592,14 +610,16 @@ async def reflect_memories(
         logger.info("Reflected on %d source memories, generated %d tokens", len(result.source_memories), result.tokens_processed)
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="memory",
-                action="reflect",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="memory",
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="reflect",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for memory reflect")
         return result
@@ -789,9 +809,7 @@ async def batch_operations(
                         update_kwargs["pinned"] = 1 if operation.pinned else 0
 
                     # Update memory via service layer
-                    updated = await memory_service.update(
-                        workspace_id=ctx.workspace_id, memory_id=memory_id, **update_kwargs
-                    )
+                    updated = await memory_service.update(workspace_id=ctx.workspace_id, memory_id=memory_id, **update_kwargs)
 
                     results.append(
                         BatchOperationResult(
@@ -842,15 +860,17 @@ async def batch_operations(
         logger.info("Completed batch operations: %d successful, %d failed", successful, failed)
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="memory",
-                action="batch",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="memory",
-                metadata={"operation_count": len(request.operations)},
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="batch",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                    metadata={"operation_count": len(request.operations)},
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for memory batch")
         return BatchOperationResponse(

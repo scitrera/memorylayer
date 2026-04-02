@@ -4,35 +4,30 @@ Default Deduplication Service implementation.
 Prevents duplicate memories during session extraction and manual remember operations.
 Uses content hashing for exact matches and embedding similarity for semantic matches.
 """
-from typing import Optional
+
 from logging import Logger
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from ..embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
+from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from .base import (
-    DeduplicationService,
-    DeduplicationServicePluginBase,
+    DEFAULT_MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD,
+    DEFAULT_MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD,
+    MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD,
+    MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD,
     DeduplicationAction,
     DeduplicationResult,
-    MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD,
-    DEFAULT_MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD,
-    MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD,
-    DEFAULT_MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD,
+    DeduplicationService,
+    DeduplicationServicePluginBase,
 )
 
 
 class DefaultDeduplicationService(DeduplicationService):
     """Default deduplication service implementation."""
 
-    def __init__(
-        self,
-        storage: StorageBackend,
-        embedding_service: EmbeddingService,
-        v: Variables = None
-    ):
+    def __init__(self, storage: StorageBackend, embedding_service: EmbeddingService, v: Variables = None):
         """
         Initialize deduplication service.
 
@@ -47,26 +42,17 @@ class DefaultDeduplicationService(DeduplicationService):
 
         # Get thresholds from config with defaults
         self.similarity_threshold = v.get(
-            MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD,
-            DEFAULT_MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD
+            MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD, DEFAULT_MEMORYLAYER_DEDUPLICATION_DUPLICATE_THRESHOLD
         )
-        self.merge_threshold = v.get(
-            MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD,
-            DEFAULT_MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD
-        )
+        self.merge_threshold = v.get(MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD, DEFAULT_MEMORYLAYER_DEDUPLICATION_MERGE_THRESHOLD)
 
         self.logger.info(
             "Initialized DefaultDeduplicationService with thresholds: similarity=%.2f, merge=%.2f",
-            self.similarity_threshold, self.merge_threshold
+            self.similarity_threshold,
+            self.merge_threshold,
         )
 
-    async def check_duplicate(
-        self,
-        content: str,
-        content_hash: str,
-        embedding: list[float],
-        workspace_id: str
-    ) -> DeduplicationResult:
+    async def check_duplicate(self, content: str, content_hash: str, embedding: list[float], workspace_id: str) -> DeduplicationResult:
         """
         Check if a memory is a duplicate.
 
@@ -90,57 +76,38 @@ class DefaultDeduplicationService(DeduplicationService):
         if existing:
             self.logger.debug("Found exact duplicate: %s", existing.id)
             return DeduplicationResult(
-                action=DeduplicationAction.SKIP,
-                existing_memory_id=existing.id,
-                similarity_score=1.0,
-                reason="Exact content duplicate"
+                action=DeduplicationAction.SKIP, existing_memory_id=existing.id, similarity_score=1.0, reason="Exact content duplicate"
             )
 
         # 2. Check embedding similarity
         similar_memories = await self.storage.search_memories(
-            workspace_id=workspace_id,
-            query_embedding=embedding,
-            limit=5,
-            min_relevance=self.merge_threshold
+            workspace_id=workspace_id, query_embedding=embedding, limit=5, min_relevance=self.merge_threshold
         )
 
         if similar_memories:
             top_match, top_score = similar_memories[0]
 
             if top_score >= self.similarity_threshold:
-                self.logger.debug(
-                    "Found semantic duplicate: %s (similarity: %.3f)",
-                    top_match.id, top_score
-                )
+                self.logger.debug("Found semantic duplicate: %s (similarity: %.3f)", top_match.id, top_score)
                 return DeduplicationResult(
                     action=DeduplicationAction.UPDATE,
                     existing_memory_id=top_match.id,
                     similarity_score=top_score,
-                    reason=f"Semantic duplicate (similarity: {top_score:.3f})"
+                    reason=f"Semantic duplicate (similarity: {top_score:.3f})",
                 )
             elif top_score >= self.merge_threshold:
-                self.logger.debug(
-                    "Found merge candidate: %s (similarity: %.3f)",
-                    top_match.id, top_score
-                )
+                self.logger.debug("Found merge candidate: %s (similarity: %.3f)", top_match.id, top_score)
                 return DeduplicationResult(
                     action=DeduplicationAction.MERGE,
                     existing_memory_id=top_match.id,
                     similarity_score=top_score,
-                    reason=f"Potential merge candidate (similarity: {top_score:.3f})"
+                    reason=f"Potential merge candidate (similarity: {top_score:.3f})",
                 )
 
         # 3. No duplicates found
-        return DeduplicationResult(
-            action=DeduplicationAction.CREATE,
-            reason="New unique memory"
-        )
+        return DeduplicationResult(action=DeduplicationAction.CREATE, reason="New unique memory")
 
-    async def deduplicate_batch(
-        self,
-        candidates: list[tuple[str, str, list[float]]],
-        workspace_id: str
-    ) -> list[DeduplicationResult]:
+    async def deduplicate_batch(self, candidates: list[tuple[str, str, list[float]]], workspace_id: str) -> list[DeduplicationResult]:
         """
         Check multiple memories for duplicates.
 
@@ -153,9 +120,7 @@ class DefaultDeduplicationService(DeduplicationService):
         """
         results = []
         for content, content_hash, embedding in candidates:
-            result = await self.check_duplicate(
-                content, content_hash, embedding, workspace_id
-            )
+            result = await self.check_duplicate(content, content_hash, embedding, workspace_id)
             results.append(result)
 
         self.logger.info(
@@ -172,13 +137,10 @@ class DefaultDeduplicationService(DeduplicationService):
 
 class DefaultDeduplicationServicePlugin(DeduplicationServicePluginBase):
     """Default deduplication service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> DeduplicationService:
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
         embedding_service: EmbeddingService = self.get_extension(EXT_EMBEDDING_SERVICE, v)
-        return DefaultDeduplicationService(
-            storage=storage,
-            embedding_service=embedding_service,
-            v=v
-        )
+        return DefaultDeduplicationService(storage=storage, embedding_service=embedding_service, v=v)

@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional
 
 
 class LLMRole(str, Enum):
     """Message role in conversation."""
+
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -13,6 +13,7 @@ class LLMRole(str, Enum):
 @dataclass
 class LLMMessage:
     """Single message in conversation."""
+
     role: LLMRole
     content: str
 
@@ -28,18 +29,20 @@ class LLMRequest:
 
     ``max_tokens`` resolution: explicit value wins, else ``provider.default_max_tokens``.
     """
-    messages: List[LLMMessage]
-    model: Optional[str] = None
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    temperature_factor: Optional[float] = None
-    stop: Optional[List[str]] = None
+
+    messages: list[LLMMessage]
+    model: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
+    temperature_factor: float | None = None
+    stop: list[str] | None = None
     stream: bool = False
 
 
 @dataclass
 class LLMResponse:
     """Response from LLM provider."""
+
     content: str
     model: str
     prompt_tokens: int
@@ -51,6 +54,7 @@ class LLMResponse:
 @dataclass
 class LLMStreamChunk:
     """Streaming response chunk."""
+
     content: str
     is_final: bool = False
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None

@@ -6,14 +6,12 @@ This is a fallback when dedicated reranker models are unavailable.
 """
 
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import Variables, get_extension
 
 from ....config import RerankerProviderType
-from ..base import RerankerProvider, RerankerProviderPluginBase
 from ...llm import EXT_LLM_SERVICE
-
+from ..base import RerankerProvider, RerankerProviderPluginBase
 
 RERANK_PROMPT_TEMPLATE = """You are a relevance scoring assistant. Score how relevant each document is to the given query.
 
@@ -54,7 +52,7 @@ class LLMRerankerProvider(RerankerProvider):
         self,
         query: str,
         documents: list[str],
-        instruction: Optional[str] = None,
+        instruction: str | None = None,
     ) -> list[float]:
         """
         Score documents by relevance to query using LLM.
@@ -73,10 +71,7 @@ class LLMRerankerProvider(RerankerProvider):
         self.logger.debug("LLM reranking %d documents", len(documents))
 
         # Format documents for prompt
-        docs_text = "\n".join(
-            f"[{i+1}] {doc[:500]}{'...' if len(doc) > 500 else ''}"
-            for i, doc in enumerate(documents)
-        )
+        docs_text = "\n".join(f"[{i + 1}] {doc[:500]}{'...' if len(doc) > 500 else ''}" for i, doc in enumerate(documents))
 
         # Build query with optional instruction
         full_query = query
@@ -96,7 +91,7 @@ class LLMRerankerProvider(RerankerProvider):
             import re
 
             # Extract JSON array from response
-            match = re.search(r'\[[\d.,\s]+\]', response)
+            match = re.search(r"\[[\d.,\s]+\]", response)
             if match:
                 scores = json.loads(match.group())
                 # Ensure we have the right number of scores

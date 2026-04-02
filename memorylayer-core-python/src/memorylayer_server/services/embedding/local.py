@@ -1,12 +1,11 @@
 from logging import Logger
-from typing import Optional
 
-from scitrera_app_framework import Variables as Variables, get_logger
+from scitrera_app_framework import Variables as Variables
 
-from .base import EmbeddingProvider, EmbeddingProviderPluginBase
 from ...config import MEMORYLAYER_EMBEDDING_MODEL, EmbeddingProviderType
+from .base import EmbeddingProvider, EmbeddingProviderPluginBase
 
-DEFAULT_EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
+DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
 class LocalEmbeddingProvider(EmbeddingProvider):
@@ -27,6 +26,7 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         """Lazy load the model."""
         if self._model is None:
             from sentence_transformers import SentenceTransformer
+
             self.logger.info("Loading sentence-transformers model: %s", self.model_name)
             self._model = SentenceTransformer(self.model_name)
         return self._model

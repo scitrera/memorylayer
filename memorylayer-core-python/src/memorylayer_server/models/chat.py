@@ -5,8 +5,9 @@ Chat threads provide persistent, append-only conversation storage scoped to
 workspace / user / thread. Messages accumulate over time and are periodically
 decomposed into long-term memories via background tasks.
 """
-from datetime import datetime, timezone
-from typing import Any, Optional, Union
+
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -15,8 +16,8 @@ class ChatMessageContent(BaseModel):
     """Structured content block within a chat message (tool calls, images, etc.)."""
 
     type: str = Field(..., description="Content block type: text, tool_call, tool_result, image, etc.")
-    text: Optional[str] = Field(None, description="Text content (for type=text)")
-    data: Optional[dict[str, Any]] = Field(None, description="Structured data (tool args, image ref, etc.)")
+    text: str | None = Field(None, description="Text content (for type=text)")
+    data: dict[str, Any] | None = Field(None, description="Structured data (tool args, image ref, etc.)")
 
 
 class ChatMessage(BaseModel):
@@ -28,12 +29,10 @@ class ChatMessage(BaseModel):
     thread_id: str = Field(..., description="Parent thread ID")
     message_index: int = Field(..., description="Sequential index within the thread (0-based)")
     role: str = Field(..., description="Message role: user, assistant, system, tool")
-    content: Union[str, list[ChatMessageContent]] = Field(
-        ..., description="Message content — plain string or structured blocks"
-    )
+    content: str | list[ChatMessageContent] = Field(..., description="Message content — plain string or structured blocks")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Creation timestamp",
     )
 
@@ -55,30 +54,30 @@ class ChatThread(BaseModel):
     id: str = Field(..., description="Thread ID (client-provided or auto-generated)")
     workspace_id: str = Field(..., description="Workspace boundary")
     tenant_id: str = Field("_default", description="Tenant")
-    user_id: Optional[str] = Field(None, description="User who owns this conversation")
+    user_id: str | None = Field(None, description="User who owns this conversation")
     context_id: str = Field("_default", description="Context within the workspace")
 
     # Entity attribution (for persona tracking / inference)
-    observer_id: Optional[str] = Field(None, description="Entity doing the observing (typically the AI agent)")
-    subject_id: Optional[str] = Field(None, description="Entity being observed (typically the human user)")
+    observer_id: str | None = Field(None, description="Entity doing the observing (typically the AI agent)")
+    subject_id: str | None = Field(None, description="Entity being observed (typically the human user)")
 
     # Display
-    title: Optional[str] = Field(None, description="Optional display title")
+    title: str | None = Field(None, description="Optional display title")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
 
     # Counters and watermarks
     message_count: int = Field(0, description="Total messages in thread")
-    last_decomposed_at: Optional[datetime] = Field(None, description="When decomposition last ran")
+    last_decomposed_at: datetime | None = Field(None, description="When decomposition last ran")
     last_decomposed_index: int = Field(0, description="Message index watermark for decomposition")
 
     # Lifecycle
-    expires_at: Optional[datetime] = Field(None, description="Optional expiration (None = permanent)")
+    expires_at: datetime | None = Field(None, description="Optional expiration (None = permanent)")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Creation timestamp",
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Last update timestamp",
     )
 
@@ -86,7 +85,7 @@ class ChatThread(BaseModel):
     def is_expired(self) -> bool:
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc) > self.expires_at
+        return datetime.now(UTC) > self.expires_at
 
     @property
     def unprocessed_count(self) -> int:
@@ -103,17 +102,18 @@ class ChatThreadWithMessages(BaseModel):
 
 # Input models (for service layer — no IDs, no timestamps)
 
+
 class CreateThreadInput(BaseModel):
     """Input for creating a new chat thread."""
 
-    thread_id: Optional[str] = Field(None, description="Client-provided thread ID (auto-generated if omitted)")
-    user_id: Optional[str] = Field(None, description="User scope")
+    thread_id: str | None = Field(None, description="Client-provided thread ID (auto-generated if omitted)")
+    user_id: str | None = Field(None, description="User scope")
     context_id: str = Field("_default", description="Context within workspace")
-    observer_id: Optional[str] = Field(None, description="Observer entity ID")
-    subject_id: Optional[str] = Field(None, description="Subject entity ID")
-    title: Optional[str] = Field(None, description="Display title")
+    observer_id: str | None = Field(None, description="Observer entity ID")
+    subject_id: str | None = Field(None, description="Subject entity ID")
+    title: str | None = Field(None, description="Display title")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Metadata")
-    expires_at: Optional[datetime] = Field(None, description="Optional expiration")
+    expires_at: datetime | None = Field(None, description="Optional expiration")
 
 
 class AppendMessagesInput(BaseModel):
@@ -126,9 +126,7 @@ class MessageInput(BaseModel):
     """A single message to append (no ID or index — assigned by the service)."""
 
     role: str = Field(..., description="Message role: user, assistant, system, tool")
-    content: Union[str, list[ChatMessageContent]] = Field(
-        ..., description="Message content"
-    )
+    content: str | list[ChatMessageContent] = Field(..., description="Message content")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Metadata")
 
     @field_validator("role")

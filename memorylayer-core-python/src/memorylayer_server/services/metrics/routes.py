@@ -1,4 +1,5 @@
 """Prometheus /metrics endpoint - only active when metrics service is 'prometheus'."""
+
 import logging
 
 from fastapi import APIRouter
@@ -19,12 +20,9 @@ router = APIRouter(tags=["metrics"])
 async def prometheus_metrics() -> Response:
     """Expose Prometheus metrics in the standard text exposition format."""
     try:
-        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
     except ImportError as exc:
-        raise RuntimeError(
-            "prometheus_client is required to serve /metrics. "
-            "Install it with: pip install prometheus_client"
-        ) from exc
+        raise RuntimeError("prometheus_client is required to serve /metrics. Install it with: pip install prometheus_client") from exc
 
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
@@ -37,8 +35,8 @@ class PrometheusMetricsRoutePlugin(Plugin):
         return EXT_MULTI_API_ROUTERS
 
     def is_enabled(self, v: Variables) -> bool:
-        provider = v.environ(MEMORYLAYER_METRICS_SERVICE, default='noop')
-        return provider == 'prometheus'
+        provider = v.environ(MEMORYLAYER_METRICS_SERVICE, default="noop")
+        return provider == "prometheus"
 
     def is_multi_extension(self, v: Variables) -> bool:
         return True

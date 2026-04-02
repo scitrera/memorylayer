@@ -3,14 +3,14 @@
 The context environment service provides sandboxed Python execution
 environments tied to sessions, with access to memory recall and LLM queries.
 """
+
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from ...config import (
-    MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
     DEFAULT_MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
+    MEMORYLAYER_CONTEXT_ENVIRONMENT_SERVICE,
 )
-
 from .._constants import EXT_CONTEXT_ENVIRONMENT_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
@@ -27,7 +27,7 @@ class ContextEnvironmentService(ABC):
         self,
         session_id: str,
         code: str,
-        result_var: Optional[str] = None,
+        result_var: str | None = None,
         return_result: bool = True,
         max_return_chars: int = 10_000,
     ) -> dict:
@@ -49,7 +49,7 @@ class ContextEnvironmentService(ABC):
     async def inspect(
         self,
         session_id: str,
-        variable: Optional[str] = None,
+        variable: str | None = None,
         preview_chars: int = 200,
     ) -> dict:
         """Inspect sandbox state or a specific variable.
@@ -71,9 +71,9 @@ class ContextEnvironmentService(ABC):
         var: str,
         query: str,
         limit: int = 50,
-        types: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None,
-        min_relevance: Optional[float] = None,
+        types: list[str] | None = None,
+        tags: list[str] | None = None,
+        min_relevance: float | None = None,
         include_embeddings: bool = False,
     ) -> dict:
         """Load memories into the sandbox as a variable.
@@ -123,8 +123,8 @@ class ContextEnvironmentService(ABC):
         session_id: str,
         prompt: str,
         variables: list[str],
-        max_context_chars: Optional[int] = None,
-        result_var: Optional[str] = None,
+        max_context_chars: int | None = None,
+        result_var: str | None = None,
     ) -> dict:
         """Send sandbox variables and a prompt to the LLM.
 
@@ -145,11 +145,11 @@ class ContextEnvironmentService(ABC):
         self,
         session_id: str,
         goal: str,
-        memory_query: Optional[str] = None,
+        memory_query: str | None = None,
         memory_limit: int = 100,
         max_iterations: int = 10,
-        variables: Optional[list[str]] = None,
-        result_var: Optional[str] = None,
+        variables: list[str] | None = None,
+        result_var: str | None = None,
         detail_level: str = "standard",
     ) -> dict:
         """Run a Recursive Language Model (RLM) loop.

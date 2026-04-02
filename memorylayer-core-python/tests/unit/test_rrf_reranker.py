@@ -6,21 +6,18 @@ import pytest
 from scitrera_app_framework import Variables
 
 from memorylayer_server.config import RerankerProviderType
+from memorylayer_server.services.embedding import EXT_EMBEDDING_SERVICE
 from memorylayer_server.services.reranker.rrf.provider import (
     RRFRerankerProvider,
     RRFRerankerProviderPlugin,
-    decompose_query,
-    compute_rrf_scores,
     _extract_keywords,
     _split_sentences,
-    DEFAULT_RRF_K,
-    DEFAULT_RRF_MIN_QUERIES,
-    MEMORYLAYER_RERANKER_RRF_K,
+    compute_rrf_scores,
+    decompose_query,
 )
-from memorylayer_server.services.embedding import EXT_EMBEDDING_SERVICE
-
 
 # --- Fixtures ---
+
 
 @pytest.fixture
 def mock_v():
@@ -56,6 +53,7 @@ def _default_embed_batch(texts):
             # Larger batch: likely documents
             # Create a spread of vectors
             import math
+
             angle = (2 * math.pi * i) / len(texts)
             result.append([math.cos(angle), math.sin(angle), 0.0])
     return result
@@ -71,6 +69,7 @@ def provider(mock_v, mock_embedding_service):
 
 
 # --- Query decomposition tests ---
+
 
 class TestDecomposeQuery:
     def test_single_word_query(self):
@@ -93,10 +92,7 @@ class TestDecomposeQuery:
         # Should have the full query + keywords variant at minimum
         assert len(result) >= 2
         # Keywords variant should not contain stopwords
-        keywords_found = any(
-            'authentication' in sq and 'the' not in sq.split()
-            for sq in result if sq != query
-        )
+        keywords_found = any("authentication" in sq and "the" not in sq.split() for sq in result if sq != query)
         assert keywords_found
 
     def test_with_instruction(self):
@@ -184,6 +180,7 @@ class TestSplitSentences:
 
 # --- RRF score computation tests ---
 
+
 class TestComputeRRFScores:
     def test_single_ranking(self):
         """Single ranking should produce valid scores."""
@@ -248,13 +245,16 @@ class TestComputeRRFScores:
 
 # --- Provider tests ---
 
+
 class TestRRFRerankerProvider:
     @pytest.mark.asyncio
     async def test_rerank_returns_correct_count(self, provider, mock_embedding_service):
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],  # sub-query embeddings
-            [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],  # doc embeddings
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],  # sub-query embeddings
+                [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],  # doc embeddings
+            ]
+        )
         docs = ["doc one", "doc two", "doc three"]
         scores = await provider.rerank("test query", docs)
         assert len(scores) == 3
@@ -267,10 +267,12 @@ class TestRRFRerankerProvider:
 
     @pytest.mark.asyncio
     async def test_rerank_scores_in_range(self, provider, mock_embedding_service):
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
-            [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
+                [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],
+            ]
+        )
         docs = ["doc one", "doc two", "doc three"]
         scores = await provider.rerank("test query", docs)
         for score in scores:
@@ -280,10 +282,12 @@ class TestRRFRerankerProvider:
     async def test_rerank_similar_doc_scores_higher(self, provider, mock_embedding_service):
         """Document most similar to query embeddings should score highest."""
         # Sub-queries both point toward [1, 0, 0]
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.9, 0.1, 0.0]],  # sub-query embeddings
-            [[0.95, 0.05, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]],  # docs
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.9, 0.1, 0.0]],  # sub-query embeddings
+                [[0.95, 0.05, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]],  # docs
+            ]
+        )
         docs = ["similar doc", "orthogonal doc", "another orthogonal"]
         scores = await provider.rerank("test query", docs)
         assert scores[0] > scores[1]
@@ -292,20 +296,24 @@ class TestRRFRerankerProvider:
     @pytest.mark.asyncio
     async def test_rerank_calls_embed_batch_twice(self, provider, mock_embedding_service):
         """Should call embed_batch once for sub-queries, once for documents."""
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
-            [[0.9, 0.1, 0.0]],
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
+                [[0.9, 0.1, 0.0]],
+            ]
+        )
         await provider.rerank("test query", ["doc one"])
         assert mock_embedding_service.embed_batch.call_count == 2
 
     @pytest.mark.asyncio
     async def test_rerank_with_instruction(self, provider, mock_embedding_service):
         """Instruction should be included in sub-queries."""
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
-            [[0.9, 0.1, 0.0]],
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
+                [[0.9, 0.1, 0.0]],
+            ]
+        )
         await provider.rerank("my query", ["doc"], instruction="Find scientific papers")
         # First embed_batch call is sub-queries
         sub_queries_arg = mock_embedding_service.embed_batch.call_args_list[0][0][0]
@@ -324,12 +332,16 @@ class TestRRFRerankerProvider:
     @pytest.mark.asyncio
     async def test_custom_rrf_k(self, mock_v, mock_embedding_service):
         """Custom k value should be used in RRF computation."""
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
-            [[0.9, 0.1, 0.0], [0.0, 1.0, 0.0]],
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
+                [[0.9, 0.1, 0.0], [0.0, 1.0, 0.0]],
+            ]
+        )
         provider = RRFRerankerProvider(
-            v=mock_v, embedding_service=mock_embedding_service, rrf_k=1,
+            v=mock_v,
+            embedding_service=mock_embedding_service,
+            rrf_k=1,
         )
         scores = await provider.rerank("test", ["doc1", "doc2"])
         assert len(scores) == 2
@@ -339,10 +351,12 @@ class TestRRFRerankerProvider:
     @pytest.mark.asyncio
     async def test_rerank_single_document(self, provider, mock_embedding_service):
         """Single document should get a valid score."""
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
-            [[0.9, 0.1, 0.0]],
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
+                [[0.9, 0.1, 0.0]],
+            ]
+        )
         scores = await provider.rerank("test query", ["only doc"])
         assert len(scores) == 1
         assert 0.0 <= scores[0] <= 1.0
@@ -350,13 +364,16 @@ class TestRRFRerankerProvider:
 
 # --- Integration-style test with rerank_with_indices ---
 
+
 class TestRRFRerankerWithIndices:
     @pytest.mark.asyncio
     async def test_rerank_with_indices_sorted_by_score(self, provider, mock_embedding_service):
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
-            [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
+                [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],
+            ]
+        )
         docs = ["similar doc", "orthogonal doc", "partial doc"]
         results = await provider.rerank_with_indices("test query", docs)
         scores = [score for _, score in results]
@@ -364,16 +381,19 @@ class TestRRFRerankerWithIndices:
 
     @pytest.mark.asyncio
     async def test_rerank_with_indices_top_k(self, provider, mock_embedding_service):
-        mock_embedding_service.embed_batch = AsyncMock(side_effect=[
-            [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
-            [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],
-        ])
+        mock_embedding_service.embed_batch = AsyncMock(
+            side_effect=[
+                [[1.0, 0.0, 0.0], [0.7, 0.7, 0.0]],
+                [[0.9, 0.1, 0.0], [0.0, 0.0, 1.0], [0.5, 0.5, 0.0]],
+            ]
+        )
         docs = ["similar doc", "orthogonal doc", "partial doc"]
         results = await provider.rerank_with_indices("test query", docs, top_k=2)
         assert len(results) == 2
 
 
 # --- Plugin tests ---
+
 
 class TestRRFRerankerPlugin:
     def test_provider_name(self):
@@ -394,6 +414,7 @@ class TestRRFRerankerPlugin:
     def test_plugin_has_no_llm_dependency(self):
         """RRF should not depend on LLM service."""
         from memorylayer_server.services.llm import EXT_LLM_SERVICE
+
         plugin = RRFRerankerProviderPlugin()
         v = Variables()
         deps = plugin.get_dependencies(v)

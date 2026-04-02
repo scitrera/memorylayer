@@ -4,19 +4,20 @@ Comprehensive unit tests for core domain models.
 Tests all domain models, enums, validators, and factory methods
 from the MemoryLayer.ai core modules.
 """
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
 
 from memorylayer_server.models.association import (
-    Association,
+    KNOWN_RELATIONSHIP_TYPES,
     AssociateInput,
+    Association,
     GraphPath,
     GraphQueryInput,
     GraphQueryResult,
     RelationshipCategory,
-    KNOWN_RELATIONSHIP_TYPES,
     get_relationship_category,
 )
 from memorylayer_server.models.memory import (
@@ -25,9 +26,7 @@ from memorylayer_server.models.memory import (
     MemoryType,
     RecallInput,
     RecallMode,
-    RecallResult,
     ReflectInput,
-    ReflectResult,
     RememberInput,
     SearchTolerance,
 )
@@ -46,7 +45,6 @@ from memorylayer_server.models.workspace import (
     Workspace,
     WorkspaceSettings,
 )
-
 
 # ============================================================================
 # MEMORY MODEL TESTS
@@ -566,15 +564,11 @@ class TestAssociateInput:
         """Test required fields for AssociateInput."""
         # Missing source_id
         with pytest.raises(ValidationError):
-            AssociateInput(
-                target_id="mem-2", relationship="solves"
-            )
+            AssociateInput(target_id="mem-2", relationship="solves")
 
         # Missing target_id
         with pytest.raises(ValidationError):
-            AssociateInput(
-                source_id="mem-1", relationship="solves"
-            )
+            AssociateInput(source_id="mem-1", relationship="solves")
 
         # Missing relationship
         with pytest.raises(ValidationError):
@@ -615,9 +609,7 @@ class TestGraphQueryInput:
         """Test direction must match pattern."""
         # Valid directions
         for direction in ["outgoing", "incoming", "both"]:
-            input_data = GraphQueryInput(
-                start_memory_id="mem-1", direction=direction
-            )
+            input_data = GraphQueryInput(start_memory_id="mem-1", direction=direction)
             assert input_data.direction == direction
 
         # Invalid direction
@@ -682,7 +674,7 @@ class TestSessionModel:
 
     def test_session_create_with_ttl_factory(self):
         """Test Session.create_with_ttl() factory method."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         session = Session.create_with_ttl(
             session_id="sess-1",
             workspace_id="ws-1",
@@ -704,7 +696,7 @@ class TestSessionModel:
             id="sess-1",
             workspace_id="ws-1",
             tenant_id="default_tenant",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         assert session.is_expired is False
 
@@ -713,7 +705,7 @@ class TestSessionModel:
             id="sess-1",
             workspace_id="ws-1",
             tenant_id="default_tenant",
-            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            expires_at=datetime.now(UTC) - timedelta(hours=1),
         )
         assert session.is_expired is True
 
@@ -774,7 +766,7 @@ class TestSessionBriefingModels:
     def test_activity_summary_model(self):
         """Test ActivitySummary model."""
         summary = ActivitySummary(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             summary="Implemented new feature",
             memories_created=5,
             key_decisions=["Use SQLite", "Add caching"],
@@ -788,7 +780,7 @@ class TestSessionBriefingModels:
         thread = OpenThread(
             topic="Authentication refactor",
             status="in_progress",
-            last_activity=datetime.now(timezone.utc),
+            last_activity=datetime.now(UTC),
             key_memories=["mem-1", "mem-2"],
         )
 
@@ -899,5 +891,3 @@ class TestContextSettings:
         assert settings.inherit_workspace_settings is True
         assert settings.auto_remember_enabled is None
         assert settings.decay_enabled is None
-
-

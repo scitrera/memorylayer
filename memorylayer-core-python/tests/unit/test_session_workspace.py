@@ -11,24 +11,26 @@ Tests:
 - ContextSettings inheritance
 - Memory modes (explicit vs auto_remember)
 """
+
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timedelta, timezone
+
 from memorylayer_server.models.session import (
-    Session,
-    WorkingMemory,
-    SessionBriefing,
-    WorkspaceSummary,
     ActivitySummary,
-    OpenThread,
     Contradiction,
+    OpenThread,
+    Session,
+    SessionBriefing,
+    WorkingMemory,
+    WorkspaceSummary,
 )
 from memorylayer_server.models.workspace import (
-    Workspace,
     Context,
-    WorkspaceSettings,
     ContextSettings,
+    Workspace,
+    WorkspaceSettings,
 )
-
 
 
 class TestSession:
@@ -48,7 +50,7 @@ class TestSession:
         assert session.workspace_id == "ws_test"
 
         # Check expiration is approximately ttl_seconds from now
-        expected_expiration = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        expected_expiration = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         # Allow 5 second tolerance for test execution time
         assert abs((session.expires_at - expected_expiration).total_seconds()) < 5
 
@@ -200,15 +202,9 @@ class TestSessionBriefing:
                 "total_memories": 150,
                 "recent_memories": 12,
             },
-            recent_activity=[
-                {"summary": "Added 5 new memories", "timestamp": datetime.now(timezone.utc).isoformat()}
-            ],
-            open_threads=[
-                {"topic": "API refactoring", "status": "in_progress"}
-            ],
-            contradictions_detected=[
-                {"memory_a": "mem_1", "memory_b": "mem_2"}
-            ],
+            recent_activity=[{"summary": "Added 5 new memories", "timestamp": datetime.now(UTC).isoformat()}],
+            open_threads=[{"topic": "API refactoring", "status": "in_progress"}],
+            contradictions_detected=[{"memory_a": "mem_1", "memory_b": "mem_2"}],
         )
 
         assert briefing.workspace_summary["total_memories"] == 150
@@ -252,7 +248,7 @@ class TestActivitySummary:
 
     def test_activity_summary_creation(self):
         """Test ActivitySummary model creation."""
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now(UTC)
         activity = ActivitySummary(
             timestamp=timestamp,
             summary="User added authentication memories",
@@ -276,7 +272,7 @@ class TestOpenThread:
             thread = OpenThread(
                 topic=f"Test thread {status}",
                 status=status,
-                last_activity=datetime.now(timezone.utc),
+                last_activity=datetime.now(UTC),
                 key_memories=["mem_1", "mem_2"],
             )
             assert thread.status == status
@@ -286,7 +282,7 @@ class TestOpenThread:
         thread = OpenThread(
             topic="Feature implementation",
             status="in_progress",
-            last_activity=datetime.now(timezone.utc),
+            last_activity=datetime.now(UTC),
             key_memories=["mem_123", "mem_456", "mem_789"],
         )
 

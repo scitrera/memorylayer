@@ -1,15 +1,15 @@
 """Google GenAI (Gemini) embedding provider."""
+
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import Variables, get_logger
 
-from ...config import EmbeddingProviderType, MEMORYLAYER_EMBEDDING_MODEL, MEMORYLAYER_EMBEDDING_DIMENSIONS
+from ...config import MEMORYLAYER_EMBEDDING_DIMENSIONS, MEMORYLAYER_EMBEDDING_MODEL, EmbeddingProviderType
 from .base import EmbeddingProvider, EmbeddingProviderPluginBase
 
-MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY = 'MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY'
+MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY = "MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY"
 
-DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-001'
+DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 DEFAULT_EMBEDDING_DIMENSIONS = 768
 
 
@@ -20,11 +20,11 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
     """
 
     def __init__(
-            self,
-            v: Variables = None,
-            api_key: Optional[str] = None,
-            model: str = DEFAULT_EMBEDDING_MODEL,
-            dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS,
+        self,
+        v: Variables = None,
+        api_key: str | None = None,
+        model: str = DEFAULT_EMBEDDING_MODEL,
+        dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS,
     ):
         super().__init__(v, output_dimensions=dimensions)
         self._api_key = api_key
@@ -34,7 +34,8 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info(
             "Initialized GoogleEmbeddingProvider: model=%s, dimensions=%s",
-            model, dimensions,
+            model,
+            dimensions,
         )
 
     def _get_client(self):
@@ -42,16 +43,16 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
         if self._client is None:
             try:
                 from google import genai
+
                 self._client = genai.Client(api_key=self._api_key)
             except ImportError:
-                raise ImportError(
-                    "google-genai package not installed. Install with: pip install google-genai"
-                )
+                raise ImportError("google-genai package not installed. Install with: pip install google-genai")
         return self._client
 
     def _get_config(self):
         """Build EmbedContentConfig with output dimensionality."""
         from google.genai import types
+
         return types.EmbedContentConfig(
             output_dimensionality=self._output_dimensionality,
         )
@@ -83,6 +84,7 @@ class GoogleEmbeddingProvider(EmbeddingProvider):
 
 class GoogleEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
     """Plugin for Google GenAI embedding provider."""
+
     PROVIDER_NAME = EmbeddingProviderType.GOOGLE
 
     def initialize(self, v: Variables, logger: Logger) -> object | None:

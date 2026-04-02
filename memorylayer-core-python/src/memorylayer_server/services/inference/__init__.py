@@ -1,13 +1,14 @@
 """Inference service package - entity insight derivation."""
-from .base import (
-    InferenceServicePluginBase,
-    InferenceService,
-    InferenceResult,
-    EXT_INFERENCE_SERVICE,
-)
-from .default import DefaultInferenceService
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    EXT_INFERENCE_SERVICE,
+    InferenceResult,
+    InferenceService,
+    InferenceServicePluginBase,
+)
+from .default import DefaultInferenceService
 
 
 def get_inference_service(v: Variables = None) -> DefaultInferenceService:
@@ -16,10 +17,10 @@ def get_inference_service(v: Variables = None) -> DefaultInferenceService:
 
 
 __all__ = (
-    'InferenceService',
-    'DefaultInferenceService',
-    'InferenceServicePluginBase',
-    'InferenceResult',
-    'get_inference_service',
-    'EXT_INFERENCE_SERVICE',
+    "InferenceService",
+    "DefaultInferenceService",
+    "InferenceServicePluginBase",
+    "InferenceResult",
+    "get_inference_service",
+    "EXT_INFERENCE_SERVICE",
 )

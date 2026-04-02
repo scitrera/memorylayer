@@ -4,12 +4,14 @@ Unit tests for recency boost in memory recall scoring.
 Tests the apply_recency_boost() method which applies time-based decay
 to memory scores based on their updated_at timestamp.
 """
-import math
+
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timezone, timedelta
-from memorylayer_server.services.memory.default import MemoryService
-from memorylayer_server.models.memory import Memory, MemoryType
+
 from memorylayer_server.config import DEFAULT_RECENCY_HALF_LIFE_HOURS, DEFAULT_RECENCY_WEIGHT
+from memorylayer_server.models.memory import Memory, MemoryType
+from memorylayer_server.services.memory.default import MemoryService
 
 
 def create_test_memory(
@@ -59,12 +61,10 @@ class TestRecencyBoost:
         # create a minimal instance
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         one_minute_ago = now - timedelta(minutes=1)
 
-        memories = [
-            create_test_memory("mem_1", boosted_score=0.9, updated_at=one_minute_ago)
-        ]
+        memories = [create_test_memory("mem_1", boosted_score=0.9, updated_at=one_minute_ago)]
 
         result = service.apply_recency_boost(
             memories=memories,
@@ -86,12 +86,10 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         thirty_days_ago = now - timedelta(days=30)
 
-        memories = [
-            create_test_memory("mem_1", boosted_score=0.9, updated_at=thirty_days_ago)
-        ]
+        memories = [create_test_memory("mem_1", boosted_score=0.9, updated_at=thirty_days_ago)]
 
         result = service.apply_recency_boost(
             memories=memories,
@@ -122,7 +120,7 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old_memory = create_test_memory("mem_1", boosted_score=0.9, updated_at=now - timedelta(days=30))
         recent_memory = create_test_memory("mem_2", boosted_score=0.8, updated_at=now - timedelta(minutes=1))
 
@@ -149,12 +147,10 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         thirty_days_ago = now - timedelta(days=30)
 
-        memories = [
-            create_test_memory("mem_1", boosted_score=0.9, updated_at=thirty_days_ago)
-        ]
+        memories = [create_test_memory("mem_1", boosted_score=0.9, updated_at=thirty_days_ago)]
 
         result = service.apply_recency_boost(
             memories=memories,
@@ -180,19 +176,9 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
-        old_memory = create_test_memory(
-            "mem_old",
-            boosted_score=0.8,
-            updated_at=now - timedelta(days=14),
-            content="Old memory"
-        )
-        recent_memory = create_test_memory(
-            "mem_recent",
-            boosted_score=0.8,
-            updated_at=now - timedelta(hours=1),
-            content="Recent memory"
-        )
+        now = datetime.now(UTC)
+        old_memory = create_test_memory("mem_old", boosted_score=0.8, updated_at=now - timedelta(days=14), content="Old memory")
+        recent_memory = create_test_memory("mem_recent", boosted_score=0.8, updated_at=now - timedelta(hours=1), content="Recent memory")
 
         # Start with old memory first
         memories = [old_memory, recent_memory]
@@ -221,12 +207,10 @@ class TestRecencyBoost:
         service = object.__new__(MemoryService)
 
         half_life_hours = 168.0  # 7 days
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         half_life_ago = now - timedelta(hours=half_life_hours)
 
-        memories = [
-            create_test_memory("mem_1", boosted_score=1.0, updated_at=half_life_ago)
-        ]
+        memories = [create_test_memory("mem_1", boosted_score=1.0, updated_at=half_life_ago)]
 
         result = service.apply_recency_boost(
             memories=memories,
@@ -266,7 +250,7 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create memories with varying scores and ages
         memories = [
@@ -297,10 +281,8 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
-        memories = [
-            create_test_memory("mem_1", boosted_score=0.9, updated_at=now - timedelta(days=30))
-        ]
+        now = datetime.now(UTC)
+        memories = [create_test_memory("mem_1", boosted_score=0.9, updated_at=now - timedelta(days=30))]
         original_score = memories[0].boosted_score
 
         result = service.apply_recency_boost(
@@ -321,13 +303,11 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         one_week_ago = now - timedelta(days=7)
 
         # Test with 7-day half-life (default)
-        memories_default = [
-            create_test_memory("mem_1", boosted_score=1.0, updated_at=one_week_ago)
-        ]
+        memories_default = [create_test_memory("mem_1", boosted_score=1.0, updated_at=one_week_ago)]
         result_default = service.apply_recency_boost(
             memories=memories_default,
             recency_weight=1.0,
@@ -335,9 +315,7 @@ class TestRecencyBoost:
         )
 
         # Test with 14-day half-life (slower decay)
-        memories_slow = [
-            create_test_memory("mem_2", boosted_score=1.0, updated_at=one_week_ago)
-        ]
+        memories_slow = [create_test_memory("mem_2", boosted_score=1.0, updated_at=one_week_ago)]
         result_slow = service.apply_recency_boost(
             memories=memories_slow,
             recency_weight=1.0,
@@ -358,13 +336,8 @@ class TestRecencyBoost:
         """
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
-        memory = create_test_memory(
-            "mem_1",
-            boosted_score=0.8,
-            updated_at=now - timedelta(days=7),
-            content="Test content"
-        )
+        now = datetime.now(UTC)
+        memory = create_test_memory("mem_1", boosted_score=0.8, updated_at=now - timedelta(days=7), content="Test content")
 
         # Store original values
         original_id = memory.id

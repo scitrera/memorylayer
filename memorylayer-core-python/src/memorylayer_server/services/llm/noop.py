@@ -1,15 +1,17 @@
 """No-op LLM provider - raises NotConfigured (OSS default)."""
-from typing import AsyncIterator
+
+from collections.abc import AsyncIterator
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from .base import LLMProvider
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
+from .base import LLMProvider
 
 
 class LLMNotConfiguredError(Exception):
     """Raised when LLM is used but not configured."""
+
     pass
 
 
@@ -35,10 +37,7 @@ class NoOpLLMProvider(LLMProvider):
             "and MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL to enable LLM features."
         )
 
-    async def complete_stream(
-        self,
-        request: LLMRequest
-    ) -> AsyncIterator[LLMStreamChunk]:
+    async def complete_stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
         raise LLMNotConfiguredError(
             "LLM provider not configured. Set MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER "
             "and MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL to enable LLM features."

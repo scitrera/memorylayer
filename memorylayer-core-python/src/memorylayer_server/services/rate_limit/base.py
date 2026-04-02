@@ -1,28 +1,29 @@
 """Rate Limit Service - Pluggable rate limiting interface."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from ...config import MEMORYLAYER_RATE_LIMIT_SERVICE, DEFAULT_MEMORYLAYER_RATE_LIMIT_SERVICE
-
+from ...config import DEFAULT_MEMORYLAYER_RATE_LIMIT_SERVICE, MEMORYLAYER_RATE_LIMIT_SERVICE
 from .._constants import EXT_RATE_LIMIT_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
 # Re-export for convenience
 __all__ = (
-    'RateLimitResult',
-    'RateLimitService',
-    'RateLimitServicePluginBase',
-    'EXT_RATE_LIMIT_SERVICE',
+    "RateLimitResult",
+    "RateLimitService",
+    "RateLimitServicePluginBase",
+    "EXT_RATE_LIMIT_SERVICE",
 )
 
 
 @dataclass
 class RateLimitResult:
     """Result of a rate limit check."""
+
     allowed: bool
-    limit: int        # max requests per window
-    remaining: int    # requests remaining in current window
-    reset_at: float   # unix timestamp when window resets
+    limit: int  # max requests per window
+    remaining: int  # requests remaining in current window
+    reset_at: float  # unix timestamp when window resets
 
 
 class RateLimitService(ABC):

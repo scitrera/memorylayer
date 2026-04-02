@@ -3,14 +3,13 @@ Extraction Service - Base classes and interfaces.
 
 Extracts memories from session content using LLM-based classification.
 """
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
-from datetime import datetime
 
-from ...config import MEMORYLAYER_EXTRACTION_SERVICE, DEFAULT_MEMORYLAYER_EXTRACTION_SERVICE
-from ...models.memory import Memory, MemoryType, MemorySubtype
+from ...config import DEFAULT_MEMORYLAYER_EXTRACTION_SERVICE, MEMORYLAYER_EXTRACTION_SERVICE
+from ...models.memory import Memory, MemorySubtype, MemoryType
 from .._constants import (
     EXT_DEDUPLICATION_SERVICE,
     EXT_EMBEDDING_SERVICE,
@@ -49,7 +48,7 @@ class ExtractionOptions:
 
     min_importance: float = 0.5
     deduplicate: bool = True
-    categories: Optional[list[ExtractionCategory]] = None  # None = all categories
+    categories: list[ExtractionCategory] | None = None  # None = all categories
     max_memories: int = 50
 
 
@@ -81,13 +80,7 @@ class ExtractionService(ABC):
 
     @abstractmethod
     async def extract_from_session(
-            self,
-            session_id: str,
-            workspace_id: str,
-            context_id: str,
-            session_content: str,
-            working_memory: dict,
-            options: ExtractionOptions
+        self, session_id: str, workspace_id: str, context_id: str, session_content: str, working_memory: dict, options: ExtractionOptions
     ) -> ExtractionResult:
         """Extract memories from a session."""
         pass
@@ -101,7 +94,7 @@ class ExtractionService(ABC):
         pass
 
     @abstractmethod
-    async def classify_content(self, content: str) -> tuple['MemoryType', 'Optional[MemorySubtype]']:
+    async def classify_content(self, content: str) -> tuple["MemoryType", "MemorySubtype | None"]:
         """Classify a single memory's content into a type and subtype.
 
         Uses LLM to determine the extraction category, then maps through

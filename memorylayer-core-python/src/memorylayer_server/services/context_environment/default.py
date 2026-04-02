@@ -3,39 +3,39 @@
 Provides in-memory sandboxed Python environments per session with
 memory integration, LLM queries, and iterative reasoning loops.
 """
+
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Any, Optional
+from typing import Any
 
-from scitrera_app_framework import get_logger, get_extension, Variables
+from scitrera_app_framework import Variables, get_logger
 
+from ...config import (
+    DEFAULT_MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
+    DEFAULT_MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
+    DEFAULT_MEMORYLAYER_CONTEXT_EXECUTOR,
+    DEFAULT_MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
+    DEFAULT_MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
+    DEFAULT_MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
+    DEFAULT_MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
+    DEFAULT_MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
+    MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
+    MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
+    MEMORYLAYER_CONTEXT_EXECUTOR,
+    MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
+    MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
+    MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
+    MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
+    MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
+)
 from .base import (
     ContextEnvironmentService,
     ContextEnvironmentServicePluginBase,
-    EXT_CONTEXT_ENVIRONMENT_SERVICE,
 )
-from .executors.base import ExecutorProvider, ExecutionResult
+from .executors.base import ExecutionResult, ExecutorProvider
 from .hooks import ContextPersistenceHook, NoOpPersistenceHook
-from ...config import (
-    MEMORYLAYER_CONTEXT_EXECUTOR,
-    DEFAULT_MEMORYLAYER_CONTEXT_EXECUTOR,
-    MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
-    DEFAULT_MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
-    MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
-    DEFAULT_MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
-    MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
-    DEFAULT_MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
-    MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
-    DEFAULT_MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
-    MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
-    DEFAULT_MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
-    MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
-    DEFAULT_MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
-    MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
-    DEFAULT_MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
-)
 
 
 def _safe_preview(value: Any, max_chars: int = 200) -> str:
@@ -45,7 +45,7 @@ def _safe_preview(value: Any, max_chars: int = 200) -> str:
     except Exception:
         s = f"<{type(value).__name__}>"
     if len(s) > max_chars:
-        return s[:max_chars] + '...'
+        return s[:max_chars] + "..."
     return s
 
 
@@ -60,19 +60,19 @@ def _estimate_size(value: Any) -> int:
 def _memory_to_dict(memory: Any, include_embeddings: bool = False) -> dict:
     """Convert a Memory model to a plain dict for sandbox use."""
     d = {
-        'id': memory.id,
-        'content': memory.content,
-        'type': str(memory.type.value) if memory.type else None,
-        'importance': memory.importance,
-        'tags': list(memory.tags) if memory.tags else [],
-        'created_at': memory.created_at.isoformat() if memory.created_at else None,
+        "id": memory.id,
+        "content": memory.content,
+        "type": str(memory.type.value) if memory.type else None,
+        "importance": memory.importance,
+        "tags": list(memory.tags) if memory.tags else [],
+        "created_at": memory.created_at.isoformat() if memory.created_at else None,
     }
     if memory.metadata:
-        d['metadata'] = dict(memory.metadata)
+        d["metadata"] = dict(memory.metadata)
     if memory.abstract:
-        d['abstract'] = memory.abstract
+        d["abstract"] = memory.abstract
     if include_embeddings and memory.embedding:
-        d['embedding'] = list(memory.embedding)
+        d["embedding"] = list(memory.embedding)
     return d
 
 
@@ -107,34 +107,48 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         self._env_metadata: dict[str, dict[str, Any]] = {}
 
         # Load config
-        self._max_operations = int(v.get(
-            MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
-            DEFAULT_MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
-        ))
-        self._max_exec_seconds = int(v.get(
-            MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
-            DEFAULT_MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
-        ))
-        self._max_output_chars = int(v.get(
-            MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
-            DEFAULT_MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
-        ))
-        self._query_max_tokens = int(v.get(
-            MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
-            DEFAULT_MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
-        ))
-        self._max_memory_bytes = int(v.get(
-            MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
-            DEFAULT_MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
-        ))
-        self._exec_soft_cap = int(v.get(
-            MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
-            DEFAULT_MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
-        ))
-        self._exec_hard_cap = int(v.get(
-            MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
-            DEFAULT_MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
-        ))
+        self._max_operations = int(
+            v.get(
+                MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
+                DEFAULT_MEMORYLAYER_CONTEXT_MAX_OPERATIONS,
+            )
+        )
+        self._max_exec_seconds = int(
+            v.get(
+                MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
+                DEFAULT_MEMORYLAYER_CONTEXT_MAX_EXEC_SECONDS,
+            )
+        )
+        self._max_output_chars = int(
+            v.get(
+                MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
+                DEFAULT_MEMORYLAYER_CONTEXT_MAX_OUTPUT_CHARS,
+            )
+        )
+        self._query_max_tokens = int(
+            v.get(
+                MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
+                DEFAULT_MEMORYLAYER_CONTEXT_QUERY_MAX_TOKENS,
+            )
+        )
+        self._max_memory_bytes = int(
+            v.get(
+                MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
+                DEFAULT_MEMORYLAYER_CONTEXT_MAX_MEMORY_BYTES,
+            )
+        )
+        self._exec_soft_cap = int(
+            v.get(
+                MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
+                DEFAULT_MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
+            )
+        )
+        self._exec_hard_cap = int(
+            v.get(
+                MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
+                DEFAULT_MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
+            )
+        )
 
         self.logger.info("DefaultContextEnvironmentService initialized")
 
@@ -148,18 +162,18 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         if restored_state is not None:
             self._environments[session_id] = restored_state
             self._env_metadata[session_id] = {
-                'created_at': datetime.now(timezone.utc).isoformat(),
-                'exec_count': 0,
-                'total_operations': 0,
-                'restored': True,
+                "created_at": datetime.now(UTC).isoformat(),
+                "exec_count": 0,
+                "total_operations": 0,
+                "restored": True,
             }
             self.logger.info("Restored environment for session %s from persistence hook", session_id)
         else:
             self._environments[session_id] = {}
             self._env_metadata[session_id] = {
-                'created_at': datetime.now(timezone.utc).isoformat(),
-                'exec_count': 0,
-                'total_operations': 0,
+                "created_at": datetime.now(UTC).isoformat(),
+                "exec_count": 0,
+                "total_operations": 0,
             }
             self.logger.info("Created environment for session: %s", session_id)
 
@@ -168,7 +182,7 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
     def _check_rate_limits(self, session_id: str) -> str | None:
         """Check rate limits. Returns error message if exceeded, None if ok."""
         meta = self._env_metadata.get(session_id, {})
-        exec_count = meta.get('exec_count', 0)
+        exec_count = meta.get("exec_count", 0)
 
         if self._exec_hard_cap > 0 and exec_count >= self._exec_hard_cap:
             return f"Hard execution cap reached: {exec_count} >= {self._exec_hard_cap}"
@@ -176,7 +190,9 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         if self._exec_soft_cap > 0 and exec_count >= self._exec_soft_cap:
             self.logger.warning(
                 "Soft execution cap reached for session %s: %d >= %d",
-                session_id, exec_count, self._exec_soft_cap,
+                session_id,
+                exec_count,
+                self._exec_soft_cap,
             )
 
         return None
@@ -190,17 +206,14 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         total_size = sum(_estimate_size(v) for v in state.values())
 
         if total_size > self._max_memory_bytes:
-            return (
-                f"Memory limit exceeded: {total_size} bytes > "
-                f"{self._max_memory_bytes} byte limit"
-            )
+            return f"Memory limit exceeded: {total_size} bytes > {self._max_memory_bytes} byte limit"
         return None
 
     async def execute(
         self,
         session_id: str,
         code: str,
-        result_var: Optional[str] = None,
+        result_var: str | None = None,
         return_result: bool = True,
         max_return_chars: int = 10_000,
     ) -> dict:
@@ -208,14 +221,14 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         # Rate limit check
         rate_error = self._check_rate_limits(session_id)
         if rate_error:
-            return {'output': '', 'result': None, 'error': rate_error, 'variables_changed': []}
+            return {"output": "", "result": None, "error": rate_error, "variables_changed": []}
 
         state = await self._init_environment(session_id)
 
         # Memory limit check
         mem_error = self._check_memory_limit(session_id)
         if mem_error:
-            return {'output': '', 'result': None, 'error': mem_error, 'variables_changed': []}
+            return {"output": "", "result": None, "error": mem_error, "variables_changed": []}
 
         self.logger.debug("Executing code in session %s: %s", session_id, code[:100])
 
@@ -229,9 +242,9 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
 
         # Update metadata
         meta = self._env_metadata[session_id]
-        meta['exec_count'] = meta.get('exec_count', 0) + 1
-        meta['total_operations'] = meta.get('total_operations', 0) + result.operations_count
-        meta['last_exec_at'] = datetime.now(timezone.utc).isoformat()
+        meta["exec_count"] = meta.get("exec_count", 0) + 1
+        meta["total_operations"] = meta.get("total_operations", 0) + result.operations_count
+        meta["last_exec_at"] = datetime.now(UTC).isoformat()
 
         # Store result in variable if requested
         if result_var and result.result is not None and result.error is None:
@@ -245,23 +258,23 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
 
         # Build response
         response: dict[str, Any] = {
-            'output': result.output,
-            'error': result.error,
-            'variables_changed': result.variables_changed,
+            "output": result.output,
+            "error": result.error,
+            "variables_changed": result.variables_changed,
         }
 
         if return_result and result.result is not None:
             preview = _safe_preview(result.result, max_return_chars)
-            response['result'] = preview
+            response["result"] = preview
         else:
-            response['result'] = None
+            response["result"] = None
 
         return response
 
     async def inspect(
         self,
         session_id: str,
-        variable: Optional[str] = None,
+        variable: str | None = None,
         preview_chars: int = 200,
     ) -> dict:
         """Inspect sandbox state or a specific variable."""
@@ -269,28 +282,28 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
 
         if variable is not None:
             if variable not in state:
-                return {'error': f"Variable '{variable}' not found"}
+                return {"error": f"Variable '{variable}' not found"}
             value = state[variable]
             return {
-                'variable': variable,
-                'type': type(value).__name__,
-                'preview': _safe_preview(value, preview_chars),
-                'size_bytes': _estimate_size(value),
+                "variable": variable,
+                "type": type(value).__name__,
+                "preview": _safe_preview(value, preview_chars),
+                "size_bytes": _estimate_size(value),
             }
 
         # Return overview of all variables
         variables = {}
         for key, value in state.items():
             variables[key] = {
-                'type': type(value).__name__,
-                'preview': _safe_preview(value, preview_chars),
-                'size_bytes': _estimate_size(value),
+                "type": type(value).__name__,
+                "preview": _safe_preview(value, preview_chars),
+                "size_bytes": _estimate_size(value),
             }
 
         return {
-            'variable_count': len(variables),
-            'variables': variables,
-            'total_size_bytes': sum(v['size_bytes'] for v in variables.values()),
+            "variable_count": len(variables),
+            "variables": variables,
+            "total_size_bytes": sum(v["size_bytes"] for v in variables.values()),
         }
 
     async def load(
@@ -299,9 +312,9 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         var: str,
         query: str,
         limit: int = 50,
-        types: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None,
-        min_relevance: Optional[float] = None,
+        types: list[str] | None = None,
+        tags: list[str] | None = None,
+        min_relevance: float | None = None,
         include_embeddings: bool = False,
     ) -> dict:
         """Load memories into the sandbox as a variable."""
@@ -310,18 +323,18 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         # Rate limit check
         rate_error = self._check_rate_limits(session_id)
         if rate_error:
-            return {'error': rate_error, 'count': 0}
+            return {"error": rate_error, "count": 0}
 
         try:
+            from ...models.memory import MemoryType, RecallInput
             from ..memory import get_memory_service
             from ..session import get_session_service
-            from ...models.memory import RecallInput, MemoryType
 
             # Resolve the session to get workspace_id
             session_service = get_session_service(self._v)
             session = await session_service.get(session_id)
             if session is None:
-                return {'error': f"Session not found: {session_id}", 'count': 0}
+                return {"error": f"Session not found: {session_id}", "count": 0}
 
             # Build recall input
             type_filters = []
@@ -347,10 +360,7 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
             )
 
             # Convert memories to dicts and store in sandbox
-            memory_dicts = [
-                _memory_to_dict(m, include_embeddings=include_embeddings)
-                for m in recall_result.memories
-            ]
+            memory_dicts = [_memory_to_dict(m, include_embeddings=include_embeddings) for m in recall_result.memories]
             state[var] = memory_dicts
 
             # Notify persistence hook
@@ -358,21 +368,23 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
 
             self.logger.info(
                 "Loaded %d memories into session %s variable '%s'",
-                len(memory_dicts), session_id, var,
+                len(memory_dicts),
+                session_id,
+                var,
             )
 
             return {
-                'count': len(memory_dicts),
-                'variable': var,
-                'query': query,
-                'total_available': recall_result.total_count,
+                "count": len(memory_dicts),
+                "variable": var,
+                "query": query,
+                "total_available": recall_result.total_count,
             }
 
         except ImportError as e:
-            return {'error': f"Memory service not available: {e}", 'count': 0}
+            return {"error": f"Memory service not available: {e}", "count": 0}
         except Exception as e:
             self.logger.error("Failed to load memories for session %s: %s", session_id, e, exc_info=True)
-            return {'error': f"Memory load failed: {e}", 'count': 0}
+            return {"error": f"Memory load failed: {e}", "count": 0}
 
     async def inject(
         self,
@@ -387,13 +399,13 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         # Rate limit check
         rate_error = self._check_rate_limits(session_id)
         if rate_error:
-            return {'error': rate_error}
+            return {"error": rate_error}
 
         if parse_json and isinstance(value, str):
             try:
                 value = json.loads(value)
             except json.JSONDecodeError as e:
-                return {'error': f"JSON parse error: {e}"}
+                return {"error": f"JSON parse error: {e}"}
 
         state[key] = value
 
@@ -403,9 +415,9 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         self.logger.debug("Injected variable '%s' into session %s", key, session_id)
 
         return {
-            'variable': key,
-            'type': type(value).__name__,
-            'preview': _safe_preview(value, 200),
+            "variable": key,
+            "type": type(value).__name__,
+            "preview": _safe_preview(value, 200),
         }
 
     async def query(
@@ -413,8 +425,8 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         session_id: str,
         prompt: str,
         variables: list[str],
-        max_context_chars: Optional[int] = None,
-        result_var: Optional[str] = None,
+        max_context_chars: int | None = None,
+        result_var: str | None = None,
     ) -> dict:
         """Send sandbox variables and a prompt to the LLM."""
         state = await self._init_environment(session_id)
@@ -433,7 +445,7 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
                 preview = _safe_preview(value, max_chars // max(len(variables), 1))
                 context_parts.append(f"[{var_name}] ({type(value).__name__}):\n{preview}")
 
-            context = '\n\n'.join(context_parts)
+            context = "\n\n".join(context_parts)
 
             llm_service = get_llm_service(self._v)
             response_text = await llm_service.synthesize(
@@ -450,26 +462,26 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
             self.logger.info("LLM query completed for session %s", session_id)
 
             return {
-                'response': response_text,
-                'variables_used': variables,
-                'result_var': result_var,
+                "response": response_text,
+                "variables_used": variables,
+                "result_var": result_var,
             }
 
         except ImportError as e:
-            return {'error': f"LLM service not available: {e}"}
+            return {"error": f"LLM service not available: {e}"}
         except Exception as e:
             self.logger.error("LLM query failed for session %s: %s", session_id, e, exc_info=True)
-            return {'error': f"LLM query failed: {e}"}
+            return {"error": f"LLM query failed: {e}"}
 
     async def rlm(
         self,
         session_id: str,
         goal: str,
-        memory_query: Optional[str] = None,
+        memory_query: str | None = None,
         memory_limit: int = 100,
         max_iterations: int = 10,
-        variables: Optional[list[str]] = None,
-        result_var: Optional[str] = None,
+        variables: list[str] | None = None,
+        result_var: str | None = None,
         detail_level: str = "standard",
     ) -> dict:
         """Run a Recursive Language Model (RLM) loop.
@@ -498,10 +510,10 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         """Get the status of a session's sandbox environment."""
         if session_id not in self._environments:
             return {
-                'exists': False,
-                'variable_count': 0,
-                'total_size_bytes': 0,
-                'metadata': {},
+                "exists": False,
+                "variable_count": 0,
+                "total_size_bytes": 0,
+                "metadata": {},
             }
 
         state = self._environments[session_id]
@@ -510,12 +522,12 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
         total_size = sum(_estimate_size(v) for v in state.values())
 
         return {
-            'exists': True,
-            'variable_count': len(state),
-            'variables': list(state.keys()),
-            'total_size_bytes': total_size,
-            'memory_limit_bytes': self._max_memory_bytes,
-            'metadata': meta,
+            "exists": True,
+            "variable_count": len(state),
+            "variables": list(state.keys()),
+            "total_size_bytes": total_size,
+            "memory_limit_bytes": self._max_memory_bytes,
+            "metadata": meta,
         }
 
     async def cleanup_environment(self, session_id: str) -> None:
@@ -542,7 +554,8 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
 
 class DefaultContextEnvironmentServicePlugin(ContextEnvironmentServicePluginBase):
     """Plugin for the default context environment service."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> ContextEnvironmentService:
         """Initialize the default context environment service."""
@@ -552,26 +565,26 @@ class DefaultContextEnvironmentServicePlugin(ContextEnvironmentServicePluginBase
         )
 
         executor: ExecutorProvider
-        if executor_type == 'smolagents':
+        if executor_type == "smolagents":
             try:
                 from .executors.smolagents_executor import SmolagentsExecutor
+
                 executor = SmolagentsExecutor()
                 logger.info("Using smolagents executor for context environments")
             except ImportError:
-                logger.warning(
-                    "smolagents not available, falling back to restricted executor"
-                )
+                logger.warning("smolagents not available, falling back to restricted executor")
                 from .executors.restricted import RestrictedExecutor
+
                 executor = RestrictedExecutor()
-        elif executor_type == 'restricted':
+        elif executor_type == "restricted":
             from .executors.restricted import RestrictedExecutor
+
             executor = RestrictedExecutor()
             logger.info("Using restricted executor for context environments")
         else:
-            logger.warning(
-                "Unknown executor type '%s', falling back to restricted", executor_type
-            )
+            logger.warning("Unknown executor type '%s', falling back to restricted", executor_type)
             from .executors.restricted import RestrictedExecutor
+
             executor = RestrictedExecutor()
 
         return DefaultContextEnvironmentService(

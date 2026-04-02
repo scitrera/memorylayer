@@ -3,6 +3,6 @@
 from .provider import LLMRerankerProvider, LLMRerankerProviderPlugin
 
 __all__ = [
-    'LLMRerankerProvider',
-    'LLMRerankerProviderPlugin',
+    "LLMRerankerProvider",
+    "LLMRerankerProviderPlugin",
 ]

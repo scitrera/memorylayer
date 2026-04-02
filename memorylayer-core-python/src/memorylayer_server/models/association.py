@@ -5,9 +5,10 @@ Defines 65 relationship types organized by 11 categories for rich knowledge grap
 Relationship types are plain strings validated against the unified ontology in
 ``memorylayer_server.services.ontology.base.BASE_ONTOLOGY``.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -31,46 +32,93 @@ class RelationshipCategory(str, Enum):
 # All known relationship type strings, kept as a convenience constant.
 # The authoritative source of truth is BASE_ONTOLOGY in
 # memorylayer_server.services.ontology.base
-KNOWN_RELATIONSHIP_TYPES: frozenset[str] = frozenset({
-    # Hierarchical
-    "parent_of", "child_of", "part_of", "has_part", "instance_of", "type_of",
-    # Causal
-    "causes", "caused_by", "enables", "enabled_by",
-    "triggers", "triggered_by", "leads_to", "led_to_by",
-    "prevents", "prevented_by",
-    # Temporal
-    "before", "after", "during",
-    # Similarity
-    "similar_to", "duplicate_of", "related_to", "variant_of",
-    # Learning
-    "contradicts", "supports", "supported_by",
-    "builds_on", "built_upon_by", "confirms",
-    "supersedes", "superseded_by",
-    # Refinement
-    "refines", "refined_by", "replaces", "replaced_by",
-    # Reference
-    "references", "referenced_by",
-    # Solution
-    "solves", "solved_by", "addresses", "addressed_by",
-    "alternative_to", "improves", "improved_by",
-    # Context
-    "occurs_in", "contains_occurrence", "applies_to", "has_applicable",
-    "works_with", "requires", "required_by",
-    # Workflow
-    "follows", "followed_by", "depends_on", "depended_on_by",
-    "blocks", "blocked_by",
-    # Quality
-    "effective_for", "has_effective", "preferred_over", "less_preferred_than",
-    "deprecated_by", "deprecates",
-})
+KNOWN_RELATIONSHIP_TYPES: frozenset[str] = frozenset(
+    {
+        # Hierarchical
+        "parent_of",
+        "child_of",
+        "part_of",
+        "has_part",
+        "instance_of",
+        "type_of",
+        # Causal
+        "causes",
+        "caused_by",
+        "enables",
+        "enabled_by",
+        "triggers",
+        "triggered_by",
+        "leads_to",
+        "led_to_by",
+        "prevents",
+        "prevented_by",
+        # Temporal
+        "before",
+        "after",
+        "during",
+        # Similarity
+        "similar_to",
+        "duplicate_of",
+        "related_to",
+        "variant_of",
+        # Learning
+        "contradicts",
+        "supports",
+        "supported_by",
+        "builds_on",
+        "built_upon_by",
+        "confirms",
+        "supersedes",
+        "superseded_by",
+        # Refinement
+        "refines",
+        "refined_by",
+        "replaces",
+        "replaced_by",
+        # Reference
+        "references",
+        "referenced_by",
+        # Solution
+        "solves",
+        "solved_by",
+        "addresses",
+        "addressed_by",
+        "alternative_to",
+        "improves",
+        "improved_by",
+        # Context
+        "occurs_in",
+        "contains_occurrence",
+        "applies_to",
+        "has_applicable",
+        "works_with",
+        "requires",
+        "required_by",
+        # Workflow
+        "follows",
+        "followed_by",
+        "depends_on",
+        "depended_on_by",
+        "blocks",
+        "blocked_by",
+        # Quality
+        "effective_for",
+        "has_effective",
+        "preferred_over",
+        "less_preferred_than",
+        "deprecated_by",
+        "deprecates",
+    }
+)
 
 
-def get_relationship_category(relationship: str) -> Optional[str]:
+def get_relationship_category(relationship: str) -> str | None:
     """Get the category for a relationship type from the ontology.
 
     Returns None if the relationship is not in the known set.
     """
     from ..services.ontology.base import BASE_ONTOLOGY
+
     info = BASE_ONTOLOGY.get(relationship)
     return info.get("category") if info else None
 
@@ -93,19 +141,14 @@ class Association(BaseModel):
     )
 
     # Edge metadata
-    strength: float = Field(
-        0.5,
-        ge=0.0,
-        le=1.0,
-        description="Relationship strength (0.0-1.0)"
-    )
+    strength: float = Field(0.5, ge=0.0, le=1.0, description="Relationship strength (0.0-1.0)")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
 
     # Timestamps
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Creation timestamp")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
 
     @property
-    def category(self) -> Optional[str]:
+    def category(self) -> str | None:
         """Get the category of this relationship."""
         return get_relationship_category(self.relationship)
 
@@ -129,22 +172,14 @@ class GraphQueryInput(BaseModel):
     start_memory_id: str = Field(..., description="Starting memory for traversal")
 
     # Filters
-    relationship_types: list[str] = Field(
-        default_factory=list,
-        description="Filter by specific relationship types (empty = all)"
-    )
+    relationship_types: list[str] = Field(default_factory=list, description="Filter by specific relationship types (empty = all)")
     relationship_categories: list[RelationshipCategory] = Field(
-        default_factory=list,
-        description="Filter by relationship categories (empty = all)"
+        default_factory=list, description="Filter by relationship categories (empty = all)"
     )
 
     # Traversal settings
     max_depth: int = Field(3, ge=1, le=5, description="Maximum traversal depth")
-    direction: str = Field(
-        "both",
-        pattern="^(outgoing|incoming|both)$",
-        description="Traversal direction: outgoing, incoming, both"
-    )
+    direction: str = Field("both", pattern="^(outgoing|incoming|both)$", description="Traversal direction: outgoing, incoming, both")
     min_strength: float = Field(0.0, ge=0.0, le=1.0, description="Minimum edge strength")
 
     # Result limits

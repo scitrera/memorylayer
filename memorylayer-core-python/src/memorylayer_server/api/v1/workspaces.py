@@ -8,36 +8,37 @@ Endpoints:
 - PUT    /v1/workspaces/{workspace_id}    - Update workspace
 - DELETE /v1/workspaces/{workspace_id}    - Delete workspace
 """
+
 import json
 import logging
+from datetime import UTC
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from scitrera_app_framework import Plugin, Variables
 
-from .. import EXT_MULTI_API_ROUTERS
 from memorylayer_server.lifecycle.fastapi import get_logger
 
-from .schemas import (
-    WorkspaceCreateRequest,
-    WorkspaceUpdateRequest,
-    WorkspaceResponse,
-    WorkspaceListResponse,
-    ErrorResponse,
-    MemoryExportItem,
-    AssociationExportItem,
-    WorkspaceExportData,
-    WorkspaceImportRequest,
-    WorkspaceImportResult,
-)
-from ...services.workspace import WorkspaceService
-from ...services.ontology import get_ontology_service as _get_ontology_service
-from ...services.memory import MemoryService
+from ...services.audit import AuditEvent, AuditService
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
-from .deps import get_auth_service, get_authz_service, get_workspace_service, get_memory_service, get_audit_service
-from ...services.audit import AuditService, AuditEvent
+from ...services.memory import MemoryService
+from ...services.ontology import get_ontology_service as _get_ontology_service
+from ...services.workspace import WorkspaceService
+from .. import EXT_MULTI_API_ROUTERS
+from .deps import get_audit_service, get_auth_service, get_authz_service, get_memory_service, get_workspace_service
+from .schemas import (
+    AssociationExportItem,
+    ErrorResponse,
+    MemoryExportItem,
+    WorkspaceCreateRequest,
+    WorkspaceImportRequest,
+    WorkspaceImportResult,
+    WorkspaceListResponse,
+    WorkspaceResponse,
+    WorkspaceUpdateRequest,
+)
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 
@@ -54,13 +55,13 @@ router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
     },
 )
 async def create_workspace(
-        http_request: Request,
-        request: WorkspaceCreateRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        workspace_service: WorkspaceService = Depends(get_workspace_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    request: WorkspaceCreateRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceResponse:
     """
     Create a new workspace.
@@ -88,15 +89,11 @@ async def create_workspace(
         # Generate workspace ID
         workspace_id = f"ws_{uuid4().hex[:16]}"
 
-        logger.info(
-            "Creating workspace: %s for tenant: %s, name: %s",
-            workspace_id,
-            ctx.tenant_id,
-            request.name
-        )
+        logger.info("Creating workspace: %s for tenant: %s, name: %s", workspace_id, ctx.tenant_id, request.name)
 
         # Create workspace
         from ...models.workspace import Workspace
+
         workspace = Workspace(
             id=workspace_id,
             tenant_id=ctx.tenant_id,
@@ -109,31 +106,27 @@ async def create_workspace(
 
         logger.info("Created workspace: %s", workspace_id)
         try:
-            await audit_service.record(AuditEvent(
-                event_type="workspace",
-                action="create",
-                tenant_id=ctx.tenant_id,
-                workspace_id=workspace.id,
-                user_id=ctx.user_id,
-                resource_type="workspace",
-                resource_id=workspace.id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="workspace",
+                    action="create",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace.id,
+                    user_id=ctx.user_id,
+                    resource_type="workspace",
+                    resource_id=workspace.id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for workspace create")
         return WorkspaceResponse(workspace=workspace)
 
     except ValueError as e:
         logger.warning("Invalid workspace creation request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to create workspace: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create workspace"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create workspace")
 
 
 @router.get(
@@ -146,11 +139,11 @@ async def create_workspace(
     },
 )
 async def list_workspaces(
-        http_request: Request,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        workspace_service: WorkspaceService = Depends(get_workspace_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceListResponse:
     """
     List all workspaces.
@@ -171,10 +164,7 @@ async def list_workspaces(
         raise
     except Exception as e:
         logger.error("Failed to list workspaces: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list workspaces"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list workspaces")
 
 
 @router.get(
@@ -188,13 +178,13 @@ async def list_workspaces(
     },
 )
 async def get_workspace(
-        http_request: Request,
-        workspace_id: str,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        workspace_service: WorkspaceService = Depends(get_workspace_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceResponse:
     """
     Retrieve a workspace by ID.
@@ -215,31 +205,27 @@ async def get_workspace(
     try:
         # Build auth context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "workspaces", "read",
-            resource_id=workspace_id, workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "workspaces", "read", resource_id=workspace_id, workspace_id=workspace_id)
 
         logger.debug("Getting workspace: %s", workspace_id)
 
         # Get workspace via workspace service
         workspace = await workspace_service.get_workspace(workspace_id)
         if not workspace:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Workspace not found: {workspace_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace not found: {workspace_id}")
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="workspace",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=workspace_id,
-                user_id=ctx.user_id,
-                resource_type="workspace",
-                resource_id=workspace_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="workspace",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="workspace",
+                    resource_id=workspace_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for workspace read")
         return WorkspaceResponse(workspace=workspace)
@@ -248,10 +234,7 @@ async def get_workspace(
         raise
     except Exception as e:
         logger.error("Failed to get workspace %s: %s", workspace_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve workspace"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve workspace")
 
 
 @router.put(
@@ -266,13 +249,13 @@ async def get_workspace(
     },
 )
 async def update_workspace(
-        http_request: Request,
-        workspace_id: str,
-        request: WorkspaceUpdateRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        workspace_service: WorkspaceService = Depends(get_workspace_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str,
+    request: WorkspaceUpdateRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceResponse:
     """
     Update an existing workspace.
@@ -294,20 +277,14 @@ async def update_workspace(
     try:
         # Build auth context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "workspaces", "write",
-            resource_id=workspace_id, workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "workspaces", "write", resource_id=workspace_id, workspace_id=workspace_id)
 
         logger.info("Updating workspace: %s", workspace_id)
 
         # Get existing workspace
         workspace = await workspace_service.get_workspace(workspace_id)
         if not workspace:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Workspace not found: {workspace_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace not found: {workspace_id}")
 
         # Update fields
         if request.name is not None:
@@ -321,16 +298,10 @@ async def update_workspace(
         raise
     except ValueError as e:
         logger.warning("Invalid workspace update request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to update workspace %s: %s", workspace_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update workspace"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update workspace")
 
 
 @router.delete(
@@ -344,39 +315,35 @@ async def update_workspace(
     },
 )
 async def delete_workspace(
-        http_request: Request,
-        workspace_id: str,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        workspace_service: WorkspaceService = Depends(get_workspace_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ):
     """Delete a workspace and all associated data."""
     try:
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "workspaces", "delete",
-            resource_id=workspace_id, workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "workspaces", "delete", resource_id=workspace_id, workspace_id=workspace_id)
 
         deleted = await workspace_service.delete_workspace(workspace_id)
         if not deleted:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Workspace not found: {workspace_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace not found: {workspace_id}")
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="workspace",
-                action="delete",
-                tenant_id=ctx.tenant_id,
-                workspace_id=workspace_id,
-                user_id=ctx.user_id,
-                resource_type="workspace",
-                resource_id=workspace_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="workspace",
+                    action="delete",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="workspace",
+                    resource_id=workspace_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for workspace delete")
 
@@ -384,10 +351,7 @@ async def delete_workspace(
         raise
     except Exception as e:
         logger.error("Failed to delete workspace %s: %s", workspace_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete workspace"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete workspace")
 
 
 @router.get(
@@ -401,12 +365,12 @@ async def delete_workspace(
     },
 )
 async def get_workspace_schema(
-        http_request: Request,
-        workspace_id: str,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        workspace_service: WorkspaceService = Depends(get_workspace_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> dict:
     """
     Get workspace schema including relationship types and memory subtypes.
@@ -427,32 +391,24 @@ async def get_workspace_schema(
     try:
         # Build auth context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "workspaces", "read",
-            resource_id=workspace_id, workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "workspaces", "read", resource_id=workspace_id, workspace_id=workspace_id)
 
         logger.debug("Getting schema for workspace: %s", workspace_id)
 
         # Verify workspace exists
         workspace = await workspace_service.get_workspace(workspace_id)
         if not workspace:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Workspace not found: {workspace_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace not found: {workspace_id}")
 
         # Get ontology service
         ontology_service = _get_ontology_service()
 
         # Get relationship types from ontology
-        relationship_types = ontology_service.list_relationship_types(
-            tenant_id=ctx.tenant_id,
-            workspace_id=workspace_id
-        )
+        relationship_types = ontology_service.list_relationship_types(tenant_id=ctx.tenant_id, workspace_id=workspace_id)
 
         # Get memory subtypes from model
         from ...models.memory import MemorySubtype
+
         memory_subtypes = [subtype.value for subtype in MemorySubtype]
 
         return {
@@ -464,16 +420,8 @@ async def get_workspace_schema(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "Failed to get schema for workspace %s: %s",
-            workspace_id,
-            e,
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve workspace schema"
-        )
+        logger.error("Failed to get schema for workspace %s: %s", workspace_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve workspace schema")
 
 
 def _serialize_memory(m: dict) -> dict:
@@ -505,7 +453,7 @@ async def _generate_export_ndjson(
     logger: logging.Logger,
 ):
     """Generate NDJSON export stream."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     # Get workspace stats for counts
     stats = await storage.get_workspace_stats(workspace_id)
@@ -517,7 +465,7 @@ async def _generate_export_ndjson(
         "type": "header",
         "version": "1.0",
         "workspace_id": workspace_id,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "total_memories": total_memories,
         "total_associations": total_associations,
         "offset": offset,
@@ -545,7 +493,7 @@ async def _generate_export_ndjson(
         # Fetch batch
         batch = await storage.get_recent_memories(
             workspace_id,
-            created_after=datetime(2000, 1, 1, tzinfo=timezone.utc),
+            created_after=datetime(2000, 1, 1, tzinfo=UTC),
             limit=batch_limit,
             offset=batch_offset,
             detail_level="full",
@@ -556,7 +504,7 @@ async def _generate_export_ndjson(
 
         # Stream each memory (convert Memory objects to dicts)
         for m_obj in batch:
-            m = m_obj.model_dump() if hasattr(m_obj, 'model_dump') else m_obj
+            m = m_obj.model_dump() if hasattr(m_obj, "model_dump") else m_obj
             memory_ids.append(m["id"])
             memory_line = {
                 "type": "memory",
@@ -645,18 +593,12 @@ async def export_workspace(
     """
     try:
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "workspaces", "read",
-            resource_id=workspace_id, workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "workspaces", "read", resource_id=workspace_id, workspace_id=workspace_id)
 
         # Verify workspace exists
         workspace = await workspace_service.get_workspace(workspace_id)
         if not workspace:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Workspace not found: {workspace_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace not found: {workspace_id}")
 
         logger.info("Exporting workspace: %s (offset=%d, limit=%d)", workspace_id, offset, limit)
 
@@ -676,16 +618,14 @@ async def export_workspace(
         raise
     except Exception as e:
         logger.error("Failed to export workspace %s: %s", workspace_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to export workspace"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export workspace")
 
 
 def _process_memory_import(item: MemoryExportItem, workspace_id: str, tenant_id: str, id_mapping: dict) -> tuple[bool, str, str]:
     """Process a single memory import. Returns (success, new_id, error_msg)."""
     from uuid import uuid4
-    from ...models.memory import Memory, MemoryType, MemorySubtype
+
+    from ...models.memory import Memory, MemorySubtype, MemoryType
 
     try:
         # Parse type/subtype
@@ -733,6 +673,7 @@ def _process_association_import(assoc: AssociationExportItem, id_mapping: dict) 
             return False, {}, "Source or target memory not found in mapping"
 
         from ...models.association import AssociateInput
+
         assoc_input = AssociateInput(
             source_id=new_source,
             target_id=new_target,
@@ -768,10 +709,7 @@ async def import_workspace(
     """Import memories and associations from JSON or NDJSON export."""
     try:
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "workspaces", "write",
-            resource_id=workspace_id, workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "workspaces", "write", resource_id=workspace_id, workspace_id=workspace_id)
 
         workspace = await workspace_service.get_workspace(workspace_id)
         if not workspace:
@@ -786,7 +724,7 @@ async def import_workspace(
         if "application/x-ndjson" in content_type:
             # NDJSON format
             body = await http_request.body()
-            lines = body.decode().strip().split('\n')
+            lines = body.decode().strip().split("\n")
 
             for line in lines:
                 if not line.strip():
@@ -862,10 +800,7 @@ async def import_workspace(
         if assoc_imported > 0:
             details.append(f"Imported {assoc_imported} associations")
 
-        logger.info(
-            "Import complete for workspace %s: imported=%d, skipped=%d, errors=%d",
-            workspace_id, imported, skipped, errors
-        )
+        logger.info("Import complete for workspace %s: imported=%d, skipped=%d, errors=%d", workspace_id, imported, skipped, errors)
 
         return WorkspaceImportResult(
             imported=imported,

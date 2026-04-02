@@ -6,36 +6,38 @@ Endpoints:
 - GET /v1/memories/{memory_id}/associations - Get associations
 - POST /v1/memories/{memory_id}/traverse - Graph traversal from memory
 """
+
 import logging
 
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from scitrera_app_framework import Plugin, Variables
 
-from .. import EXT_MULTI_API_ROUTERS
+from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
 
 from ...models.association import AssociateInput
-from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
 from ...services.association import AssociationService
+from ...services.audit import AuditEvent, AuditService
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
+from .. import EXT_MULTI_API_ROUTERS
+from .deps import get_audit_service, get_auth_service, get_authz_service
 from .schemas import (
     AssociationCreateRequest,
-    MemoryTraverseRequest,
-    AssociationResponse,
     AssociationListResponse,
-    GraphQueryResult,
+    AssociationResponse,
     ErrorResponse,
+    GraphQueryResult,
+    MemoryTraverseRequest,
 )
-from .deps import get_auth_service, get_authz_service, get_audit_service
-from ...services.audit import AuditService, AuditEvent
 
-router = APIRouter(prefix='/v1', tags=["associations"])
+router = APIRouter(prefix="/v1", tags=["associations"])
 
 
 # Dependencies for services
 async def get_association_service(v: Variables = Depends(get_variables_dep)) -> AssociationService:
     """Get association service instance from dependency injection."""
     from ...services.association import get_association_service as _get_association_service
+
     return _get_association_service(v)
 
 
@@ -52,14 +54,14 @@ async def get_association_service(v: Variables = Depends(get_variables_dep)) -> 
     },
 )
 async def create_association(
-        http_request: Request,
-        memory_id: str,
-        request: AssociationCreateRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        association_service: AssociationService = Depends(get_association_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    memory_id: str,
+    request: AssociationCreateRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    association_service: AssociationService = Depends(get_association_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> AssociationResponse:
     """
     Create a typed relationship between two memories.
@@ -80,16 +82,9 @@ async def create_association(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, request)
-        await authz_service.require_authorization(
-            ctx, "associations", "create", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "associations", "create", workspace_id=ctx.workspace_id)
 
-        logger.info(
-            "Creating association: %s -[%s]-> %s",
-            memory_id,
-            request.relationship,
-            request.target_id
-        )
+        logger.info("Creating association: %s -[%s]-> %s", memory_id, request.relationship, request.target_id)
 
         # Convert request to domain input
         associate_input = AssociateInput(
@@ -108,38 +103,31 @@ async def create_association(
 
         logger.info("Created association: %s", association.id)
         try:
-            await audit_service.record(AuditEvent(
-                event_type="association",
-                action="create",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="association",
-                resource_id=association.id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="association",
+                    action="create",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="association",
+                    resource_id=association.id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for association create")
         return AssociationResponse(association=association)
 
     except ValueError as e:
         logger.warning("Invalid association request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         # Check if it's a "not found" error
         if "not found" in str(e).lower():
             logger.warning("Association source or target not found: %s -> %s: %s", memory_id, request.target_id, e)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Memory not found: {memory_id} or {request.target_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id} or {request.target_id}")
         logger.error("Failed to create association: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create association"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create association")
 
 
 @router.get(
@@ -153,15 +141,15 @@ async def create_association(
     },
 )
 async def get_associations(
-        http_request: Request,
-        memory_id: str,
-        relationships: str | None = None,
-        direction: str = "both",
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        association_service: AssociationService = Depends(get_association_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    memory_id: str,
+    relationships: str | None = None,
+    direction: str = "both",
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    association_service: AssociationService = Depends(get_association_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> AssociationListResponse:
     """
     Get all associations for a memory.
@@ -183,24 +171,14 @@ async def get_associations(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "associations", "read", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "associations", "read", workspace_id=ctx.workspace_id)
 
-        logger.debug(
-            "Getting associations for memory: %s, direction: %s",
-            memory_id,
-            direction
-        )
+        logger.debug("Getting associations for memory: %s, direction: %s", memory_id, direction)
 
         # Parse relationship types if provided
         relationship_types = None
         if relationships:
-            relationship_types = [
-                rel.strip().upper()
-                for rel in relationships.split(",")
-                if rel.strip()
-            ]
+            relationship_types = [rel.strip().upper() for rel in relationships.split(",") if rel.strip()]
 
         # Get associations
         associations = await association_service.get_related(
@@ -212,41 +190,29 @@ async def get_associations(
 
         logger.debug("Found %d associations for memory: %s", len(associations), memory_id)
         try:
-            await audit_service.record(AuditEvent(
-                event_type="association",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="association",
-                resource_id=memory_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="association",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="association",
+                    resource_id=memory_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for association read")
-        return AssociationListResponse(
-            associations=associations,
-            total_count=len(associations)
-        )
+        return AssociationListResponse(associations=associations, total_count=len(associations))
 
     except HTTPException:
         raise
     except ValueError as e:
         logger.warning("Invalid association query: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(
-            "Failed to get associations for memory %s: %s",
-            memory_id,
-            e,
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve associations"
-        )
+        logger.error("Failed to get associations for memory %s: %s", memory_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve associations")
 
 
 @router.post(
@@ -261,14 +227,14 @@ async def get_associations(
     },
 )
 async def traverse_from_memory(
-        http_request: Request,
-        memory_id: str,
-        request: MemoryTraverseRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        association_service: AssociationService = Depends(get_association_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    memory_id: str,
+    request: MemoryTraverseRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    association_service: AssociationService = Depends(get_association_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> GraphQueryResult:
     """
     Traverse memory graph starting from a specific memory.
@@ -294,16 +260,9 @@ async def traverse_from_memory(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, request)
-        await authz_service.require_authorization(
-            ctx, "associations", "read", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "associations", "read", workspace_id=ctx.workspace_id)
 
-        logger.info(
-            "Traversing graph from memory: %s, max_depth: %d, direction: %s",
-            memory_id,
-            request.max_depth,
-            request.direction
-        )
+        logger.info("Traversing graph from memory: %s, max_depth: %d, direction: %s", memory_id, request.max_depth, request.direction)
 
         # Perform traversal via storage backend
         result = await association_service.storage.traverse_graph(
@@ -314,44 +273,33 @@ async def traverse_from_memory(
             direction=request.direction,
         )
 
-        logger.info(
-            "Graph traversal found %d paths, %d unique nodes",
-            result.total_paths,
-            len(result.unique_nodes)
-        )
+        logger.info("Graph traversal found %d paths, %d unique nodes", result.total_paths, len(result.unique_nodes))
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="association",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="association",
-                resource_id=memory_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="association",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="association",
+                    resource_id=memory_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for association traverse")
         return result
 
     except ValueError as e:
         logger.warning("Invalid graph traversal request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         # Check if it's a "not found" error
         if "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Memory not found: {memory_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
         logger.error("Failed to traverse graph from memory %s: %s", memory_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to traverse graph"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to traverse graph")
 
 
 class AssociationsAPIPlugin(Plugin):

@@ -43,10 +43,7 @@ class EnterpriseRequiredError(MemoryLayerError):
         feature: str = "This feature",
         message: str | None = None,
     ) -> None:
-        msg = message or (
-            f"{feature} requires MemoryLayer Enterprise. "
-            "See https://memorylayer.ai for upgrade options."
-        )
+        msg = message or (f"{feature} requires MemoryLayer Enterprise. See https://memorylayer.ai for upgrade options.")
         super().__init__(msg, status_code=404)
         self.feature = feature
 

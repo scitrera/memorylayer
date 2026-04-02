@@ -3,6 +3,6 @@
 from .provider import RRFRerankerProvider, RRFRerankerProviderPlugin
 
 __all__ = [
-    'RRFRerankerProvider',
-    'RRFRerankerProviderPlugin',
+    "RRFRerankerProvider",
+    "RRFRerankerProviderPlugin",
 ]

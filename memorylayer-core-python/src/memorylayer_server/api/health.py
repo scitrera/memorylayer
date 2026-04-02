@@ -1,20 +1,19 @@
 """Health check endpoints for MemoryLayer.ai API."""
+
 import logging
 
-from typing import Dict
-
-from fastapi import APIRouter, status, Depends
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 from scitrera_app_framework import Plugin, Variables
 
 from ..lifecycle.fastapi import get_logger
 from . import EXT_MULTI_API_ROUTERS
 
-router = APIRouter(tags=['health'])
+router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> dict[str, str]:
     """
     Basic health check endpoint.
 
@@ -25,7 +24,9 @@ async def health_check() -> Dict[str, str]:
 
 
 @router.get("/health/ready")
-async def readiness_check(logger: logging.Logger = Depends(get_logger), ) -> JSONResponse:
+async def readiness_check(
+    logger: logging.Logger = Depends(get_logger),
+) -> JSONResponse:
     """
     Readiness check endpoint verifying database and cache connectivity.
 
@@ -40,6 +41,7 @@ async def readiness_check(logger: logging.Logger = Depends(get_logger), ) -> JSO
     # Check database connectivity
     try:
         from memorylayer_server.services.storage import get_storage_backend
+
         storage = get_storage_backend()
         is_healthy = await storage.health_check()
         checks["services"]["database"] = "connected" if is_healthy else "disconnected"
@@ -53,11 +55,7 @@ async def readiness_check(logger: logging.Logger = Depends(get_logger), ) -> JSO
     # Cache is optional and not yet configured via plugin
     checks["services"]["cache"] = "not_configured"
 
-    status_code = (
-        status.HTTP_200_OK
-        if checks["status"] == "ready"
-        else status.HTTP_503_SERVICE_UNAVAILABLE
-    )
+    status_code = status.HTTP_200_OK if checks["status"] == "ready" else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(content=checks, status_code=status_code)
 

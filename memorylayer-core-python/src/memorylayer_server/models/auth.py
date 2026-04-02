@@ -3,8 +3,9 @@ Authentication and authorization context models.
 
 These models represent the resolved identity and context for API requests.
 """
+
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .session import Session
 
@@ -17,9 +18,10 @@ class AuthIdentity:
     In OSS, this always returns default tenant with no user.
     In Enterprise, this is populated from API key or JWT verification.
     """
+
     tenant_id: str
-    user_id: Optional[str] = None
-    api_key_id: Optional[str] = None  # For audit/tracking
+    user_id: str | None = None
+    api_key_id: str | None = None  # For audit/tracking
 
 
 @dataclass
@@ -38,18 +40,19 @@ class RequestContext:
     The metadata dict carries extension-specific data (e.g., gateway-injected
     access levels) without coupling the core model to any particular auth scheme.
     """
+
     tenant_id: str
     workspace_id: str
-    user_id: Optional[str] = None
-    session: Optional[Session] = None
+    user_id: str | None = None
+    session: Session | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         """Convenience property to get session ID if session exists."""
         return self.session.id if self.session else None
 
     @property
-    def context_id(self) -> Optional[str]:
+    def context_id(self) -> str | None:
         """Get context_id from session if available."""
         return self.session.context_id if self.session else None

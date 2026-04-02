@@ -5,19 +5,19 @@ Derives higher-order insights and conclusions from accumulated memories
 about an entity (subject). Unlike extraction (which captures what was said),
 inference derives what patterns and behaviors *mean* about the entity.
 """
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
 
-from ...config import MEMORYLAYER_INFERENCE_SERVICE, DEFAULT_MEMORYLAYER_INFERENCE_SERVICE
+from ...config import DEFAULT_MEMORYLAYER_INFERENCE_SERVICE, MEMORYLAYER_INFERENCE_SERVICE
 from ...models.memory import Memory
 from .._constants import (
-    EXT_INFERENCE_SERVICE,
-    EXT_MEMORY_SERVICE,
-    EXT_STORAGE_BACKEND,
-    EXT_LLM_SERVICE,
     EXT_ASSOCIATION_SERVICE,
     EXT_CACHE_SERVICE,
+    EXT_INFERENCE_SERVICE,
+    EXT_LLM_SERVICE,
+    EXT_MEMORY_SERVICE,
+    EXT_STORAGE_BACKEND,
 )
 from .._plugin_factory import make_service_plugin_base
 
@@ -39,11 +39,11 @@ class InferenceService(ABC):
 
     @abstractmethod
     async def derive_insights(
-            self,
-            workspace_id: str,
-            subject_id: str,
-            observer_id: Optional[str] = None,
-            force: bool = False,
+        self,
+        workspace_id: str,
+        subject_id: str,
+        observer_id: str | None = None,
+        force: bool = False,
     ) -> InferenceResult:
         """Derive higher-order insights about a subject from accumulated memories.
 
@@ -63,11 +63,11 @@ class InferenceService(ABC):
 
     @abstractmethod
     async def get_insights(
-            self,
-            workspace_id: str,
-            subject_id: str,
-            observer_id: Optional[str] = None,
-            limit: int = 20,
+        self,
+        workspace_id: str,
+        subject_id: str,
+        observer_id: str | None = None,
+        limit: int = 20,
     ) -> list[Memory]:
         """Retrieve existing derived insights about a subject.
 

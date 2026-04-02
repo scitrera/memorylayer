@@ -1,11 +1,12 @@
 """Context environment service package."""
-from .base import (
-    ContextEnvironmentService,
-    ContextEnvironmentServicePluginBase,
-    EXT_CONTEXT_ENVIRONMENT_SERVICE,
-)
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    EXT_CONTEXT_ENVIRONMENT_SERVICE,
+    ContextEnvironmentService,
+    ContextEnvironmentServicePluginBase,
+)
 
 
 def get_context_environment_service(v: Variables = None) -> ContextEnvironmentService:
@@ -14,8 +15,8 @@ def get_context_environment_service(v: Variables = None) -> ContextEnvironmentSe
 
 
 __all__ = (
-    'ContextEnvironmentService',
-    'ContextEnvironmentServicePluginBase',
-    'get_context_environment_service',
-    'EXT_CONTEXT_ENVIRONMENT_SERVICE',
+    "ContextEnvironmentService",
+    "ContextEnvironmentServicePluginBase",
+    "get_context_environment_service",
+    "EXT_CONTEXT_ENVIRONMENT_SERVICE",
 )

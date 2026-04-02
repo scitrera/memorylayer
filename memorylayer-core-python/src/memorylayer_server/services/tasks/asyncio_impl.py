@@ -3,16 +3,17 @@ AsyncIO Task Service implementation.
 
 Simple in-memory task service using asyncio for local development and single-node deployments.
 """
-import asyncio
-from typing import Callable, Awaitable, Optional
-from uuid import uuid4
-from logging import Logger
 
-from scitrera_app_framework import get_logger, Variables, ext_parse_bool
+import asyncio
+from collections.abc import Awaitable, Callable
+from logging import Logger
+from uuid import uuid4
+
+from scitrera_app_framework import Variables, ext_parse_bool, get_logger
 
 from .base import TaskService, TaskServicePluginBase, TaskStatus
 
-MEMORYLAYER_TASKS_ENABLED = 'MEMORYLAYER_TASKS_ENABLED'
+MEMORYLAYER_TASKS_ENABLED = "MEMORYLAYER_TASKS_ENABLED"
 DEFAULT_TASKS_ENABLED = True
 
 
@@ -43,13 +44,7 @@ class AsyncIOTaskService(TaskService):
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info("Initialized AsyncIOTaskService")
 
-    async def schedule_task(
-            self,
-            task_type: str,
-            payload: dict,
-            delay_seconds: int = 0,
-            priority: int = 5
-    ) -> Optional[str]:
+    async def schedule_task(self, task_type: str, payload: dict, delay_seconds: int = 0, priority: int = 5) -> str | None:
         """
         Schedule a task for background execution.
 
@@ -85,12 +80,7 @@ class AsyncIOTaskService(TaskService):
         self._tasks[task_id] = asyncio.create_task(run_after_delay())
         return task_id
 
-    async def schedule_recurring(
-            self,
-            task_type: str,
-            interval_seconds: int,
-            payload: dict
-    ) -> Optional[str]:
+    async def schedule_recurring(self, task_type: str, interval_seconds: int, payload: dict) -> str | None:
         """
         Schedule a recurring task.
 
@@ -116,24 +106,14 @@ class AsyncIOTaskService(TaskService):
                         self.logger.debug("Executing recurring task (type: %s)", task_type)
                         await handler(self._v, payload)
                     except Exception as e:
-                        self.logger.error(
-                            "Recurring task %s failed: %s",
-                            task_type,
-                            e,
-                            exc_info=True
-                        )
+                        self.logger.error("Recurring task %s failed: %s", task_type, e, exc_info=True)
                 else:
                     self.logger.error("No handler registered for task type: %s", task_type)
 
                 await asyncio.sleep(interval_seconds)
 
         self._recurring_tasks[schedule_id] = asyncio.create_task(run_recurring())
-        self.logger.info(
-            "Scheduled recurring task %s: type=%s, interval=%ss",
-            schedule_id,
-            task_type,
-            interval_seconds
-        )
+        self.logger.info("Scheduled recurring task %s: type=%s, interval=%ss", schedule_id, task_type, interval_seconds)
         return schedule_id
 
     async def cancel_task(self, task_id: str) -> bool:
@@ -191,11 +171,7 @@ class AsyncIOTaskService(TaskService):
 
         return TaskStatus.RUNNING
 
-    def register_handler(
-            self,
-            task_type: str,
-            handler: Callable[[Variables, dict], Awaitable[None]]
-    ) -> None:
+    def register_handler(self, task_type: str, handler: Callable[[Variables, dict], Awaitable[None]]) -> None:
         """
         Register a handler for a task type.
 
@@ -236,7 +212,7 @@ class AsyncIOTaskServicePlugin(TaskServicePluginBase):
     """
 
     # This MUST match what users set in MEMORYLAYER_TASK_PROVIDER
-    PROVIDER_NAME = 'asyncio'
+    PROVIDER_NAME = "asyncio"
 
     def initialize(self, v: Variables, logger: Logger) -> TaskService:
         """

@@ -41,9 +41,7 @@ async def basic_example():
             print(f"  - {mem.content}")
 
         # Synthesize memories
-        reflection = await client.reflect(
-            query="summarize user's technology preferences", max_tokens=300
-        )
+        reflection = await client.reflect(query="summarize user's technology preferences", max_tokens=300)
         print(f"\nReflection:\n{reflection.reflection}")
 
 
@@ -104,15 +102,11 @@ async def session_example():
             {"description": "Debugging auth", "file": "auth.py", "line": 42},
         )
 
-        await client.set_context(
-            session.id, "user_intent", "Fix token refresh issue"
-        )
+        await client.set_context(session.id, "user_intent", "Fix token refresh issue")
 
         # Retrieve context
-        context = await client.get_context(
-            session.id, ["current_task", "user_intent"]
-        )
-        print(f"\nSession context:")
+        context = await client.get_context(session.id, ["current_task", "user_intent"])
+        print("\nSession context:")
         print(f"  Task: {context.get('current_task')}")
         print(f"  Intent: {context.get('user_intent')}")
 
@@ -167,9 +161,7 @@ async def memory_lifecycle_example():
         print(f"Created: {memory.id}")
 
         # Update memory
-        updated = await client.update_memory(
-            memory.id, importance=0.5, tags=["testing", "temporary"]
-        )
+        updated = await client.update_memory(memory.id, importance=0.5, tags=["testing", "temporary"])
         print(f"Updated importance: {updated.importance}")
 
         # Get specific memory

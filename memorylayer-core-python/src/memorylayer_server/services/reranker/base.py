@@ -12,25 +12,27 @@ Extension Points:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from logging import Logger
-from typing import Optional, Union, Any
+from typing import Any
 
-from scitrera_app_framework.api import Variables, Plugin, enabled_option_pattern
 from scitrera_app_framework import get_logger
-
-from .._plugin_factory import make_service_plugin_base
+from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import (
-    MEMORYLAYER_RERANKER_PROVIDER, DEFAULT_MEMORYLAYER_RERANKER_PROVIDER,
-    MEMORYLAYER_RERANKER_SERVICE, DEFAULT_MEMORYLAYER_RERANKER_SERVICE,
-    MEMORYLAYER_RERANKER_PRELOAD_ENABLED, DEFAULT_MEMORYLAYER_RERANKER_PRELOAD_ENABLED,
+    DEFAULT_MEMORYLAYER_RERANKER_PRELOAD_ENABLED,
+    DEFAULT_MEMORYLAYER_RERANKER_PROVIDER,
+    DEFAULT_MEMORYLAYER_RERANKER_SERVICE,
+    MEMORYLAYER_RERANKER_PRELOAD_ENABLED,
+    MEMORYLAYER_RERANKER_PROVIDER,
+    MEMORYLAYER_RERANKER_SERVICE,
 )
-
 from .._constants import EXT_RERANKER_PROVIDER, EXT_RERANKER_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 @dataclass
 class RerankResult:
     """Result of a reranking operation."""
+
     index: int  # Original index in input list
     score: float  # Relevance score (0-1)
     document: Any  # Original document
@@ -57,10 +59,10 @@ class RerankerProvider(ABC):
 
     @abstractmethod
     async def rerank(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
     ) -> list[float]:
         """
         Score documents by relevance to query.
@@ -76,11 +78,11 @@ class RerankerProvider(ABC):
         pass
 
     async def rerank_with_indices(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
-            top_k: Optional[int] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
+        top_k: int | None = None,
     ) -> list[tuple[int, float]]:
         """
         Score documents and return sorted indices with scores.
@@ -113,10 +115,10 @@ class MultimodalRerankerProvider(RerankerProvider):
 
     @abstractmethod
     async def rerank_multimodal(
-            self,
-            query: Union[str, dict],
-            documents: list[Union[str, dict]],
-            instruction: Optional[str] = None,
+        self,
+        query: str | dict,
+        documents: list[str | dict],
+        instruction: str | None = None,
     ) -> list[float]:
         """
         Score multimodal documents by relevance to a multimodal query.
@@ -144,31 +146,31 @@ class RerankerService:
         self.logger = get_logger(v, name=self.__class__.__name__)
 
     async def rerank(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
     ) -> list[float]:
         """Score documents by relevance to query."""
         return await self.provider.rerank(query, documents, instruction)
 
     async def rerank_with_indices(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
-            top_k: Optional[int] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
+        top_k: int | None = None,
     ) -> list[tuple[int, float]]:
         """Score documents and return sorted indices with scores."""
         return await self.provider.rerank_with_indices(query, documents, instruction, top_k)
 
     async def rerank_objects(
-            self,
-            query: str,
-            objects: list[Any],
-            content_fn,
-            instruction: Optional[str] = None,
-            top_k: Optional[int] = None,
+        self,
+        query: str,
+        objects: list[Any],
+        content_fn,
+        instruction: str | None = None,
+        top_k: int | None = None,
     ) -> list[RerankResult]:
         """
         Rerank arbitrary objects using a content extraction function.
@@ -190,26 +192,21 @@ class RerankerService:
         documents = [content_fn(obj) for obj in objects]
 
         # Get ranked indices
-        ranked = await self.provider.rerank_with_indices(
-            query, documents, instruction, top_k
-        )
+        ranked = await self.provider.rerank_with_indices(query, documents, instruction, top_k)
 
         # Build results with original objects
-        results = [
-            RerankResult(index=idx, score=score, document=objects[idx])
-            for idx, score in ranked
-        ]
+        results = [RerankResult(index=idx, score=score, document=objects[idx]) for idx, score in ranked]
 
         return results
 
     async def rerank_objects_adaptive(
-            self,
-            query: str,
-            objects: list[Any],
-            content_fn,
-            score_fn,
-            requested_k: int,
-            instruction: Optional[str] = None,
+        self,
+        query: str,
+        objects: list[Any],
+        content_fn,
+        score_fn,
+        requested_k: int,
+        instruction: str | None = None,
     ) -> list[RerankResult]:
         """
         Rerank objects with adaptive candidate sizing based on initial scores.
@@ -244,9 +241,11 @@ class RerankerService:
 
 # Plugin base classes
 
+
 class RerankerProviderPluginBase(Plugin):
     """Base Plugin for reranker providers."""
-    PROVIDER_NAME: str = ''
+
+    PROVIDER_NAME: str = ""
 
     def name(self) -> str:
         return f"{EXT_RERANKER_PROVIDER}|{self.PROVIDER_NAME}"
@@ -255,7 +254,7 @@ class RerankerProviderPluginBase(Plugin):
         return EXT_RERANKER_PROVIDER
 
     def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_RERANKER_PROVIDER, self_attr='PROVIDER_NAME')
+        return enabled_option_pattern(self, v, MEMORYLAYER_RERANKER_PROVIDER, self_attr="PROVIDER_NAME")
 
     def on_registration(self, v: Variables) -> None:
         v.set_default_value(MEMORYLAYER_RERANKER_PROVIDER, DEFAULT_MEMORYLAYER_RERANKER_PROVIDER)
@@ -267,9 +266,7 @@ class RerankerProviderPluginBase(Plugin):
         # noinspection PyTypeChecker
         provider: RerankerProvider = value
         preload = v.environ(
-            MEMORYLAYER_RERANKER_PRELOAD_ENABLED,
-            default=DEFAULT_MEMORYLAYER_RERANKER_PRELOAD_ENABLED,
-            type_fn=ext_parse_bool
+            MEMORYLAYER_RERANKER_PRELOAD_ENABLED, default=DEFAULT_MEMORYLAYER_RERANKER_PRELOAD_ENABLED, type_fn=ext_parse_bool
         )
 
         if preload:

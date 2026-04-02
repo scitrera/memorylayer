@@ -1,6 +1,7 @@
 """Rate limiting middleware for MemoryLayer FastAPI server."""
+
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -16,7 +17,7 @@ from ..services.rate_limit.noop import NoopRateLimitService
 # Health-check paths that bypass rate limiting
 _HEALTH_PATHS = frozenset({"/health", "/healthz"})
 
-EXT_RATE_LIMIT_MIDDLEWARE = 'memorylayer-server-fastapi-middleware-rate-limit'
+EXT_RATE_LIMIT_MIDDLEWARE = "memorylayer-server-fastapi-middleware-rate-limit"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

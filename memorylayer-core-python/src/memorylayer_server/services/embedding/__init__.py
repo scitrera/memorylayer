@@ -1,7 +1,7 @@
-from .base import EmbeddingProvider, EXT_EMBEDDING_PROVIDER, EXT_EMBEDDING_SERVICE
-from .service_default import EmbeddingService
-
 from scitrera_app_framework import Variables, get_extension
+
+from .base import EXT_EMBEDDING_PROVIDER, EXT_EMBEDDING_SERVICE, EmbeddingProvider
+from .service_default import EmbeddingService
 
 
 def get_embedding_provider(v: Variables = None) -> EmbeddingProvider:
@@ -13,10 +13,10 @@ def get_embedding_service(v: Variables = None) -> EmbeddingService:
 
 
 __all__ = (
-    'EmbeddingProvider',
-    'EmbeddingService',
-    'get_embedding_provider',
-    'get_embedding_service',
-    'EXT_EMBEDDING_PROVIDER',
-    'EXT_EMBEDDING_SERVICE',
+    "EmbeddingProvider",
+    "EmbeddingService",
+    "get_embedding_provider",
+    "get_embedding_service",
+    "EXT_EMBEDDING_PROVIDER",
+    "EXT_EMBEDDING_SERVICE",
 )

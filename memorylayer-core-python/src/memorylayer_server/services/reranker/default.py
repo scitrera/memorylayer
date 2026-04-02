@@ -5,9 +5,9 @@ Provides high-level reranking with adaptive candidate list sizing.
 """
 
 from logging import Logger
-from typing import Any, Optional
+from typing import Any
 
-from scitrera_app_framework import Variables, get_extension
+from scitrera_app_framework import Variables
 
 from .base import (
     EXT_RERANKER_PROVIDER,
@@ -16,7 +16,6 @@ from .base import (
     RerankerServicePluginBase,
     RerankResult,
 )
-
 
 # Adaptive reranking configuration
 ADAPTIVE_MIN_CANDIDATES = 10  # Minimum candidates to consider
@@ -98,7 +97,7 @@ class DefaultRerankerService(RerankerService):
         documents: list[str],
         initial_scores: list[float],
         requested_k: int,
-        instruction: Optional[str] = None,
+        instruction: str | None = None,
     ) -> list[tuple[int, float]]:
         """
         Rerank with adaptive candidate list sizing.
@@ -117,9 +116,7 @@ class DefaultRerankerService(RerankerService):
             return []
 
         # Compute adaptive candidate count
-        candidates_k = self.compute_adaptive_k(
-            initial_scores, requested_k, len(documents)
-        )
+        candidates_k = self.compute_adaptive_k(initial_scores, requested_k, len(documents))
 
         # Get top candidates by initial score
         indexed_initial = list(enumerate(initial_scores))
@@ -134,10 +131,7 @@ class DefaultRerankerService(RerankerService):
         rerank_scores = await self.provider.rerank(query, candidate_docs, instruction)
 
         # Map back to original indices and sort by rerank score
-        results = [
-            (candidate_indices[i], score)
-            for i, score in enumerate(rerank_scores)
-        ]
+        results = [(candidate_indices[i], score) for i, score in enumerate(rerank_scores)]
         results.sort(key=lambda x: x[1], reverse=True)
 
         return results[:requested_k]
@@ -149,7 +143,7 @@ class DefaultRerankerService(RerankerService):
         content_fn,
         score_fn,
         requested_k: int,
-        instruction: Optional[str] = None,
+        instruction: str | None = None,
     ) -> list[RerankResult]:
         """
         Rerank objects with adaptive candidate sizing.
@@ -173,15 +167,10 @@ class DefaultRerankerService(RerankerService):
         initial_scores = [score_fn(obj) for obj in objects]
 
         # Rerank with adaptive sizing
-        ranked = await self.rerank_with_adaptive_k(
-            query, documents, initial_scores, requested_k, instruction
-        )
+        ranked = await self.rerank_with_adaptive_k(query, documents, initial_scores, requested_k, instruction)
 
         # Build results
-        results = [
-            RerankResult(index=idx, score=score, document=objects[idx])
-            for idx, score in ranked
-        ]
+        results = [RerankResult(index=idx, score=score, document=objects[idx]) for idx, score in ranked]
 
         return results
 
@@ -189,7 +178,7 @@ class DefaultRerankerService(RerankerService):
 class DefaultRerankerServicePlugin(RerankerServicePluginBase):
     """Plugin for default reranker service."""
 
-    PROVIDER_NAME = 'default'
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> object | None:
         provider = self.get_extension(EXT_RERANKER_PROVIDER, v)

@@ -12,36 +12,44 @@ Endpoints:
 - POST /v1/sessions/{session_id}/touch - Update session expiration
 - GET /v1/sessions/briefing - Session briefing
 """
+
 import logging
-from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from scitrera_app_framework import Plugin, Variables
 
-from .. import EXT_MULTI_API_ROUTERS
 from memorylayer_server.lifecycle.fastapi import get_logger
 
+from ...config import DEFAULT_CONTEXT_ID, DEFAULT_TENANT_ID
+from ...services.audit import AuditEvent, AuditService
+from ...services.authentication import AuthenticationService
+from ...services.authorization import AuthorizationService
+from ...services.metrics import MetricsService
+from ...services.session import SessionService
+from ...services.workspace import WorkspaceService
+from .. import EXT_MULTI_API_ROUTERS
+from .deps import (
+    get_active_session,
+    get_audit_service,
+    get_auth_service,
+    get_authz_service,
+    get_metrics_service,
+    get_session_service,
+    get_workspace_service,
+)
 from .schemas import (
+    CommitOptions,
+    CommitResponse,
+    ErrorResponse,
+    SessionBriefingResponse,
     SessionCreateRequest,
-    WorkingMemorySetRequest,
     SessionListResponse,
     SessionResponse,
     SessionStartResponse,
     WorkingMemoryResponse,
-    SessionBriefingResponse,
-    CommitOptions,
-    CommitResponse,
-    ErrorResponse,
+    WorkingMemorySetRequest,
 )
-from ...services.session import SessionService
-from ...services.workspace import WorkspaceService
-from ...services.authentication import AuthenticationService
-from ...services.authorization import AuthorizationService
-from ...config import DEFAULT_TENANT_ID, DEFAULT_CONTEXT_ID
-from .deps import get_auth_service, get_authz_service, get_session_service, get_workspace_service, get_active_session, get_audit_service, get_metrics_service
-from ...services.audit import AuditService, AuditEvent
-from ...services.metrics import MetricsService
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -58,15 +66,15 @@ router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
     },
 )
 async def create_session(
-        http_request: Request,
-        request: SessionCreateRequest,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        workspace_service: WorkspaceService = Depends(get_workspace_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        metrics_service: MetricsService = Depends(get_metrics_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    request: SessionCreateRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    metrics_service: MetricsService = Depends(get_metrics_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> SessionStartResponse:
     """
     Create a new working memory session.
@@ -90,9 +98,7 @@ async def create_session(
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, request)
-        await authz_service.require_authorization(
-            ctx, "sessions", "create", workspace_id=ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "create", workspace_id=ctx.workspace_id)
 
         # Generate session ID if not provided
         session_id = request.session_id or f"sess_{uuid4().hex}"
@@ -104,11 +110,7 @@ async def create_session(
         context_id = request.context_id or DEFAULT_CONTEXT_ID
 
         logger.info(
-            "Creating session: %s in workspace: %s, ttl: %d, context: %s",
-            session_id,
-            workspace_id,
-            request.ttl_seconds,
-            context_id
+            "Creating session: %s in workspace: %s, ttl: %d, context: %s", session_id, workspace_id, request.ttl_seconds, context_id
         )
 
         # Auto-create workspace if it doesn't exist (OSS "just works" pattern)
@@ -125,6 +127,7 @@ async def create_session(
 
         # Create session with context_id
         from ...models.session import Session
+
         session = Session.create_with_ttl(
             session_id=session_id,
             workspace_id=workspace_id,
@@ -141,12 +144,7 @@ async def create_session(
         if request.working_memory:
             logger.info("Setting initial working memory: %d keys", len(request.working_memory))
             for key, value in request.working_memory.items():
-                await session_service.set_working_memory(
-                    workspace_id=workspace_id,
-                    session_id=session_id,
-                    key=key,
-                    value=value
-                )
+                await session_service.set_working_memory(workspace_id=workspace_id, session_id=session_id, key=key, value=value)
 
         # Generate briefing if requested
         briefing = None
@@ -167,31 +165,27 @@ async def create_session(
         except Exception:
             logger.debug("Metrics recording failed for session create")
         try:
-            await audit_service.record(AuditEvent(
-                event_type="session",
-                action="create",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="session",
-                resource_id=session.id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="session",
+                    action="create",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="session",
+                    resource_id=session.id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for session create")
         return SessionStartResponse(session=session, briefing=briefing)
 
     except ValueError as e:
         logger.warning("Invalid session creation request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to create session: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create session"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create session")
 
 
 # NOTE: list and /briefing must be defined BEFORE /{session_id} to avoid route collision
@@ -205,14 +199,14 @@ async def create_session(
     },
 )
 async def list_sessions(
-        http_request: Request,
-        workspace_id: Optional[str] = None,
-        context_id: Optional[str] = None,
-        include_expired: bool = False,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str | None = None,
+    context_id: str | None = None,
+    include_expired: bool = False,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> SessionListResponse:
     """
     List sessions in a workspace.
@@ -236,14 +230,9 @@ async def list_sessions(
         # Build context and check authorization
         ctx = await auth_service.build_context(http_request, None)
         workspace_id = workspace_id or ctx.workspace_id
-        await authz_service.require_authorization(
-            ctx, "sessions", "read", workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "read", workspace_id=workspace_id)
 
-        logger.debug(
-            "Listing sessions for workspace: %s, context: %s, include_expired: %s",
-            workspace_id, context_id, include_expired
-        )
+        logger.debug("Listing sessions for workspace: %s, context: %s, include_expired: %s", workspace_id, context_id, include_expired)
 
         sessions = await session_service.list_sessions(
             workspace_id,
@@ -260,10 +249,7 @@ async def list_sessions(
         raise
     except Exception as e:
         logger.error("Failed to list sessions: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list sessions"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list sessions")
 
 
 @router.get(
@@ -276,17 +262,17 @@ async def list_sessions(
     },
 )
 async def get_briefing(
-        http_request: Request,
-        workspace_id: Optional[str] = None,
-        lookback_minutes: int = 60,
-        detail_level: str = "abstract",
-        limit: int = 10,
-        include_memories: bool = True,
-        include_contradictions: bool = True,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str | None = None,
+    lookback_minutes: int = 60,
+    detail_level: str = "abstract",
+    limit: int = 10,
+    include_memories: bool = True,
+    include_contradictions: bool = True,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> SessionBriefingResponse:
     """
     Get a briefing of recent workspace activity and context.
@@ -314,9 +300,7 @@ async def get_briefing(
         ctx = await auth_service.build_context(http_request, None)
         # Use explicit workspace_id if provided, otherwise fall back to context
         workspace_id = workspace_id or ctx.workspace_id
-        await authz_service.require_authorization(
-            ctx, "sessions", "read", workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "read", workspace_id=workspace_id)
 
         logger.info("Generating briefing for workspace: %s", workspace_id)
 
@@ -334,10 +318,7 @@ async def get_briefing(
         raise
     except Exception as e:
         logger.error("Failed to generate briefing: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate briefing"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate briefing")
 
 
 @router.get(
@@ -351,14 +332,14 @@ async def get_briefing(
     },
 )
 async def get_session(
-        http_request: Request,
-        session_id: str,
-        _active_session: str | None = Depends(get_active_session),
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    session_id: str,
+    _active_session: str | None = Depends(get_active_session),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> SessionResponse:
     """
     Retrieve a session by ID.
@@ -382,27 +363,23 @@ async def get_session(
         # Session service get() doesn't require workspace_id
         session = await session_service.get(session_id)
         if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found or expired: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found or expired: {session_id}")
 
         # Check authorization for the session's workspace
-        await authz_service.require_authorization(
-            ctx, "sessions", "read",
-            resource_id=session_id, workspace_id=session.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "read", resource_id=session_id, workspace_id=session.workspace_id)
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="session",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=session.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="session",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="session",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=session.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="session",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for session read")
         return SessionResponse(session=session)
@@ -411,10 +388,7 @@ async def get_session(
         raise
     except Exception as e:
         logger.error("Failed to get session %s: %s", session_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve session"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve session")
 
 
 @router.delete(
@@ -428,14 +402,14 @@ async def get_session(
     },
 )
 async def delete_session(
-        http_request: Request,
-        session_id: str,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        audit_service: AuditService = Depends(get_audit_service),
-        metrics_service: MetricsService = Depends(get_metrics_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    session_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    metrics_service: MetricsService = Depends(get_metrics_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> None:
     """
     Delete a session and all its context data.
@@ -456,38 +430,31 @@ async def delete_session(
         # Get session to find its workspace
         session = await session_service.get(session_id)
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
 
         # Check authorization
-        await authz_service.require_authorization(
-            ctx, "sessions", "delete",
-            resource_id=session_id, workspace_id=session.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "delete", resource_id=session_id, workspace_id=session.workspace_id)
 
         success = await session_service.delete_session(session.workspace_id, session_id)
         if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
 
         try:
             metrics_service.counter("memorylayer_session_close_total", labels={"workspace": session.workspace_id})
         except Exception:
             logger.debug("Metrics recording failed for session close")
         try:
-            await audit_service.record(AuditEvent(
-                event_type="session",
-                action="close",
-                tenant_id=ctx.tenant_id,
-                workspace_id=session.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="session",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="session",
+                    action="close",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=session.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="session",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for session close")
 
@@ -495,10 +462,7 @@ async def delete_session(
         raise
     except Exception as e:
         logger.error("Failed to delete session %s: %s", session_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete session"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete session")
 
 
 @router.post(
@@ -514,14 +478,14 @@ async def delete_session(
     },
 )
 async def set_working_memory(
-        http_request: Request,
-        session_id: str,
-        request: WorkingMemorySetRequest,
-        _active_session: str | None = Depends(get_active_session),
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    session_id: str,
+    request: WorkingMemorySetRequest,
+    _active_session: str | None = Depends(get_active_session),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> WorkingMemoryResponse:
     """
     Set a key-value working memory entry in a session.
@@ -544,22 +508,12 @@ async def set_working_memory(
         # Get session to find its workspace
         session = await session_service.get(session_id)
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
 
         # Check authorization
-        await authz_service.require_authorization(
-            ctx, "sessions", "write",
-            resource_id=session_id, workspace_id=session.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "write", resource_id=session_id, workspace_id=session.workspace_id)
 
-        logger.info(
-            "Setting working memory in session: %s, key: %s",
-            session_id,
-            request.key
-        )
+        logger.info("Setting working memory in session: %s, key: %s", session_id, request.key)
 
         memory = await session_service.set_working_memory(
             workspace_id=session.workspace_id,
@@ -569,32 +523,17 @@ async def set_working_memory(
             ttl_seconds=request.ttl_seconds,
         )
         return WorkingMemoryResponse(
-            key=memory.key,
-            value=memory.value,
-            ttl_seconds=memory.ttl_seconds,
-            created_at=memory.created_at,
-            updated_at=memory.updated_at
+            key=memory.key, value=memory.value, ttl_seconds=memory.ttl_seconds, created_at=memory.created_at, updated_at=memory.updated_at
         )
 
     except ValueError as e:
         logger.warning("Invalid working memory set request: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "Failed to set working memory in session %s: %s",
-            session_id,
-            e,
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to set working memory"
-        )
+        logger.error("Failed to set working memory in session %s: %s", session_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to set working memory")
 
 
 @router.get(
@@ -608,14 +547,14 @@ async def set_working_memory(
     },
 )
 async def get_working_memory(
-        http_request: Request,
-        session_id: str,
-        key: str | None = None,
-        _active_session: str | None = Depends(get_active_session),
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    session_id: str,
+    key: str | None = None,
+    _active_session: str | None = Depends(get_active_session),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> dict:
     """
     Get session working memory data.
@@ -638,26 +577,17 @@ async def get_working_memory(
         # Get session to find its workspace
         session = await session_service.get(session_id)
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
 
         # Check authorization
-        await authz_service.require_authorization(
-            ctx, "sessions", "read",
-            resource_id=session_id, workspace_id=session.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "read", resource_id=session_id, workspace_id=session.workspace_id)
 
         logger.debug("Getting working memory from session: %s, key: %s", session_id, key)
 
         if key:
             memory = await session_service.get_working_memory(session.workspace_id, session_id, key)
             if not memory:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Working memory key not found: {key}"
-                )
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Working memory key not found: {key}")
             return {key: memory.value}
         else:
             memories = await session_service.get_all_working_memory(session.workspace_id, session_id)
@@ -666,16 +596,8 @@ async def get_working_memory(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "Failed to get working memory from session %s: %s",
-            session_id,
-            e,
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve working memory"
-        )
+        logger.error("Failed to get working memory from session %s: %s", session_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve working memory")
 
 
 @router.post(
@@ -690,13 +612,13 @@ async def get_working_memory(
     },
 )
 async def commit_session(
-        http_request: Request,
-        session_id: str,
-        options: Optional[CommitOptions] = None,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    session_id: str,
+    options: CommitOptions | None = None,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> CommitResponse:
     """
     Commit session and finalize working memory.
@@ -719,35 +641,23 @@ async def commit_session(
         # Get session to find its workspace
         session = await session_service.get(session_id)
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
 
         # Check authorization
-        await authz_service.require_authorization(
-            ctx, "sessions", "write",
-            resource_id=session_id, workspace_id=session.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "write", resource_id=session_id, workspace_id=session.workspace_id)
 
         logger.info("Committing session: %s with options: %s", session_id, options)
 
         # Convert Pydantic model to service CommitOptions
         from ...services.session.base import CommitOptions as ServiceCommitOptions
+
         service_options = None
         if options:
             service_options = ServiceCommitOptions(
-                include_working_memory=True,
-                importance_threshold=options.min_importance,
-                delete_after_commit=False,
-                tags=[]
+                include_working_memory=True, importance_threshold=options.min_importance, delete_after_commit=False, tags=[]
             )
 
-        result = await session_service.commit_session(
-            session.workspace_id,
-            session_id,
-            options=service_options
-        )
+        result = await session_service.commit_session(session.workspace_id, session_id, options=service_options)
 
         # Build response from CommitResult fields
         return CommitResponse(
@@ -755,24 +665,18 @@ async def commit_session(
             memories_extracted=result.memories_extracted,
             memories_deduplicated=result.memories_deduplicated,
             memories_created=result.memories_committed,
-            breakdown=result.extraction_summary.get('breakdown', {}),
-            extraction_time_ms=result.extraction_summary.get('extraction_time_ms', 0)
+            breakdown=result.extraction_summary.get("breakdown", {}),
+            extraction_time_ms=result.extraction_summary.get("extraction_time_ms", 0),
         )
 
     except ValueError as e:
         logger.warning("Session commit failed: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to commit session %s: %s", session_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to commit session"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to commit session")
 
 
 @router.post(
@@ -786,13 +690,13 @@ async def commit_session(
     },
 )
 async def touch_session(
-        http_request: Request,
-        session_id: str,
-        extend_seconds: Optional[int] = None,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        session_service: SessionService = Depends(get_session_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    session_id: str,
+    extend_seconds: int | None = None,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> dict:
     """
     Update session expiration (extend TTL) using sliding window.
@@ -818,37 +722,23 @@ async def touch_session(
         # Get session to find its workspace
         session = await session_service.get(session_id)
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
 
         # Check authorization
-        await authz_service.require_authorization(
-            ctx, "sessions", "write",
-            resource_id=session_id, workspace_id=session.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "sessions", "write", resource_id=session_id, workspace_id=session.workspace_id)
 
         logger.debug("Touching session: %s with extend_seconds=%s", session_id, extend_seconds)
 
-        updated_session = await session_service.touch_session(
-            session.workspace_id, session_id, extend_seconds=extend_seconds
-        )
+        updated_session = await session_service.touch_session(session.workspace_id, session_id, extend_seconds=extend_seconds)
         if not updated_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session not found: {session_id}"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
         return {"expires_at": updated_session.expires_at.isoformat()}
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to touch session %s: %s", session_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to touch session"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to touch session")
 
 
 class SessionsAPIPlugin(Plugin):

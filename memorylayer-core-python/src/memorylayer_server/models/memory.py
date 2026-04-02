@@ -3,11 +3,12 @@ Memory domain models for MemoryLayer.ai.
 
 Defines cognitive types, domain subtypes, and core memory data structures.
 """
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 class MemoryType(str, Enum):
@@ -76,12 +77,13 @@ class MemoryStatus(str, Enum):
 
 class SourceType(str, Enum):
     """Types of sources that can produce memories."""
-    MEMORY = "memory"           # Fact decomposition
-    SESSION = "session"         # Working memory commit
-    DOCUMENT = "document"       # Document ingestion
-    PAGE = "page"               # Document page
-    THREAD = "thread"           # Chat history decomposition
-    DATASET = "dataset"         # Dataset profiling/summarization
+
+    MEMORY = "memory"  # Fact decomposition
+    SESSION = "session"  # Working memory commit
+    DOCUMENT = "document"  # Document ingestion
+    PAGE = "page"  # Document page
+    THREAD = "thread"  # Chat history decomposition
+    DATASET = "dataset"  # Dataset profiling/summarization
 
 
 class Memory(BaseModel):
@@ -94,11 +96,11 @@ class Memory(BaseModel):
     workspace_id: str = Field(..., description="Workspace this memory belongs to")
     tenant_id: str = Field(..., description="Tenant this memory belongs to")
     context_id: str = Field("_default", description="Context for logical grouping (default: _default)")
-    user_id: Optional[str] = Field(None, description="Optional user scope")
+    user_id: str | None = Field(None, description="Optional user scope")
 
     # Entity attribution (v3) - "who remembers what about whom"
-    observer_id: Optional[str] = Field(None, description="Entity doing the observing/remembering (agent ID, user ID, etc.)")
-    subject_id: Optional[str] = Field(None, description="Entity the memory is about")
+    observer_id: str | None = Field(None, description="Entity doing the observing/remembering (agent ID, user ID, etc.)")
+    subject_id: str | None = Field(None, description="Entity the memory is about")
 
     # Content
     content: str = Field(..., description="The memory content")
@@ -106,57 +108,52 @@ class Memory(BaseModel):
 
     # Classification
     type: MemoryType = Field(..., description="Cognitive type of memory")
-    subtype: Optional[MemorySubtype] = Field(None, description="Domain-specific classification")
-    importance: float = Field(
-        0.5,
-        ge=0.0,
-        le=1.0,
-        description="Memory importance (0.0-1.0, affects retention/ranking)"
-    )
+    subtype: MemorySubtype | None = Field(None, description="Domain-specific classification")
+    importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0, affects retention/ranking)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
 
     # v2 additions for hierarchical memory
-    abstract: Optional[str] = Field(None, description="Brief summary/abstract of memory content")
-    overview: Optional[str] = Field(None, description="High-level overview (tier 3)")
-    session_id: Optional[str] = Field(None, description="Associated session ID")
-    source_memory_id: Optional[str] = Field(None, description="Parent memory this fact was decomposed from")
+    abstract: str | None = Field(None, description="Brief summary/abstract of memory content")
+    overview: str | None = Field(None, description="High-level overview (tier 3)")
+    session_id: str | None = Field(None, description="Associated session ID")
+    source_memory_id: str | None = Field(None, description="Parent memory this fact was decomposed from")
 
     # Document provenance - traces memory back to source document/page
-    source_document_id: Optional[str] = Field(None, description="Document this memory was derived from")
-    source_page_id: Optional[str] = Field(None, description="Document page this memory was extracted from")
-    source_dataset_id: Optional[str] = Field(None, description="Dataset this memory was derived from")
-    source_thread_id: Optional[str] = Field(None, description="Chat thread this memory was decomposed from")
+    source_document_id: str | None = Field(None, description="Document this memory was derived from")
+    source_page_id: str | None = Field(None, description="Document page this memory was extracted from")
+    source_dataset_id: str | None = Field(None, description="Dataset this memory was derived from")
+    source_thread_id: str | None = Field(None, description="Chat thread this memory was decomposed from")
 
-    category: Optional[str] = Field(None, description="User-defined category")
+    category: str | None = Field(None, description="User-defined category")
 
     # Vector embedding (optional - computed async or stored separately)
-    embedding: Optional[list[float]] = Field(None, description="Vector embedding for similarity search")
+    embedding: list[float] | None = Field(None, description="Vector embedding for similarity search")
 
     # Lifecycle & access tracking
     access_count: int = Field(0, ge=0, description="Number of times memory was accessed")
-    last_accessed_at: Optional[datetime] = Field(None, description="Last access timestamp")
+    last_accessed_at: datetime | None = Field(None, description="Last access timestamp")
     decay_factor: float = Field(1.0, ge=0.0, le=1.0, description="Memory decay over time")
     status: MemoryStatus = Field(MemoryStatus.ACTIVE, description="Memory lifecycle status")
     pinned: bool = Field(False, description="Pinned memories are exempt from decay and archival")
 
     # Locality-aware ranking metadata (populated during recall)
-    source_scope: Optional[str] = Field(None, description="Scope of memory source (same_context, same_workspace, global_workspace, other)")
-    relevance_score: Optional[float] = Field(None, description="Base relevance score from vector similarity")
-    boosted_score: Optional[float] = Field(None, description="Relevance score after locality boost applied")
+    source_scope: str | None = Field(None, description="Scope of memory source (same_context, same_workspace, global_workspace, other)")
+    relevance_score: float | None = Field(None, description="Base relevance score from vector similarity")
+    boosted_score: float | None = Field(None, description="Relevance score after locality boost applied")
 
     # Trust scoring (populated during recall)
-    trust_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Composite trust score (0.0-1.0)")
-    trust_signals: Optional[dict] = Field(None, description="Component trust scores used to compute trust_score")
+    trust_score: float | None = Field(None, ge=0.0, le=1.0, description="Composite trust score (0.0-1.0)")
+    trust_signals: dict | None = Field(None, description="Component trust scores used to compute trust_score")
 
     # Freshness metadata (populated during recall)
-    freshness_score: Optional[float] = Field(None, description="Exponential freshness score (1.0=new, 0.0=very old)")
-    staleness_warning: Optional[str] = Field(None, description="Staleness tier: none, mild, moderate, severe")
-    age_days: Optional[float] = Field(None, description="Age of memory in days since creation")
+    freshness_score: float | None = Field(None, description="Exponential freshness score (1.0=new, 0.0=very old)")
+    staleness_warning: str | None = Field(None, description="Staleness tier: none, mild, moderate, severe")
+    age_days: float | None = Field(None, description="Age of memory in days since creation")
 
     # Timestamps
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Creation timestamp")
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last update timestamp")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Last update timestamp")
 
     @field_validator("content")
     @classmethod
@@ -177,31 +174,26 @@ class RememberInput(BaseModel):
     """Request model for creating a new memory."""
 
     content: str = Field(..., description="The memory content to store")
-    type: Optional[MemoryType] = Field(None, description="Cognitive type (auto-classified if omitted)")
-    subtype: Optional[MemorySubtype] = Field(None, description="Domain-specific classification")
-    importance: float = Field(
-        0.5,
-        ge=0.0,
-        le=1.0,
-        description="Memory importance (0.0-1.0)"
-    )
+    type: MemoryType | None = Field(None, description="Cognitive type (auto-classified if omitted)")
+    subtype: MemorySubtype | None = Field(None, description="Domain-specific classification")
+    importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
     associations: list[str] = Field(default_factory=list, description="Memory IDs to associate with")
 
     # Optional overrides (usually auto-computed)
-    context_id: Optional[str] = Field(None, description="Target context (default: _default)")
-    user_id: Optional[str] = Field(None, description="User scope override")
+    context_id: str | None = Field(None, description="Target context (default: _default)")
+    user_id: str | None = Field(None, description="User scope override")
 
     # Entity attribution (v3)
-    observer_id: Optional[str] = Field(None, description="Entity doing the observing/remembering")
-    subject_id: Optional[str] = Field(None, description="Entity this memory is about")
+    observer_id: str | None = Field(None, description="Entity doing the observing/remembering")
+    subject_id: str | None = Field(None, description="Entity this memory is about")
 
     # Document provenance
-    source_document_id: Optional[str] = Field(None, description="Source document ID for provenance tracking")
-    source_page_id: Optional[str] = Field(None, description="Source page ID for provenance tracking")
-    source_dataset_id: Optional[str] = Field(None, description="Source dataset ID for provenance tracking")
-    source_thread_id: Optional[str] = Field(None, description="Source thread ID for provenance tracking")
+    source_document_id: str | None = Field(None, description="Source document ID for provenance tracking")
+    source_page_id: str | None = Field(None, description="Source page ID for provenance tracking")
+    source_dataset_id: str | None = Field(None, description="Source dataset ID for provenance tracking")
+    source_thread_id: str | None = Field(None, description="Source thread ID for provenance tracking")
 
 
 class RecallInput(BaseModel):
@@ -213,45 +205,37 @@ class RecallInput(BaseModel):
     types: list[MemoryType] = Field(default_factory=list, description="Filter by cognitive types")
     subtypes: list[MemorySubtype] = Field(default_factory=list, description="Filter by domain subtypes")
     tags: list[str] = Field(default_factory=list, description="Filter by tags (AND logic)")
-    context_id: Optional[str] = Field(None, description="Filter by context")
-    user_id: Optional[str] = Field(None, description="Filter by user")
-    observer_id: Optional[str] = Field(None, description="Filter by observer entity")
-    subject_id: Optional[str] = Field(None, description="Filter by subject entity")
+    context_id: str | None = Field(None, description="Filter by context")
+    user_id: str | None = Field(None, description="Filter by user")
+    observer_id: str | None = Field(None, description="Filter by observer entity")
+    subject_id: str | None = Field(None, description="Filter by subject entity")
     include_global: bool = Field(True, description="Include _global workspace in search")
 
     # Retrieval settings
-    mode: Optional[RecallMode] = Field(None, description="Retrieval strategy (None = server default)")
-    tolerance: Optional[SearchTolerance] = Field(None, description="Search precision (None = server default)")
+    mode: RecallMode | None = Field(None, description="Retrieval strategy (None = server default)")
+    tolerance: SearchTolerance | None = Field(None, description="Search precision (None = server default)")
     limit: int = Field(10, ge=1, le=100, description="Maximum memories to return")
     offset: int = Field(0, ge=0, description="Number of results to skip for pagination")
-    min_relevance: Optional[float] = Field(None, ge=0.0, le=1.0, description="Minimum relevance score (None = server default)")
-    recency_weight: Optional[float] = Field(None, ge=0.0, le=1.0,
-                                            description="Weight for recency boosting (0.0=disabled, 1.0=full). None = server default.")
-    detail_level: Optional[DetailLevel] = Field(None, description="Level of detail to return (None = server default)")
+    min_relevance: float | None = Field(None, ge=0.0, le=1.0, description="Minimum relevance score (None = server default)")
+    recency_weight: float | None = Field(
+        None, ge=0.0, le=1.0, description="Weight for recency boosting (0.0=disabled, 1.0=full). None = server default."
+    )
+    detail_level: DetailLevel | None = Field(None, description="Level of detail to return (None = server default)")
 
     # Graph traversal (None = use server default from env config)
-    include_associations: Optional[bool] = Field(None, description="Include linked memories (None = server default)")
-    traverse_depth: Optional[int] = Field(None, ge=0, le=5, description="Multi-hop graph traversal depth (None = server default)")
-    max_expansion: Optional[int] = Field(None, ge=1, le=500,
-                                         description="Max memories discovered via graph expansion (None = server default)")
+    include_associations: bool | None = Field(None, description="Include linked memories (None = server default)")
+    traverse_depth: int | None = Field(None, ge=0, le=5, description="Multi-hop graph traversal depth (None = server default)")
+    max_expansion: int | None = Field(None, ge=1, le=500, description="Max memories discovered via graph expansion (None = server default)")
 
     # Time range filters
-    created_after: Optional[datetime] = Field(None, description="Filter memories created after this time")
-    created_before: Optional[datetime] = Field(None, description="Filter memories created before this time")
+    created_after: datetime | None = Field(None, description="Filter memories created after this time")
+    created_before: datetime | None = Field(None, description="Filter memories created before this time")
 
     # LLM mode options
-    context: list[dict[str, str]] = Field(
-        default_factory=list,
-        description="Recent conversation context for query rewriting (LLM mode)"
-    )
+    context: list[dict[str, str]] = Field(default_factory=list, description="Recent conversation context for query rewriting (LLM mode)")
 
     # Hybrid mode options
-    rag_threshold: float = Field(
-        0.8,
-        ge=0.0,
-        le=1.0,
-        description="Use LLM if RAG confidence < threshold (hybrid mode)"
-    )
+    rag_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Use LLM if RAG confidence < threshold (hybrid mode)")
 
     # Status filtering
     include_archived: bool = Field(False, description="Include archived memories in recall results")
@@ -273,31 +257,31 @@ class RecallResult(BaseModel):
     mode_used: RecallMode = Field(..., description="Actual retrieval mode used")
 
     # LLM mode metadata
-    query_rewritten: Optional[str] = Field(None, description="Rewritten query (LLM mode)")
-    sufficiency_reached: Optional[bool] = Field(None, description="Whether search stopped early (LLM mode)")
+    query_rewritten: str | None = Field(None, description="Rewritten query (LLM mode)")
+    sufficiency_reached: bool | None = Field(None, description="Whether search stopped early (LLM mode)")
 
     # Locality-aware ranking metadata
-    source_scope: Optional[str] = Field(None, description="Scope of memory source (same_context, same_workspace, global_workspace, other)")
-    boosted_score: Optional[float] = Field(None, description="Relevance score after locality boost applied")
+    source_scope: str | None = Field(None, description="Scope of memory source (same_context, same_workspace, global_workspace, other)")
+    boosted_score: float | None = Field(None, description="Relevance score after locality boost applied")
 
     # Token efficiency metadata (for detail_level support)
-    token_summary: Optional[dict[str, Any]] = Field(None, description="Token usage summary when using detail_level")
+    token_summary: dict[str, Any] | None = Field(None, description="Token usage summary when using detail_level")
 
     # Trajectory tracing
-    trajectory: Optional[dict] = Field(None, description="Trajectory data if trace=True")
+    trajectory: dict | None = Field(None, description="Trajectory data if trace=True")
 
     # Trust scoring
-    drift_caveat: Optional[str] = Field(None, description="Warning when one or more recalled memories have low trust scores")
+    drift_caveat: str | None = Field(None, description="Warning when one or more recalled memories have low trust scores")
 
     # Freshness metadata
-    freshness_metadata: Optional[dict] = Field(None, description="Aggregate freshness statistics for returned memories")
+    freshness_metadata: dict | None = Field(None, description="Aggregate freshness statistics for returned memories")
 
 
 class ReflectInput(BaseModel):
     """Request model for synthesizing memories."""
 
     query: str = Field(..., description="What to reflect on")
-    detail_level: Optional[DetailLevel] = Field(None, description="Level of detail for reflection output (None = server default)")
+    detail_level: DetailLevel | None = Field(None, description="Level of detail for reflection output (None = server default)")
     include_sources: bool = Field(True, description="Include source memory references")
     depth: int = Field(2, ge=1, le=5, description="Association traversal depth")
 
@@ -305,10 +289,10 @@ class ReflectInput(BaseModel):
     types: list[MemoryType] = Field(default_factory=list)
     subtypes: list[MemorySubtype] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
-    context_id: Optional[str] = None
-    user_id: Optional[str] = None
-    observer_id: Optional[str] = None
-    subject_id: Optional[str] = None
+    context_id: str | None = None
+    user_id: str | None = None
+    observer_id: str | None = None
+    subject_id: str | None = None
 
 
 class ReflectResult(BaseModel):
@@ -360,11 +344,7 @@ class SessionMemorySections(BaseModel):
     @property
     def total_tokens(self) -> int:
         """Estimated total tokens across all sections (len(content) / 4)."""
-        total_chars = sum(
-            len(entry)
-            for entries in self.sections.values()
-            for entry in entries
-        )
+        total_chars = sum(len(entry) for entries in self.sections.values() for entry in entries)
         return total_chars // 4
 
     def add_entry(self, section: str, entry: str) -> bool:

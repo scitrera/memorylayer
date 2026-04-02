@@ -1,12 +1,11 @@
 """Audit Service - Pluggable audit logging interface."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from ...config import MEMORYLAYER_AUDIT_SERVICE, DEFAULT_MEMORYLAYER_AUDIT_SERVICE
-
+from ...config import DEFAULT_MEMORYLAYER_AUDIT_SERVICE, MEMORYLAYER_AUDIT_SERVICE
 from .._constants import EXT_AUDIT_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
@@ -32,22 +31,22 @@ class AuditEvent:
     tenant_id: str
     """Tenant this event belongs to."""
 
-    workspace_id: Optional[str] = None
+    workspace_id: str | None = None
     """Workspace scope, if applicable."""
 
-    user_id: Optional[str] = None
+    user_id: str | None = None
     """Acting user or principal, if known."""
 
-    resource_type: Optional[str] = None
+    resource_type: str | None = None
     """Type of resource acted upon: 'memory', 'session', 'workspace', etc."""
 
-    resource_id: Optional[str] = None
+    resource_id: str | None = None
     """Identifier of the specific resource."""
 
     metadata: dict = field(default_factory=dict)
     """Additional context (IP address, user-agent, request ID, etc.)."""
 
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     """UTC timestamp when the event occurred."""
 
     id: str = field(default_factory=lambda: uuid4().hex)
@@ -83,9 +82,9 @@ class AuditService(ABC):
     async def query(
         self,
         tenant_id: str,
-        workspace_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        since: Optional[datetime] = None,
+        workspace_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditEvent]:
         """Query audit events.

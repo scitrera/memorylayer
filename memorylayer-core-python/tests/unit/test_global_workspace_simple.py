@@ -1,7 +1,9 @@
 """Simple tests for _global workspace functionality without full framework."""
+
 import pytest
+
+from memorylayer_server.config import DEFAULT_TENANT_ID, GLOBAL_WORKSPACE_ID
 from memorylayer_server.models import RecallInput
-from memorylayer_server.config import GLOBAL_WORKSPACE_ID, DEFAULT_TENANT_ID
 
 
 @pytest.mark.asyncio

@@ -7,10 +7,9 @@ Operations:
 - update_workspace: Update workspace settings
 """
 
-from ...config import MEMORYLAYER_WORKSPACE_SERVICE, DEFAULT_MEMORYLAYER_WORKSPACE_SERVICE
+from ...config import DEFAULT_MEMORYLAYER_WORKSPACE_SERVICE, MEMORYLAYER_WORKSPACE_SERVICE
 from .._constants import EXT_STORAGE_BACKEND, EXT_WORKSPACE_SERVICE
 from .._plugin_factory import make_service_plugin_base
-
 
 # noinspection PyAbstractClass
 WorkspaceServicePluginBase = make_service_plugin_base(

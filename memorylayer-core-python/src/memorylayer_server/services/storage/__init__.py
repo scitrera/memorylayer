@@ -1,6 +1,6 @@
-from .base import StorageBackend, EXT_STORAGE_BACKEND
-
 from scitrera_app_framework import Variables, get_extension
+
+from .base import EXT_STORAGE_BACKEND, StorageBackend
 
 
 def get_storage_backend(v: Variables = None) -> StorageBackend:
@@ -8,5 +8,7 @@ def get_storage_backend(v: Variables = None) -> StorageBackend:
 
 
 __all__ = (
-    'StorageBackend', 'get_storage_backend', 'EXT_STORAGE_BACKEND',
+    "StorageBackend",
+    "get_storage_backend",
+    "EXT_STORAGE_BACKEND",
 )

@@ -17,16 +17,16 @@ Configure via environment variables:
     MEMORYLAYER_LLM_OPENAI_API_KEY=local
     MEMORYLAYER_LLM_OPENAI_MODEL=nemotron3-30b-a3b-2512
 """
+
 import os
+
 import pytest
 
 from memorylayer_server.services.extraction import ExtractionCategory
 from memorylayer_server.services.extraction.default import (
     DefaultExtractionService,
-    ExtractionOptions,
 )
 from memorylayer_server.services.llm.openai import OpenAILLMProvider
-
 
 pytestmark = pytest.mark.llm_quality
 
@@ -81,20 +81,16 @@ class TestCategoryAccuracy:
         result = await extraction_service._llm_extraction(context, categories)
 
         # Find memories about the user vs others
-        user_memories = [m for m in result if "senior python developer" in m.content.lower()
-                        or "10 years" in m.content.lower()]
-        other_memories = [m for m in result if "john" in m.content.lower()
-                         or "sarah" in m.content.lower()]
+        user_memories = [m for m in result if "senior python developer" in m.content.lower() or "10 years" in m.content.lower()]
+        other_memories = [m for m in result if "john" in m.content.lower() or "sarah" in m.content.lower()]
 
         # User info should be PROFILE
         for m in user_memories:
-            assert m.category == ExtractionCategory.PROFILE, \
-                f"User info should be PROFILE, got {m.category}: {m.content}"
+            assert m.category == ExtractionCategory.PROFILE, f"User info should be PROFILE, got {m.category}: {m.content}"
 
         # Others should be ENTITIES
         for m in other_memories:
-            assert m.category == ExtractionCategory.ENTITIES, \
-                f"Info about others should be ENTITIES, got {m.category}: {m.content}"
+            assert m.category == ExtractionCategory.ENTITIES, f"Info about others should be ENTITIES, got {m.category}: {m.content}"
 
     @pytest.mark.asyncio
     async def test_preference_vs_event_distinction(self, extraction_service):
@@ -125,11 +121,9 @@ class TestCategoryAccuracy:
             has_event_keyword = any(k in content_lower for k in event_keywords)
 
             if has_pref_keyword and not has_event_keyword:
-                assert m.category == ExtractionCategory.PREFERENCES, \
-                    f"Ongoing preference should be PREFERENCES: {m.content}"
+                assert m.category == ExtractionCategory.PREFERENCES, f"Ongoing preference should be PREFERENCES: {m.content}"
             elif has_event_keyword and "always" not in content_lower:
-                assert m.category == ExtractionCategory.EVENTS, \
-                    f"One-time event should be EVENTS: {m.content}"
+                assert m.category == ExtractionCategory.EVENTS, f"One-time event should be EVENTS: {m.content}"
 
     @pytest.mark.asyncio
     async def test_case_extraction_has_problem_and_solution(self, extraction_service):
@@ -163,15 +157,11 @@ class TestCategoryAccuracy:
 
         # Combined, all cases should have both elements (LLMs may rephrase)
         all_content = " ".join(m.content.lower() for m in case_memories)
-        problem_indicators = ["timeout", "bug", "issue", "problem", "exhausted",
-                              "error", "fail", "request", "api", "connection"]
-        solution_indicators = ["fix", "increase", "resolved", "solution", "cleanup",
-                               "change", "set", "add", "20", "max_connections"]
+        problem_indicators = ["timeout", "bug", "issue", "problem", "exhausted", "error", "fail", "request", "api", "connection"]
+        solution_indicators = ["fix", "increase", "resolved", "solution", "cleanup", "change", "set", "add", "20", "max_connections"]
 
-        assert any(w in all_content for w in problem_indicators), \
-            f"Cases should mention the problem. Content: {all_content}"
-        assert any(w in all_content for w in solution_indicators), \
-            f"Cases should mention the solution. Content: {all_content}"
+        assert any(w in all_content for w in problem_indicators), f"Cases should mention the problem. Content: {all_content}"
+        assert any(w in all_content for w in solution_indicators), f"Cases should mention the solution. Content: {all_content}"
 
 
 class TestImportanceCalibration:
@@ -196,8 +186,7 @@ class TestImportanceCalibration:
         assert len(cto_memories) > 0, "Should extract CTO information"
 
         for m in cto_memories:
-            assert m.importance >= 0.7, \
-                f"CTO role should be high importance (>=0.7), got {m.importance}: {m.content}"
+            assert m.importance >= 0.7, f"CTO role should be high importance (>=0.7), got {m.importance}: {m.content}"
 
     @pytest.mark.asyncio
     async def test_lower_importance_for_minor_preferences(self, extraction_service):
@@ -218,17 +207,16 @@ class TestImportanceCalibration:
         minor_keywords = ["tabs", "spaces", "dark mode", "ide"]
         major_keywords = ["payment", "rewrite", "authentication", "oauth", "migrate"]
 
-        minor_memories = [m for m in result
-                         if any(k in m.content.lower() for k in minor_keywords)]
-        major_memories = [m for m in result
-                         if any(k in m.content.lower() for k in major_keywords)]
+        minor_memories = [m for m in result if any(k in m.content.lower() for k in minor_keywords)]
+        major_memories = [m for m in result if any(k in m.content.lower() for k in major_keywords)]
 
         if minor_memories and major_memories:
             avg_minor = sum(m.importance for m in minor_memories) / len(minor_memories)
             avg_major = sum(m.importance for m in major_memories) / len(major_memories)
 
-            assert avg_major > avg_minor, \
+            assert avg_major > avg_minor, (
                 f"Major decisions ({avg_major:.2f}) should have higher importance than minor preferences ({avg_minor:.2f})"
+            )
 
 
 class TestNoiseRejection:
@@ -254,12 +242,11 @@ class TestNoiseRejection:
         # Should not extract greetings/thank yous as memories
         for m in result:
             content_lower = m.content.lower()
-            assert "hello" not in content_lower or "python" in content_lower, \
-                f"Should not extract bare greetings: {m.content}"
-            assert "thank" not in content_lower or any(k in content_lower for k in ["python", "pytorch", "fastapi"]), \
+            assert "hello" not in content_lower or "python" in content_lower, f"Should not extract bare greetings: {m.content}"
+            assert "thank" not in content_lower or any(k in content_lower for k in ["python", "pytorch", "fastapi"]), (
                 f"Should not extract thank yous: {m.content}"
-            assert "you're welcome" not in content_lower, \
-                f"Should not extract pleasantries: {m.content}"
+            )
+            assert "you're welcome" not in content_lower, f"Should not extract pleasantries: {m.content}"
 
     @pytest.mark.asyncio
     async def test_extracts_technical_content_from_noisy_conversation(self, extraction_service):
@@ -280,10 +267,8 @@ class TestNoiseRejection:
         # Should extract the actual technical content
         all_content = " ".join(m.content.lower() for m in result)
 
-        assert "redis" in all_content or "cache" in all_content, \
-            "Should extract Redis/cache information from noisy text"
-        assert "invalidation" in all_content or "stale" in all_content, \
-            "Should extract the problem/solution despite noise"
+        assert "redis" in all_content or "cache" in all_content, "Should extract Redis/cache information from noisy text"
+        assert "invalidation" in all_content or "stale" in all_content, "Should extract the problem/solution despite noise"
 
 
 class TestContentQuality:
@@ -307,16 +292,16 @@ class TestContentQuality:
         for m in result:
             # Memory should not start with dangling references
             first_word = m.content.split()[0].lower() if m.content.split() else ""
-            assert first_word not in ["it", "this", "that", "these", "those"], \
+            assert first_word not in ["it", "this", "that", "these", "those"], (
                 f"Memory should not start with dangling reference: {m.content}"
+            )
 
             # Memory should contain the subject, not just pronouns
             content_lower = m.content.lower()
-            has_subject = any(k in content_lower for k in
-                            ["recommendation", "engine", "filtering", "e-commerce",
-                             "platform", "hybrid", "approach"])
-            assert has_subject, \
-                f"Memory should contain concrete subject, not just pronouns: {m.content}"
+            has_subject = any(
+                k in content_lower for k in ["recommendation", "engine", "filtering", "e-commerce", "platform", "hybrid", "approach"]
+            )
+            assert has_subject, f"Memory should contain concrete subject, not just pronouns: {m.content}"
 
     @pytest.mark.asyncio
     async def test_memories_are_concise(self, extraction_service):
@@ -338,8 +323,7 @@ class TestContentQuality:
         for m in result:
             # Memories should generally be under 300 characters for conciseness
             # (not a hard rule, but most should be)
-            assert len(m.content) < 500, \
-                f"Memory might be too verbose ({len(m.content)} chars): {m.content[:100]}..."
+            assert len(m.content) < 500, f"Memory might be too verbose ({len(m.content)} chars): {m.content[:100]}..."
 
 
 class TestCompleteness:
@@ -369,8 +353,7 @@ class TestCompleteness:
         captured = [t for t in key_techs if t in all_content]
 
         # Should capture at least most of them (allow for some summarization)
-        assert len(captured) >= 4, \
-            f"Should capture most key technologies. Captured: {captured}, Missing: {set(key_techs) - set(captured)}"
+        assert len(captured) >= 4, f"Should capture most key technologies. Captured: {captured}, Missing: {set(key_techs) - set(captured)}"
 
     @pytest.mark.asyncio
     async def test_captures_both_problem_and_solution_in_case(self, extraction_service):
@@ -390,10 +373,10 @@ class TestCompleteness:
         all_content = " ".join(m.content.lower() for m in result)
 
         # Should capture both problem and solution elements
-        assert any(w in all_content for w in ["oom", "out of memory", "512mb", "heap"]), \
-            "Should capture the problem (OOM/memory issue)"
-        assert any(w in all_content for w in ["2gb", "g1gc", "increased", "gc tuning"]), \
+        assert any(w in all_content for w in ["oom", "out of memory", "512mb", "heap"]), "Should capture the problem (OOM/memory issue)"
+        assert any(w in all_content for w in ["2gb", "g1gc", "increased", "gc tuning"]), (
             "Should capture the solution (heap increase, GC tuning)"
+        )
 
 
 class TestModelEvaluationSummary:
@@ -449,7 +432,7 @@ class TestModelEvaluationSummary:
                 "user_correctly_profiled": False,
                 "others_are_entities": False,
                 "no_noise_extracted": True,
-            }
+            },
         }
 
         for cat in ExtractionCategory:
@@ -474,7 +457,7 @@ class TestModelEvaluationSummary:
             stats["avg_importance"] = sum(m.importance for m in result) / len(result)
 
         # Check specific quality items
-        all_content = " ".join(m.content.lower() for m in result)
+        " ".join(m.content.lower() for m in result)
 
         # User should be correctly profiled
         profile_memories = [m for m in result if m.category == ExtractionCategory.PROFILE]
@@ -515,7 +498,7 @@ class TestModelEvaluationSummary:
             print(f"  {status}: {check}")
             if result_val:
                 passed += 1
-        print(f"\nOverall: {passed}/{total} checks passed ({100*passed/total:.0f}%)")
+        print(f"\nOverall: {passed}/{total} checks passed ({100 * passed / total:.0f}%)")
         print("=" * 60 + "\n")
 
         # Assert minimum quality bar

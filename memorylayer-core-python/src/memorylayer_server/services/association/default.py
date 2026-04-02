@@ -9,48 +9,48 @@ Handles:
 """
 
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from .base import (
-    AssociationServicePluginBase,
-    MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD,
-    DEFAULT_MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD
+from ...models import (
+    KNOWN_RELATIONSHIP_TYPES,
+    AssociateInput,
+    Association,
+    GraphQueryInput,
+    GraphQueryResult,
+    RelationshipCategory,
+    get_relationship_category,
 )
-from ..storage import StorageBackend, EXT_STORAGE_BACKEND
-from ...models import AssociateInput, Association, GraphQueryInput, GraphQueryResult, RelationshipCategory, KNOWN_RELATIONSHIP_TYPES, get_relationship_category
-from ...utils import generate_id
-from ..ontology import OntologyService, EXT_ONTOLOGY_SERVICE
+from ..ontology import EXT_ONTOLOGY_SERVICE, OntologyService
+from ..storage import EXT_STORAGE_BACKEND, StorageBackend
+from .base import (
+    DEFAULT_MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD,
+    MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD,
+    AssociationServicePluginBase,
+)
 
 
 class AssociationService:
     """Service for managing memory associations and graph operations."""
 
-    def __init__(self, storage: StorageBackend, ontology_service: Optional[OntologyService] = None, v: Variables = None):
+    def __init__(self, storage: StorageBackend, ontology_service: OntologyService | None = None, v: Variables = None):
         self.storage = storage
         self.ontology_service = ontology_service
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.auto_association_threshold = v.get(
-            MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD,
-            DEFAULT_MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD
+            MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD, DEFAULT_MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD
         )
 
         self.logger.info("Initialized AssociationService with auto_association_threshold=%.2f", self.auto_association_threshold)
 
     async def associate(
-            self,
-            workspace_id: str,
-            input: AssociateInput,
+        self,
+        workspace_id: str,
+        input: AssociateInput,
     ) -> Association:
         """Create a relationship between two memories."""
-        self.logger.info(
-            "Creating association: %s -[%s]-> %s",
-            input.source_id,
-            input.relationship,
-            input.target_id
-        )
+        self.logger.info("Creating association: %s -[%s]-> %s", input.source_id, input.relationship, input.target_id)
 
         # Validate that both memories exist
         source = await self.storage.get_memory(workspace_id, input.source_id, track_access=False)
@@ -80,37 +80,30 @@ class AssociationService:
         return association
 
     async def get_related(
-            self,
-            workspace_id: str,
-            memory_id: str,
-            relationships: Optional[list[str]] = None,
-            direction: str = "both",
+        self,
+        workspace_id: str,
+        memory_id: str,
+        relationships: list[str] | None = None,
+        direction: str = "both",
     ) -> list[Association]:
         """Get all associations for a memory."""
-        self.logger.debug(
-            "Getting related memories for: %s, direction: %s",
-            memory_id,
-            direction
-        )
+        self.logger.debug("Getting related memories for: %s, direction: %s", memory_id, direction)
 
         # Validate direction
         if direction not in ["outgoing", "incoming", "both"]:
             raise ValueError(f"Invalid direction: {direction}")
 
         associations = await self.storage.get_associations(
-            workspace_id=workspace_id,
-            memory_id=memory_id,
-            direction=direction,
-            relationships=relationships
+            workspace_id=workspace_id, memory_id=memory_id, direction=direction, relationships=relationships
         )
 
         self.logger.debug("Found %s associations for memory: %s", len(associations), memory_id)
         return associations
 
     async def traverse(
-            self,
-            workspace_id: str,
-            input: GraphQueryInput,
+        self,
+        workspace_id: str,
+        input: GraphQueryInput,
     ) -> GraphQueryResult:
         """
         Multi-hop graph traversal.
@@ -118,12 +111,7 @@ class AssociationService:
         Example: Find what caused a problem:
         [Problem] <--CAUSED_BY-- [Error] <--TRIGGERED_BY-- [Change]
         """
-        self.logger.info(
-            "Traversing graph from: %s, max_depth: %s, direction: %s",
-            input.start_memory_id,
-            input.max_depth,
-            input.direction
-        )
+        self.logger.info("Traversing graph from: %s, max_depth: %s, direction: %s", input.start_memory_id, input.max_depth, input.direction)
 
         # Validate direction
         if input.direction not in ["outgoing", "incoming", "both"]:
@@ -135,21 +123,17 @@ class AssociationService:
             start_id=input.start_memory_id,
             max_depth=input.max_depth,
             relationships=input.relationship_types or None,
-            direction=input.direction
+            direction=input.direction,
         )
 
-        self.logger.info(
-            "Graph traversal found %s paths, %s unique nodes",
-            result.total_paths,
-            len(result.unique_nodes)
-        )
+        self.logger.info("Graph traversal found %s paths, %s unique nodes", result.total_paths, len(result.unique_nodes))
 
         return result
 
     async def find_contradictions(
-            self,
-            workspace_id: str,
-            memory_id: Optional[str] = None,
+        self,
+        workspace_id: str,
+        memory_id: str | None = None,
     ) -> list[tuple[str, str]]:
         """
         Find memories that contradict each other.
@@ -163,10 +147,7 @@ class AssociationService:
         if memory_id:
             # Find contradictions for specific memory
             associations = await self.storage.get_associations(
-                workspace_id=workspace_id,
-                memory_id=memory_id,
-                direction="both",
-                relationships=["contradicts"]
+                workspace_id=workspace_id, memory_id=memory_id, direction="both", relationships=["contradicts"]
             )
 
             for assoc in associations:
@@ -195,12 +176,12 @@ class AssociationService:
         return contradictions
 
     async def auto_associate(
-            self,
-            workspace_id: str,
-            new_memory_id: str,
-            similar_memories: list[tuple[str, float]],
-            threshold: float = None,
-            new_memory_content: Optional[str] = None,
+        self,
+        workspace_id: str,
+        new_memory_id: str,
+        similar_memories: list[tuple[str, float]],
+        threshold: float = None,
+        new_memory_content: str | None = None,
     ) -> list[Association]:
         """
         Automatically create associations for highly similar memories.
@@ -221,16 +202,13 @@ class AssociationService:
             threshold = self.auto_association_threshold
 
         self.logger.debug(
-            "Auto-associating memory: %s with %s similar memories (threshold=%.2f)",
-            new_memory_id,
-            len(similar_memories),
-            threshold
+            "Auto-associating memory: %s with %s similar memories (threshold=%.2f)", new_memory_id, len(similar_memories), threshold
         )
 
         # Determine whether LLM classification is available
         use_llm = (
             self.ontology_service is not None
-            and getattr(self.ontology_service, 'llm_service', None) is not None
+            and getattr(self.ontology_service, "llm_service", None) is not None
             and new_memory_content is not None
         )
 
@@ -259,7 +237,9 @@ class AssociationService:
                 except Exception as e:
                     self.logger.debug(
                         "LLM classification failed for %s <-> %s, using similar_to: %s",
-                        new_memory_id, similar_id, e,
+                        new_memory_id,
+                        similar_id,
+                        e,
                     )
                     relationship = "similar_to"
 
@@ -269,36 +249,27 @@ class AssociationService:
                     target_id=similar_id,
                     relationship=relationship,
                     strength=similarity_score,
-                    metadata={"auto_generated": True, "similarity_score": similarity_score}
+                    metadata={"auto_generated": True, "similarity_score": similarity_score},
                 )
 
                 association = await self.storage.create_association(workspace_id, assoc_input)
                 associations.append(association)
 
                 self.logger.debug(
-                    "Auto-associated %s -[%s]-> %s (similarity: %.2f)",
-                    new_memory_id,
-                    relationship,
-                    similar_id,
-                    similarity_score
+                    "Auto-associated %s -[%s]-> %s (similarity: %.2f)", new_memory_id, relationship, similar_id, similarity_score
                 )
 
             except Exception as e:
-                self.logger.warning(
-                    "Failed to auto-associate %s with %s: %s",
-                    new_memory_id,
-                    similar_id,
-                    e
-                )
+                self.logger.warning("Failed to auto-associate %s with %s: %s", new_memory_id, similar_id, e)
 
         self.logger.info("Created %s auto-associations for memory: %s", len(associations), new_memory_id)
         return associations
 
     async def get_causal_chain(
-            self,
-            workspace_id: str,
-            effect_memory_id: str,
-            max_depth: int = 5,
+        self,
+        workspace_id: str,
+        effect_memory_id: str,
+        max_depth: int = 5,
     ) -> GraphQueryResult:
         """
         Find causal chain leading to a specific memory.
@@ -311,10 +282,7 @@ class AssociationService:
         if self.ontology_service:
             causal_relationships = self.ontology_service.get_relationships_by_category("causal")
         else:
-            causal_relationships = [
-                rel for rel in KNOWN_RELATIONSHIP_TYPES
-                if get_relationship_category(rel) == "causal"
-            ]
+            causal_relationships = [rel for rel in KNOWN_RELATIONSHIP_TYPES if get_relationship_category(rel) == "causal"]
 
         # Traverse incoming edges (what caused this)
         query = GraphQueryInput(
@@ -323,7 +291,7 @@ class AssociationService:
             max_depth=max_depth,
             direction="incoming",
             max_paths=50,
-            max_nodes=100
+            max_nodes=100,
         )
 
         result = await self.traverse(workspace_id, query)
@@ -332,9 +300,9 @@ class AssociationService:
         return result
 
     async def get_solutions_for_problem(
-            self,
-            workspace_id: str,
-            problem_memory_id: str,
+        self,
+        workspace_id: str,
+        problem_memory_id: str,
     ) -> list[str]:
         """
         Find all memories that solve or address a specific problem.
@@ -347,16 +315,13 @@ class AssociationService:
         if self.ontology_service:
             solution_relationships = self.ontology_service.get_relationships_by_category("solution")
         else:
-            solution_relationships = [
-                rel for rel in KNOWN_RELATIONSHIP_TYPES
-                if get_relationship_category(rel) == "solution"
-            ]
+            solution_relationships = [rel for rel in KNOWN_RELATIONSHIP_TYPES if get_relationship_category(rel) == "solution"]
 
         associations = await self.storage.get_associations(
             workspace_id=workspace_id,
             memory_id=problem_memory_id,
             direction="incoming",  # Things that solve this problem
-            relationships=solution_relationships
+            relationships=solution_relationships,
         )
 
         solution_ids = [assoc.source_id for assoc in associations]
@@ -365,35 +330,27 @@ class AssociationService:
         return solution_ids
 
     async def get_related_by_category(
-            self,
-            workspace_id: str,
-            memory_id: str,
-            category: RelationshipCategory,
-            max_depth: int = 2,
+        self,
+        workspace_id: str,
+        memory_id: str,
+        category: RelationshipCategory,
+        max_depth: int = 2,
     ) -> GraphQueryResult:
         """
         Find memories related by a specific relationship category.
 
         Example: Get all causal relationships (CAUSES, TRIGGERS, LEADS_TO, PREVENTS)
         """
-        self.logger.info(
-            "Finding memories related to %s by category: %s",
-            memory_id,
-            category
-        )
+        self.logger.info("Finding memories related to %s by category: %s", memory_id, category)
 
         # Get all relationship types in this category using ontology service
         if self.ontology_service:
-            relationship_types = self.ontology_service.get_relationships_by_category(
-                category.value
-            )
+            relationship_types = self.ontology_service.get_relationships_by_category(category.value)
         else:
             # Fallback: use KNOWN_RELATIONSHIP_TYPES + get_relationship_category helper
             from ...models.association import get_relationship_category
-            relationship_types = [
-                rel for rel in KNOWN_RELATIONSHIP_TYPES
-                if get_relationship_category(rel) == category.value
-            ]
+
+            relationship_types = [rel for rel in KNOWN_RELATIONSHIP_TYPES if get_relationship_category(rel) == category.value]
 
         query = GraphQueryInput(
             start_memory_id=memory_id,
@@ -401,27 +358,24 @@ class AssociationService:
             max_depth=max_depth,
             direction="both",
             max_paths=100,
-            max_nodes=200
+            max_nodes=200,
         )
 
         result = await self.traverse(workspace_id, query)
 
-        self.logger.info(
-            "Found %s paths in category %s",
-            len(result.paths),
-            category
-        )
+        self.logger.info("Found %s paths in category %s", len(result.paths), category)
 
         return result
 
 
 class DefaultAssociationServicePlugin(AssociationServicePluginBase):
     """Default association service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> AssociationService:
         storage_backend: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
-        ontology_service: Optional[OntologyService] = None
+        ontology_service: OntologyService | None = None
         try:
             ontology_service = self.get_extension(EXT_ONTOLOGY_SERVICE, v)
         except Exception:

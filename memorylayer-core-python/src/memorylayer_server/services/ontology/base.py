@@ -1,13 +1,20 @@
-from ...config import MEMORYLAYER_ONTOLOGY_SERVICE, DEFAULT_MEMORYLAYER_ONTOLOGY_SERVICE
-
+from ...config import DEFAULT_MEMORYLAYER_ONTOLOGY_SERVICE, MEMORYLAYER_ONTOLOGY_SERVICE
 from .._constants import EXT_ONTOLOGY_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
 # All valid relationship categories
 RELATIONSHIP_CATEGORIES = {
-    "hierarchical", "causal", "temporal", "similarity",
-    "learning", "refinement", "reference",
-    "solution", "context", "workflow", "quality",
+    "hierarchical",
+    "causal",
+    "temporal",
+    "similarity",
+    "learning",
+    "refinement",
+    "reference",
+    "solution",
+    "context",
+    "workflow",
+    "quality",
 }
 
 
@@ -16,10 +23,7 @@ class FeatureRequiresUpgradeError(Exception):
 
     def __init__(self, feature: str):
         self.feature = feature
-        super().__init__(
-            f"Feature '{feature}' requires MemoryLayer Enterprise. "
-            "Visit https://memorylayer.ai/enterprise to upgrade."
-        )
+        super().__init__(f"Feature '{feature}' requires MemoryLayer Enterprise. Visit https://memorylayer.ai/enterprise to upgrade.")
 
 
 # Unified ontology with 45 relationship types across 11 categories
@@ -67,7 +71,6 @@ BASE_ONTOLOGY = {
         "inverse": "instance_of",
         "category": "hierarchical",
     },
-
     # --- Causal relationships ---
     "causes": {
         "description": "Direct causation",
@@ -139,7 +142,6 @@ BASE_ONTOLOGY = {
         "inverse": "prevents",
         "category": "causal",
     },
-
     # --- Temporal relationships ---
     "before": {
         "description": "Occurs before in time",
@@ -162,7 +164,6 @@ BASE_ONTOLOGY = {
         "inverse": None,
         "category": "temporal",
     },
-
     # --- Similarity relationships ---
     "similar_to": {
         "description": "Similar content or meaning",
@@ -192,7 +193,6 @@ BASE_ONTOLOGY = {
         "inverse": "variant_of",
         "category": "similarity",
     },
-
     # --- Learning relationships (formerly "logical") ---
     "contradicts": {
         "description": "Logically contradicts",
@@ -250,7 +250,6 @@ BASE_ONTOLOGY = {
         "inverse": "supersedes",
         "category": "learning",
     },
-
     # --- Refinement relationships ---
     "refines": {
         "description": "Refines or elaborates on",
@@ -280,7 +279,6 @@ BASE_ONTOLOGY = {
         "inverse": "replaces",
         "category": "refinement",
     },
-
     # --- Reference relationships ---
     "references": {
         "description": "References or cites",
@@ -296,7 +294,6 @@ BASE_ONTOLOGY = {
         "inverse": "references",
         "category": "reference",
     },
-
     # --- Solution relationships ---
     "solves": {
         "description": "A solves problem B",
@@ -347,7 +344,6 @@ BASE_ONTOLOGY = {
         "inverse": "improves",
         "category": "solution",
     },
-
     # --- Context relationships ---
     "occurs_in": {
         "description": "A occurs in context B",
@@ -398,7 +394,6 @@ BASE_ONTOLOGY = {
         "inverse": "requires",
         "category": "context",
     },
-
     # --- Workflow relationships ---
     "follows": {
         "description": "A follows B in sequence",
@@ -442,7 +437,6 @@ BASE_ONTOLOGY = {
         "inverse": "blocks",
         "category": "workflow",
     },
-
     # --- Quality relationships ---
     "effective_for": {
         "description": "A is effective for B",
@@ -490,58 +484,33 @@ BASE_ONTOLOGY = {
 
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 
 class OntologyService(ABC):
     """Interface for ontology service."""
 
     @abstractmethod
-    def get_merged_ontology(
-        self,
-        tenant_id: str,
-        workspace_id: Optional[str] = None
-    ) -> dict:
+    def get_merged_ontology(self, tenant_id: str, workspace_id: str | None = None) -> dict:
         """Get merged ontology (base + custom for enterprise)."""
         pass
 
     @abstractmethod
-    def validate_relationship(
-        self,
-        relationship_type: str,
-        tenant_id: str,
-        workspace_id: Optional[str] = None
-    ) -> bool:
+    def validate_relationship(self, relationship_type: str, tenant_id: str, workspace_id: str | None = None) -> bool:
         """Validate that a relationship type exists in the ontology."""
         pass
 
     @abstractmethod
-    def get_relationship_info(
-        self,
-        relationship_type: str,
-        tenant_id: str,
-        workspace_id: Optional[str] = None
-    ) -> dict:
+    def get_relationship_info(self, relationship_type: str, tenant_id: str, workspace_id: str | None = None) -> dict:
         """Get metadata about a relationship type."""
         pass
 
     @abstractmethod
-    def create_ontology(
-        self,
-        tenant_id: str,
-        name: str,
-        relationships: dict,
-        workspace_id: Optional[str] = None
-    ) -> dict:
+    def create_ontology(self, tenant_id: str, name: str, relationships: dict, workspace_id: str | None = None) -> dict:
         """Create a custom ontology (Enterprise only)."""
         pass
 
     @abstractmethod
-    def list_relationship_types(
-        self,
-        tenant_id: str,
-        workspace_id: Optional[str] = None
-    ) -> list[str]:
+    def list_relationship_types(self, tenant_id: str, workspace_id: str | None = None) -> list[str]:
         """List all available relationship types."""
         pass
 
@@ -551,7 +520,7 @@ class OntologyService(ABC):
         content_a: str,
         content_b: str,
         tenant_id: str = "_default",
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
     ) -> str:
         """Use LLM to classify the relationship between two memory contents.
 
@@ -565,7 +534,7 @@ class OntologyService(ABC):
         self,
         category: str,
         tenant_id: str = "_default",
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
     ) -> list[str]:
         """Get all relationship types in a category."""
         pass

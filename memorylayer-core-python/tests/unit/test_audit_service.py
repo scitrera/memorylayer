@@ -1,13 +1,13 @@
 """
 Unit tests for the audit service — AuditEvent dataclass and NoopAuditService.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 
 import pytest
 
 from memorylayer_server.services.audit.base import AuditEvent
 from memorylayer_server.services.audit.noop import NoopAuditService
-
 
 # ============================================================================
 # AuditEvent dataclass tests
@@ -33,12 +33,12 @@ class TestAuditEvent:
 
     def test_timestamp_defaults_to_utc(self):
         """timestamp defaults to a timezone-aware UTC datetime."""
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         event = AuditEvent(event_type="memory", action="create", tenant_id="t1")
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
 
         assert event.timestamp.tzinfo is not None
-        assert event.timestamp.tzinfo == timezone.utc
+        assert event.timestamp.tzinfo == UTC
         assert before <= event.timestamp <= after
 
     def test_metadata_defaults_to_empty_dict(self):
@@ -140,7 +140,7 @@ class TestNoopAuditService:
             tenant_id="t1",
             workspace_id="ws-1",
             event_type="auth",
-            since=datetime.now(timezone.utc),
+            since=datetime.now(UTC),
             limit=50,
         )
         assert results == []

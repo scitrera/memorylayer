@@ -5,11 +5,9 @@ Returns uniform scores - effectively disables reranking while maintaining API co
 """
 
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import Variables
 
-from ....config import RerankerProviderType
 from ..base import RerankerProvider, RerankerProviderPluginBase
 
 
@@ -21,10 +19,10 @@ class NoneRerankerProvider(RerankerProvider):
     """
 
     async def rerank(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
     ) -> list[float]:
         """Return uniform scores (1.0) for all documents."""
         return [1.0] * len(documents)
@@ -33,7 +31,7 @@ class NoneRerankerProvider(RerankerProvider):
 class NoneRerankerProviderPlugin(RerankerProviderPluginBase):
     """Plugin for disabled reranker provider."""
 
-    PROVIDER_NAME = 'none'
+    PROVIDER_NAME = "none"
 
     def initialize(self, v: Variables, logger: Logger) -> object | None:
         return NoneRerankerProvider(v=v)

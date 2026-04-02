@@ -1,18 +1,18 @@
 """Unit tests for chat history models and service."""
-import json
-from datetime import datetime, timezone, timedelta
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from memorylayer_server.models.chat import (
+    AppendMessagesInput,
     ChatMessage,
     ChatMessageContent,
     ChatThread,
     ChatThreadWithMessages,
     CreateThreadInput,
-    AppendMessagesInput,
-    MessageInput,
     DecompositionResult,
+    MessageInput,
 )
 
 
@@ -127,7 +127,7 @@ class TestChatThread:
         thread = ChatThread(
             id="t1",
             workspace_id="ws",
-            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            expires_at=datetime.now(UTC) - timedelta(hours=1),
         )
         assert thread.is_expired
 
@@ -135,7 +135,7 @@ class TestChatThread:
         thread = ChatThread(
             id="t1",
             workspace_id="ws",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         assert not thread.is_expired
 
@@ -201,7 +201,7 @@ class TestCreateThreadInput:
             subject_id="drew",
             title="Planning Session",
             metadata={"source": "mcp"},
-            expires_at=datetime(2026, 12, 31, tzinfo=timezone.utc),
+            expires_at=datetime(2026, 12, 31, tzinfo=UTC),
         )
         assert inp.thread_id == "my-thread"
         assert inp.title == "Planning Session"
@@ -266,15 +266,20 @@ class TestChatMessageSerialization:
 
     def test_string_content_serializes(self):
         msg = ChatMessage(
-            id="m1", thread_id="t1", message_index=0,
-            role="user", content="hello",
+            id="m1",
+            thread_id="t1",
+            message_index=0,
+            role="user",
+            content="hello",
         )
         data = msg.model_dump(mode="json")
         assert data["content"] == "hello"
 
     def test_structured_content_serializes(self):
         msg = ChatMessage(
-            id="m1", thread_id="t1", message_index=0,
+            id="m1",
+            thread_id="t1",
+            message_index=0,
             role="assistant",
             content=[ChatMessageContent(type="text", text="hi")],
         )

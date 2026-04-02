@@ -12,17 +12,17 @@ When triggered:
 4. Creates PART_OF associations from each fact to the parent
 5. Archives the parent memory (status = ARCHIVED)
 """
-from logging import Logger
-from typing import Optional
 
-from scitrera_app_framework import get_logger, Variables
+from logging import Logger
+
+from scitrera_app_framework import Variables, get_logger
 
 from ..models.association import AssociateInput
-from ..models.memory import MemoryType, MemorySubtype, MemoryStatus, RememberInput
-from ..services.storage import StorageBackend, EXT_STORAGE_BACKEND
-from ..services.tasks import TaskHandlerPlugin, TaskSchedule
-from ..services.extraction import ExtractionService, EXT_EXTRACTION_SERVICE
+from ..models.memory import MemoryStatus, MemorySubtype, MemoryType, RememberInput
+from ..services.extraction import EXT_EXTRACTION_SERVICE, ExtractionService
 from ..services.memory import EXT_MEMORY_SERVICE, MemoryService
+from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 
 
 class FactDecompositionTaskHandler(TaskHandlerPlugin):
@@ -39,9 +39,9 @@ class FactDecompositionTaskHandler(TaskHandlerPlugin):
     """
 
     def get_task_type(self) -> str:
-        return 'decompose_facts'
+        return "decompose_facts"
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         return None  # On-demand only, not recurring
 
     async def handle(self, v: Variables, payload: dict) -> None:
@@ -58,13 +58,14 @@ class FactDecompositionTaskHandler(TaskHandlerPlugin):
         # Get memory service for per-fact pipeline
         memory_service: MemoryService = self.get_extension(EXT_MEMORY_SERVICE, v)
 
-        memory_id = payload.get('memory_id')
-        workspace_id = payload.get('workspace_id')
+        memory_id = payload.get("memory_id")
+        workspace_id = payload.get("workspace_id")
 
         if not memory_id or not workspace_id:
             logger.warning(
                 "Missing required payload fields: workspace_id=%s, memory_id=%s",
-                workspace_id, memory_id,
+                workspace_id,
+                memory_id,
             )
             return
 
@@ -139,7 +140,9 @@ class FactDecompositionTaskHandler(TaskHandlerPlugin):
             except Exception as e:
                 logger.warning(
                     "Failed to create PART_OF association from %s to %s: %s",
-                    fact_id, memory_id, e,
+                    fact_id,
+                    memory_id,
+                    e,
                 )
 
         # 5. Archive the parent memory
@@ -151,7 +154,8 @@ class FactDecompositionTaskHandler(TaskHandlerPlugin):
             )
             logger.info(
                 "Decomposed memory %s into %d atomic facts and archived parent",
-                memory_id, len(created_fact_ids),
+                memory_id,
+                len(created_fact_ids),
             )
         except Exception as e:
             logger.warning("Failed to archive parent memory %s: %s", memory_id, e)

@@ -3,15 +3,16 @@ Task Handler Plugin Base.
 
 Base class for task handler plugins that are auto-discovered via multi-extension.
 """
+
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Iterable
 from logging import Logger
-from typing import Optional, Awaitable, Callable, Iterable
 
 from scitrera_app_framework import Plugin, Variables, get_extensions
 
-from .base import EXT_MULTI_TASK_HANDLERS, TaskSchedule, TaskService, EXT_TASK_SERVICE
 from ..memory import EXT_MEMORY_SERVICE
 from ..session import EXT_SESSION_SERVICE
+from .base import EXT_MULTI_TASK_HANDLERS, EXT_TASK_SERVICE, TaskSchedule, TaskService
 
 
 class TaskHandlerPlugin(Plugin, ABC):
@@ -53,7 +54,7 @@ class TaskHandlerPlugin(Plugin, ABC):
         pass
 
     @abstractmethod
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         """
         Return a recurring schedule, or None if not recurring. Takes variables instance for context
         for dynamic schedules that are dependent on configuration.
@@ -88,7 +89,7 @@ class TaskHandlersSetupPlugin(Plugin):
         return EXT_MULTI_TASK_HANDLERS
 
     def initialize(self, v, logger) -> object | None:
-        logger.info('Initializing Task Service Handlers')
+        logger.info("Initializing Task Service Handlers")
         task_service: TaskService = self.get_extension(EXT_TASK_SERVICE, v)
 
         # Register task service handlers
@@ -101,27 +102,23 @@ class TaskHandlersSetupPlugin(Plugin):
 
     async def async_ready(self, v: Variables, logger: Logger, value: TaskService) -> None:
         task_service: TaskService = value
-        logger.info('Scheduling Recurring Task Handlers')
+        logger.info("Scheduling Recurring Task Handlers")
         for handler_plugin in get_extensions(EXT_MULTI_TASK_HANDLERS, v).values():  # type: TaskHandlerPlugin
             # Schedule recurring tasks
             schedule = handler_plugin.get_schedule(v)
             if schedule:
                 # Guard: verify payload is serializable (catches service objects at startup)
                 import json
+
                 try:
                     json.dumps(schedule.default_payload)
                 except TypeError as e:
                     raise TypeError(
                         "Task handler '%s' has a non-serializable default_payload: %s. "
-                        "Move service resolution from get_schedule() to handle()."
-                        % (handler_plugin.get_task_type(), e)
+                        "Move service resolution from get_schedule() to handle()." % (handler_plugin.get_task_type(), e)
                     ) from e
 
-                await task_service.schedule_recurring(
-                    handler_plugin.get_task_type(),
-                    schedule.interval_seconds,
-                    schedule.default_payload
-                )
+                await task_service.schedule_recurring(handler_plugin.get_task_type(), schedule.interval_seconds, schedule.default_payload)
 
         return
 

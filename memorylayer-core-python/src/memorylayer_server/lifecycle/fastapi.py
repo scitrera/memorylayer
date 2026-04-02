@@ -1,16 +1,17 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 from logging import Logger
 
 from fastapi import FastAPI, Request
-from scitrera_app_framework import (
-    Plugin, Variables, get_logger as _saf_get_logger, get_variables as _saf_get_variables, get_extension as _saf_get_extension
-)
+from scitrera_app_framework import Plugin, Variables
+from scitrera_app_framework import get_extension as _saf_get_extension
+from scitrera_app_framework import get_logger as _saf_get_logger
+from scitrera_app_framework import get_variables as _saf_get_variables
 from scitrera_app_framework.core.plugins import init_all_plugins as _saf_init_all_plugins
 
 from .. import __version__
 
-EXT_FASTAPI_SERVER = 'memorylayer-server-fastapi-server'
+EXT_FASTAPI_SERVER = "memorylayer-server-fastapi-server"
 
 
 async def get_variables_dep(request: Request) -> Variables:
@@ -33,7 +34,7 @@ class FastApiPlugin(Plugin):
         return EXT_FASTAPI_SERVER
 
     def initialize(self, v, logger) -> object | None:
-        logger.info('Initializing FastAPI App')
+        logger.info("Initializing FastAPI App")
 
         # noinspection PyShadowingNames
         @asynccontextmanager
@@ -45,7 +46,7 @@ class FastApiPlugin(Plugin):
             await initialize_services(v)
 
             # store app in variables for access in services/plugins
-            v.set('app', app)
+            v.set("app", app)
 
             # store variables in app state
             app.state.v = v

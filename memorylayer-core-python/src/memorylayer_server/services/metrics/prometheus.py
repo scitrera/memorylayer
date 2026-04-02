@@ -4,9 +4,9 @@ Requires the optional ``prometheus_client`` package::
 
     pip install prometheus_client
 """
+
 import threading
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework.api import Variables
 
@@ -42,8 +42,7 @@ class PrometheusMetricsService(MetricsService):
             import prometheus_client as _pc  # noqa: F401
         except ImportError as exc:
             raise ImportError(
-                "prometheus_client is required for PrometheusMetricsService. "
-                "Install it with: pip install prometheus_client"
+                "prometheus_client is required for PrometheusMetricsService. Install it with: pip install prometheus_client"
             ) from exc
 
         self._lock = threading.Lock()
@@ -65,6 +64,7 @@ class PrometheusMetricsService(MetricsService):
 
     def _get_counter(self, name: str, label_names: tuple[str, ...]):
         import prometheus_client as pc
+
         if name not in self._counters:
             with self._lock:
                 if name not in self._counters:
@@ -73,6 +73,7 @@ class PrometheusMetricsService(MetricsService):
 
     def _get_histogram(self, name: str, label_names: tuple[str, ...]):
         import prometheus_client as pc
+
         if name not in self._histograms:
             with self._lock:
                 if name not in self._histograms:
@@ -81,6 +82,7 @@ class PrometheusMetricsService(MetricsService):
 
     def _get_gauge(self, name: str, label_names: tuple[str, ...]):
         import prometheus_client as pc
+
         if name not in self._gauges:
             with self._lock:
                 if name not in self._gauges:
@@ -121,8 +123,9 @@ class PrometheusMetricsService(MetricsService):
 
 class PrometheusMetricsServicePlugin(MetricsServicePluginBase):
     """Plugin for Prometheus metrics service."""
-    PROVIDER_NAME = 'prometheus'
 
-    def initialize(self, v: Variables, logger: Logger) -> Optional[PrometheusMetricsService]:
+    PROVIDER_NAME = "prometheus"
+
+    def initialize(self, v: Variables, logger: Logger) -> PrometheusMetricsService | None:
         logger.info("Initializing PrometheusMetricsService")
         return PrometheusMetricsService()

@@ -1,11 +1,12 @@
 """Memory service package."""
-from .base import (
-    MemoryServicePluginBase,
-    EXT_MEMORY_SERVICE,
-)
-from .default import DefaultMemoryServicePlugin, MemoryService
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    EXT_MEMORY_SERVICE,
+    MemoryServicePluginBase,
+)
+from .default import DefaultMemoryServicePlugin, MemoryService
 
 
 def get_memory_service(v: Variables = None) -> MemoryService:
@@ -14,9 +15,9 @@ def get_memory_service(v: Variables = None) -> MemoryService:
 
 
 __all__ = (
-    'MemoryService',
-    'MemoryServicePluginBase',
-    'get_memory_service',
-    'EXT_MEMORY_SERVICE',
-    'DefaultMemoryServicePlugin',
+    "MemoryService",
+    "MemoryServicePluginBase",
+    "get_memory_service",
+    "EXT_MEMORY_SERVICE",
+    "DefaultMemoryServicePlugin",
 )
