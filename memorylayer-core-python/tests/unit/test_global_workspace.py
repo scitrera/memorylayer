@@ -196,7 +196,7 @@ async def test_scope_boosts_prioritize_workspace_over_global(memory_service, tes
         ),
     )
 
-    global_memory = await memory_service.remember(
+    await memory_service.remember(
         workspace_id=GLOBAL_WORKSPACE_ID,
         input=RememberInput(
             content="Important information about the project",

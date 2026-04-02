@@ -643,7 +643,7 @@ class TestAdvancedRecallFeatures:
         from datetime import datetime, timedelta
 
         # Store a memory
-        memory = await memory_service.remember(workspace_id, RememberInput(content="Recent memory"))
+        await memory_service.remember(workspace_id, RememberInput(content="Recent memory"))
 
         # Query with time range
         now = datetime.now(UTC)
@@ -1032,7 +1032,7 @@ class TestRecallOverfetch:
 
             # LLM path calls _recall_rag internally, which applies overfetch
             assert len(captured_limits) >= 1
-            expected_limit = (
+            (
                 min(requested_limit * memory_service.recall_overfetch, 50) * memory_service.recall_overfetch
             )  # _recall_llm sets limit, then _recall_rag overfetches
             # The innermost storage call should use overfetched limit from _recall_rag

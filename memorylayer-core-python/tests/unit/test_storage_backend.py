@@ -730,7 +730,7 @@ class TestWorkspaceStats:
         """Test get_workspace_stats() excludes soft-deleted memories."""
         workspace_id = unique_workspace_id
         # Create and delete a memory
-        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Active memory stats", importance=0.5))
+        await storage_backend.create_memory(workspace_id, RememberInput(content="Active memory stats", importance=0.5))
         mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Deleted memory stats", importance=0.5))
         await storage_backend.delete_memory(workspace_id, mem2.id, hard=False)
 

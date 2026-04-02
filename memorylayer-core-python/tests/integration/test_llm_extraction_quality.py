@@ -457,7 +457,7 @@ class TestModelEvaluationSummary:
             stats["avg_importance"] = sum(m.importance for m in result) / len(result)
 
         # Check specific quality items
-        all_content = " ".join(m.content.lower() for m in result)
+        " ".join(m.content.lower() for m in result)
 
         # User should be correctly profiled
         profile_memories = [m for m in result if m.category == ExtractionCategory.PROFILE]

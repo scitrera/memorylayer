@@ -157,7 +157,7 @@ class TestDecayWorkspace:
         original_importance = memory.importance
 
         settings = DecaySettings(min_age_days=365)  # Nothing is 365 days old
-        result = await decay_service.decay_workspace(workspace_id, settings)
+        await decay_service.decay_workspace(workspace_id, settings)
 
         updated = await storage_backend.get_memory(workspace_id, memory.id)
         assert updated.importance == original_importance

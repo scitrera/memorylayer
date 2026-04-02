@@ -145,9 +145,6 @@ class TestPrometheusMetricsService:
         service._histograms = {}
         service._gauges = {}
         # Monkey-patch _get_* to use the isolated registry
-        original_get_counter = PrometheusMetricsService._get_counter
-        original_get_histogram = PrometheusMetricsService._get_histogram
-        original_get_gauge = PrometheusMetricsService._get_gauge
 
         def _get_counter(self, name, label_names):
             if name not in self._counters:
@@ -182,7 +179,7 @@ class TestPrometheusMetricsService:
         """PrometheusMetricsService can be instantiated when prometheus_client is present."""
         import prometheus_client
 
-        registry = prometheus_client.CollectorRegistry()
+        prometheus_client.CollectorRegistry()
         # Use _make_service to avoid global registry pollution
         service = self._make_service()
         assert service is not None

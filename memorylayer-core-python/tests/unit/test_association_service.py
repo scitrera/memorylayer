@@ -588,7 +588,7 @@ class TestAdvancedQueries:
         """Test detecting contradictions between memories."""
         mem_claim1 = await memory_service.remember(workspace_id, RememberInput(content="REST is always better"))
         mem_claim2 = await memory_service.remember(workspace_id, RememberInput(content="GraphQL is always better"))
-        mem_neutral = await memory_service.remember(workspace_id, RememberInput(content="Both have trade-offs"))
+        await memory_service.remember(workspace_id, RememberInput(content="Both have trade-offs"))
 
         # Create contradiction
         await association_service.associate(

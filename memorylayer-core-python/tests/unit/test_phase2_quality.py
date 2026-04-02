@@ -125,7 +125,7 @@ class TestMergeMemories:
 
         svc = _make_service(storage=storage, embedding=embedding)
 
-        result = await svc._merge_memories(
+        await svc._merge_memories(
             workspace_id="ws_test",
             existing=existing,
             new_content="new content",

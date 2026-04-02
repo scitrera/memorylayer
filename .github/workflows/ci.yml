@@ -84,8 +84,34 @@ jobs:
   # ──────────────────────────────────────────────────────────────────
   # TypeScript packages
   # ──────────────────────────────────────────────────────────────────
+  build-typescript-sdk:
+    name: "TypeScript: memorylayer-sdk (build)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: memorylayer-sdk-typescript
+        run: npm ci
+
+      - name: Build
+        working-directory: memorylayer-sdk-typescript
+        run: npm run build
+
+      - name: Upload SDK build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: memorylayer-sdk-dist
+          path: memorylayer-sdk-typescript/dist/
+          retention-days: 1
+
   test-typescript:
     name: "TypeScript: ${{ matrix.package.name }}"
+    needs: build-typescript-sdk
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -99,6 +125,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Download SDK build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: memorylayer-sdk-dist
+          path: memorylayer-sdk-typescript/dist/
 
       - name: Install dependencies
         working-directory: ${{ matrix.package.dir }}

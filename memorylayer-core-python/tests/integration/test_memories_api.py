@@ -546,8 +546,8 @@ class TestMemoryCreateExtended:
         assert response2.status_code == 201
 
         # If implemented, should return same ID
-        memory1_id = response1.json()["memory"]["id"]
-        memory2_id = response2.json()["memory"]["id"]
+        response1.json()["memory"]["id"]
+        response2.json()["memory"]["id"]
         # Note: Deduplication may or may not be implemented yet
         # Just verify both calls work
 
@@ -750,7 +750,7 @@ class TestMemoryReflectExtended:
             },
             headers=workspace_headers,
         )
-        memory_id = create_response.json()["memory"]["id"]
+        create_response.json()["memory"]["id"]
 
         response = test_client.post(
             "/v1/memories/reflect",
