@@ -36,9 +36,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install package with dev extras
+      - name: Install package with dev and context extras
         working-directory: memorylayer-core-python
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,context]"
 
       - name: Lint with ruff
         working-directory: memorylayer-core-python
