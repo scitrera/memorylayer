@@ -1,0 +1,115 @@
+# CI workflow: lint, build, and test all packages
+#
+# Triggers:
+#   - Pull requests to main or develop
+#   - Pushes to develop
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  push:
+    branches:
+      - develop
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Python server (memorylayer-core-python)
+  # ──────────────────────────────────────────────────────────────────
+  test-python-server:
+    name: "Python: memorylayer-server"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: memorylayer-core-python/pyproject.toml
+
+      - name: Install package with dev and local extras
+        working-directory: memorylayer-core-python
+        run: pip install -e ".[dev,local]"
+
+      - name: Lint with ruff
+        working-directory: memorylayer-core-python
+        run: ruff check .
+
+      - name: Check formatting with ruff
+        working-directory: memorylayer-core-python
+        run: ruff format --check .
+
+      - name: Run tests
+        working-directory: memorylayer-core-python
+        run: pytest tests/ -m "not slow and not integration and not llm and not llm_quality"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Python SDK (memorylayer-sdk-python)
+  # ──────────────────────────────────────────────────────────────────
+  test-python-sdk:
+    name: "Python: memorylayer-client"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: memorylayer-sdk-python/pyproject.toml
+
+      - name: Install package with dev extras
+        working-directory: memorylayer-sdk-python
+        run: pip install -e ".[dev]"
+
+      - name: Lint with ruff
+        working-directory: memorylayer-sdk-python
+        run: ruff check .
+
+      - name: Check formatting with ruff
+        working-directory: memorylayer-sdk-python
+        run: ruff format --check .
+
+      - name: Run tests
+        working-directory: memorylayer-sdk-python
+        run: pytest tests/
+
+  # ──────────────────────────────────────────────────────────────────
+  # TypeScript packages
+  # ──────────────────────────────────────────────────────────────────
+  test-typescript:
+    name: "TypeScript: ${{ matrix.package.name }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - { dir: memorylayer-sdk-typescript, name: memorylayer-sdk }
+          - { dir: memorylayer-mcp-typescript, name: memorylayer-mcp-server }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ${{ matrix.package.dir }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.package.dir }}
+        run: npm install
+
+      - name: Build
+        working-directory: ${{ matrix.package.dir }}
+        run: npm run build
