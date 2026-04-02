@@ -41,7 +41,6 @@ EXT_EMBEDDING_SERVICE = "embedding-service"
 # ============================================
 # LLM
 # ============================================
-EXT_LLM_PROVIDER = "memorylayer-llm-provider"
 EXT_LLM_SERVICE = "memorylayer-llm-service"
 EXT_LLM_REGISTRY = "memorylayer-llm-registry"
 

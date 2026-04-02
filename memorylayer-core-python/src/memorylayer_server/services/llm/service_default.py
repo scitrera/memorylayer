@@ -6,7 +6,7 @@ from logging import Logger
 from scitrera_app_framework import Variables, get_logger
 
 from ...models.llm import LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
-from .base import EXT_LLM_REGISTRY, LLMProvider, LLMServicePluginBase
+from .base import EXT_LLM_REGISTRY, LLMServicePluginBase
 from .registry import LLMProviderRegistry
 
 
@@ -21,11 +21,6 @@ class LLMService:
     def __init__(self, registry: LLMProviderRegistry, v: Variables = None):
         self.registry = registry
         self.logger = get_logger(v, name=self.__class__.__name__)
-
-    @property
-    def provider(self) -> LLMProvider:
-        """Default provider for backward compatibility."""
-        return self.registry.get_provider("default")
 
     async def complete(self, request: LLMRequest, profile: str = "default") -> LLMResponse:
         """Route completion to the provider for the given profile."""
@@ -122,13 +117,13 @@ Memories:
 
     @property
     def default_model(self) -> str:
-        """Default model from provider."""
-        return self.provider.default_model
+        """Default model from the default profile provider."""
+        return self.registry.get_provider("default").default_model
 
     @property
     def supports_streaming(self) -> bool:
-        """Streaming support from provider."""
-        return self.provider.supports_streaming
+        """Streaming support from the default profile provider."""
+        return self.registry.get_provider("default").supports_streaming
 
 
 class DefaultLLMServicePlugin(LLMServicePluginBase):

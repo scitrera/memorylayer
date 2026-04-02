@@ -283,18 +283,20 @@ def test_session_context(client: SyncMemoryLayerClient, base_url: str) -> None:
 @respx.mock
 def test_sync_client_helper(base_url: str) -> None:
     """Test sync_client() context manager helper."""
-    # Mock response
+    # Mock response (server wraps in MemoryResponse envelope)
     mock_response = {
-        "id": "mem_456",
-        "workspace_id": "ws_test",
-        "content": "Test memory",
-        "type": "working",
-        "importance": 0.5,
-        "tags": [],
-        "metadata": {},
-        "access_count": 0,
-        "created_at": "2026-01-26T10:00:00Z",
-        "updated_at": "2026-01-26T10:00:00Z",
+        "memory": {
+            "id": "mem_456",
+            "workspace_id": "ws_test",
+            "content": "Test memory",
+            "type": "working",
+            "importance": 0.5,
+            "tags": [],
+            "metadata": {},
+            "access_count": 0,
+            "created_at": "2026-01-26T10:00:00Z",
+            "updated_at": "2026-01-26T10:00:00Z",
+        }
     }
 
     respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=mock_response))

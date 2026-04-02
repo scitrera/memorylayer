@@ -327,18 +327,14 @@ class TestMemoryBatch:
             json={
                 "operations": [
                     {
-                        "type": "create",
-                        "data": {
-                            "content": "First batch memory",
-                            "importance": 0.5,
-                        },
+                        "op": "create",
+                        "content": "First batch memory",
+                        "importance": 0.5,
                     },
                     {
-                        "type": "create",
-                        "data": {
-                            "content": "Second batch memory",
-                            "importance": 0.6,
-                        },
+                        "op": "create",
+                        "content": "Second batch memory",
+                        "importance": 0.6,
                     },
                 ]
             },
@@ -369,25 +365,19 @@ class TestMemoryBatch:
             json={
                 "operations": [
                     {
-                        "type": "create",
-                        "data": {
-                            "content": "New batch memory",
-                        },
+                        "op": "create",
+                        "content": "New batch memory",
                     },
                     {
-                        "type": "update",
-                        "data": {
-                            "memory_id": memory_id,
-                            "content": "Updated content",
-                            "importance": 0.9,
-                        },
+                        "op": "update",
+                        "memory_id": memory_id,
+                        "content": "Updated content",
+                        "importance": 0.9,
                     },
                     {
-                        "type": "delete",
-                        "data": {
-                            "memory_id": memory_id,
-                            "hard": False,
-                        },
+                        "op": "delete",
+                        "memory_id": memory_id,
+                        "hard": False,
                     },
                 ]
             },

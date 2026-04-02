@@ -13,6 +13,7 @@ from scitrera_app_framework.api import Variables
 
 from ...config import DEFAULT_MEMORYLAYER_TASK_PROVIDER, MEMORYLAYER_TASK_PROVIDER
 from .._constants import (
+    EXT_MULTI_TASK_HANDLERS,  # noqa: F401 — re-exported for handlers.py and __init__.py
     EXT_STORAGE_BACKEND,
     EXT_TASK_SERVICE,
 )

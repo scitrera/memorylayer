@@ -9,12 +9,19 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from memorylayer_server.models.association import Association, RelationshipCategory
+from memorylayer_server.models.association import (
+    Association,
+    GraphPath,  # noqa: F401 — re-exported for associations.py
+    GraphQueryResult,  # noqa: F401 — re-exported for associations.py
+    RelationshipCategory,
+)
 from memorylayer_server.models.memory import (
     Memory,
     MemorySubtype,
     MemoryType,
     RecallMode,
+    RecallResult,  # noqa: F401 — re-exported for memories.py
+    ReflectResult,  # noqa: F401 — re-exported for memories.py
     SearchTolerance,
 )
 from memorylayer_server.models.session import Session, SessionBriefing

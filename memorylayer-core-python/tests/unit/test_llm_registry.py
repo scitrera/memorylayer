@@ -477,13 +477,14 @@ class TestLLMServiceWithRegistry:
         default.complete.assert_called_once_with(request)
         cheap.complete.assert_not_called()
 
-    def test_provider_property_returns_default(self):
-        """service.provider returns default provider from registry."""
+    def test_default_model_uses_default_profile(self):
+        """service.default_model delegates to default profile provider."""
         default = _mock_provider("default")
+        default.default_model = "gpt-4o"
         cheap = _mock_provider("cheap")
         registry = LLMProviderRegistry(
             providers={"default": default, "cheap": cheap},
         )
         service = LLMService(registry=registry)
 
-        assert service.provider is default
+        assert service.default_model == "gpt-4o"
