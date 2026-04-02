@@ -1,9 +1,9 @@
 """Type definitions and enums for MemoryLayer.ai SDK."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class MemoryType(str, Enum):
+class MemoryType(StrEnum):
     """Cognitive memory types - how memory is structured."""
 
     EPISODIC = "episodic"  # Specific events/interactions
@@ -12,7 +12,7 @@ class MemoryType(str, Enum):
     WORKING = "working"  # Current task context
 
 
-class MemorySubtype(str, Enum):
+class MemorySubtype(StrEnum):
     """Domain subtypes - what the memory is about."""
 
     SOLUTION = "solution"  # Working fixes to problems
@@ -30,7 +30,7 @@ class MemorySubtype(str, Enum):
     INFERENCE = "inference"  # Inferred/derived knowledge
 
 
-class RecallMode(str, Enum):
+class RecallMode(StrEnum):
     """Retrieval strategy for recall queries."""
 
     RAG = "rag"  # Fast vector similarity search
@@ -38,7 +38,7 @@ class RecallMode(str, Enum):
     HYBRID = "hybrid"  # Combine both strategies
 
 
-class SearchTolerance(str, Enum):
+class SearchTolerance(StrEnum):
     """Search precision level."""
 
     LOOSE = "loose"  # Fuzzy matching, broader results
@@ -46,7 +46,7 @@ class SearchTolerance(str, Enum):
     STRICT = "strict"  # Exact matching, high relevance
 
 
-class RelationshipCategory(str, Enum):
+class RelationshipCategory(StrEnum):
     """High-level relationship categories.
 
     These match the server's category names from the unified ontology.
@@ -64,7 +64,7 @@ class RelationshipCategory(str, Enum):
     QUALITY = "quality"  # Quality assessments
 
 
-class RelationshipType(str, Enum):
+class RelationshipType(StrEnum):
     """Specific relationship types between memories.
 
     These match the server's relationship type strings (snake_case).

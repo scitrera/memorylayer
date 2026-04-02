@@ -3,12 +3,11 @@ Tier Generation Service - Base interface and plugin.
 
 Provides the ABC interface and plugin base for tier generation services.
 """
+
 from abc import ABC, abstractmethod
-from typing import Optional
 
-from ...config import MEMORYLAYER_SEMANTIC_TIERING_SERVICE, DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_SERVICE
+from ...config import DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_SERVICE, MEMORYLAYER_SEMANTIC_TIERING_SERVICE
 from ...models.memory import Memory
-
 from .._constants import EXT_LLM_SERVICE, EXT_SEMANTIC_TIERING_SERVICE, EXT_STORAGE_BACKEND
 from .._plugin_factory import make_service_plugin_base
 
@@ -17,42 +16,26 @@ class SemanticTieringService(ABC):
     """Interface for tier generation service."""
 
     @abstractmethod
-    async def generate_abstract(
-            self,
-            content: str,
-            max_tokens: int = 30
-    ) -> str:
+    async def generate_abstract(self, content: str, max_tokens: int = 30) -> str:
         """Generate brief abstract (tier 1) from memory content."""
         pass
 
     @abstractmethod
-    async def generate_overview(
-            self,
-            content: str,
-            max_tokens: int = 100
-    ) -> str:
+    async def generate_overview(self, content: str, max_tokens: int = 100) -> str:
         """Generate overview (tier 2) from memory content."""
         pass
 
     @abstractmethod
-    async def generate_tiers(
-            self,
-            memory_id: str,
-            workspace_id: str,
-            force: bool = False
-    ) -> Memory:
+    async def generate_tiers(self, memory_id: str, workspace_id: str, force: bool = False) -> Memory:
         """Generate all tiers (abstract, overview) for a memory."""
         pass
 
     @abstractmethod
-    async def generate_tiers_for_content(
-            self,
-            content: str
-    ) -> tuple[str, str]:
+    async def generate_tiers_for_content(self, content: str) -> tuple[str, str]:
         """Generate tiers for content without persisting."""
         pass
 
-    async def request_tier_generation(self, memory_id: str, workspace_id: str) -> Optional[str]:
+    async def request_tier_generation(self, memory_id: str, workspace_id: str) -> str | None:
         """
         Request tier generation for a memory, potentially as a background task.
 

@@ -7,10 +7,14 @@ Tests:
 - recall filtering by subject_id
 - recall filtering by both observer_id and subject_id
 """
+
 import pytest
 
 from memorylayer_server.models.memory import (
-    RememberInput, RecallInput, MemoryType, RecallMode,
+    MemoryType,
+    RecallInput,
+    RecallMode,
+    RememberInput,
 )
 from memorylayer_server.services.memory import MemoryService
 
@@ -20,9 +24,9 @@ class TestEntityAttribution:
 
     @pytest.mark.asyncio
     async def test_remember_with_observer_id(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Storing a memory with observer_id persists the field."""
         input_data = RememberInput(
@@ -38,9 +42,9 @@ class TestEntityAttribution:
 
     @pytest.mark.asyncio
     async def test_remember_with_subject_id(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Storing a memory with subject_id persists the field."""
         input_data = RememberInput(
@@ -56,9 +60,9 @@ class TestEntityAttribution:
 
     @pytest.mark.asyncio
     async def test_remember_with_both_entity_fields(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Storing a memory with both observer and subject persists both."""
         input_data = RememberInput(
@@ -75,9 +79,9 @@ class TestEntityAttribution:
 
     @pytest.mark.asyncio
     async def test_recall_filter_by_subject_id(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Recall with subject_id filter returns only matching memories."""
         # Create memories about different subjects
@@ -86,12 +90,15 @@ class TestEntityAttribution:
             ("entity-A", "Entity A uses PostgreSQL"),
             ("entity-B", "Entity B prefers GraphQL"),
         ]:
-            await memory_service.remember(workspace_id, RememberInput(
-                content=content,
-                type=MemoryType.SEMANTIC,
-                subject_id=subject,
-                importance=0.8,
-            ))
+            await memory_service.remember(
+                workspace_id,
+                RememberInput(
+                    content=content,
+                    type=MemoryType.SEMANTIC,
+                    subject_id=subject,
+                    importance=0.8,
+                ),
+            )
 
         # Recall only entity-A memories
         recall_input = RecallInput(
@@ -110,9 +117,9 @@ class TestEntityAttribution:
 
     @pytest.mark.asyncio
     async def test_recall_filter_by_observer_id(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Recall with observer_id filter returns only memories from that observer."""
         for observer, content in [
@@ -120,12 +127,15 @@ class TestEntityAttribution:
             ("observer-X", "Observer X noted the user's preference for Vim"),
             ("observer-Y", "Observer Y saw the user coding in Go"),
         ]:
-            await memory_service.remember(workspace_id, RememberInput(
-                content=content,
-                type=MemoryType.SEMANTIC,
-                observer_id=observer,
-                importance=0.8,
-            ))
+            await memory_service.remember(
+                workspace_id,
+                RememberInput(
+                    content=content,
+                    type=MemoryType.SEMANTIC,
+                    observer_id=observer,
+                    importance=0.8,
+                ),
+            )
 
         recall_input = RecallInput(
             query="what did observer X notice",
@@ -142,23 +152,29 @@ class TestEntityAttribution:
 
     @pytest.mark.asyncio
     async def test_recall_without_entity_filter_returns_all(
-            self,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Recall without entity filters includes all memories regardless of attribution."""
-        await memory_service.remember(workspace_id, RememberInput(
-            content="Unattributed memory about test isolation patterns",
-            type=MemoryType.SEMANTIC,
-            importance=0.9,
-        ))
-        await memory_service.remember(workspace_id, RememberInput(
-            content="Attributed memory about test isolation patterns",
-            type=MemoryType.SEMANTIC,
-            observer_id="obs-1",
-            subject_id="subj-1",
-            importance=0.9,
-        ))
+        await memory_service.remember(
+            workspace_id,
+            RememberInput(
+                content="Unattributed memory about test isolation patterns",
+                type=MemoryType.SEMANTIC,
+                importance=0.9,
+            ),
+        )
+        await memory_service.remember(
+            workspace_id,
+            RememberInput(
+                content="Attributed memory about test isolation patterns",
+                type=MemoryType.SEMANTIC,
+                observer_id="obs-1",
+                subject_id="subj-1",
+                importance=0.9,
+            ),
+        )
 
         recall_input = RecallInput(
             query="test isolation patterns",

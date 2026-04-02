@@ -1,14 +1,15 @@
 """In-memory LRU cache service."""
+
 import time
 from logging import Logger
-from typing import Optional, Any
+from typing import Any
 
 from scitrera_app_framework import Variables, get_logger
 
 from .base import CacheService, CacheServicePluginBase
 
 # Environment variable constants (specific to this implementation)
-MEMORYLAYER_CACHE_LRU_MAXSIZE = 'MEMORYLAYER_CACHE_LRU_MAXSIZE'
+MEMORYLAYER_CACHE_LRU_MAXSIZE = "MEMORYLAYER_CACHE_LRU_MAXSIZE"
 DEFAULT_MEMORYLAYER_CACHE_LRU_MAXSIZE = 4096
 
 
@@ -20,12 +21,13 @@ class LRUCacheService(CacheService):
     """
 
     def __init__(
-            self,
-            v: Variables = None,
-            logger: Logger = None,
-            maxsize: int = DEFAULT_MEMORYLAYER_CACHE_LRU_MAXSIZE,
+        self,
+        v: Variables = None,
+        logger: Logger = None,
+        maxsize: int = DEFAULT_MEMORYLAYER_CACHE_LRU_MAXSIZE,
     ):
         from cachetools import LRUCache
+
         self._v = v
         self._logger = logger or get_logger(v, name=self.__class__.__name__)
         self._cache: LRUCache = LRUCache(maxsize=maxsize)
@@ -43,7 +45,7 @@ class LRUCacheService(CacheService):
         age = time.monotonic() - timestamp
         return age > ttl_seconds
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """Get value from cache, checking TTL expiration."""
         if key not in self._cache:
             return None
@@ -53,12 +55,7 @@ class LRUCacheService(CacheService):
             return None
         return self._cache.get(key)
 
-    async def set(
-            self,
-            key: str,
-            value: Any,
-            ttl_seconds: Optional[int] = None
-    ) -> bool:
+    async def set(self, key: str, value: Any, ttl_seconds: int | None = None) -> bool:
         """Set value in cache with optional TTL."""
         self._cache[key] = value
         self._timestamps[key] = (time.monotonic(), ttl_seconds)
@@ -94,10 +91,10 @@ class LRUCacheService(CacheService):
         return len(keys_to_delete)
 
     async def get_or_set(
-            self,
-            key: str,
-            factory,
-            ttl_seconds: Optional[int] = None,
+        self,
+        key: str,
+        factory,
+        ttl_seconds: int | None = None,
     ) -> Any:
         """Get from cache or compute and cache."""
         value = await self.get(key)
@@ -112,9 +109,10 @@ class LRUCacheService(CacheService):
 
 class LRUCacheServicePlugin(CacheServicePluginBase):
     """Plugin for LRU cache service."""
-    PROVIDER_NAME = 'lru'
 
-    def initialize(self, v: Variables, logger: Logger) -> Optional[LRUCacheService]:
+    PROVIDER_NAME = "lru"
+
+    def initialize(self, v: Variables, logger: Logger) -> LRUCacheService | None:
         maxsize = v.environ(
             MEMORYLAYER_CACHE_LRU_MAXSIZE,
             default=DEFAULT_MEMORYLAYER_CACHE_LRU_MAXSIZE,

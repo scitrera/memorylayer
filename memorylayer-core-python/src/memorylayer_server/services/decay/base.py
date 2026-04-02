@@ -1,17 +1,18 @@
 """Decay Service - Base interface and plugin."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
 
-from ...config import MEMORYLAYER_DECAY_PROVIDER, DEFAULT_MEMORYLAYER_DECAY_PROVIDER
+from ...config import DEFAULT_MEMORYLAYER_DECAY_PROVIDER, MEMORYLAYER_DECAY_PROVIDER
 from ...models import Memory
-from .._constants import EXT_STORAGE_BACKEND, EXT_DECAY_SERVICE
+from .._constants import EXT_DECAY_SERVICE, EXT_STORAGE_BACKEND
 from .._plugin_factory import make_service_plugin_base
 
 
 @dataclass
 class DecaySettings:
     """Configuration for memory decay behavior."""
+
     decay_rate: float = 0.95  # Per-day decay multiplier
     min_importance: float = 0.1  # Floor - importance never drops below this
     min_age_days: int = 7  # Don't decay memories younger than this
@@ -24,6 +25,7 @@ class DecaySettings:
 @dataclass
 class DecayResult:
     """Result of a decay pass."""
+
     processed: int = 0
     decayed: int = 0
     archived: int = 0
@@ -33,26 +35,26 @@ class DecayService(ABC):
     """Interface for memory decay and archival."""
 
     @abstractmethod
-    async def decay_workspace(self, workspace_id: str, settings: Optional[DecaySettings] = None) -> DecayResult:
+    async def decay_workspace(self, workspace_id: str, settings: DecaySettings | None = None) -> DecayResult:
         """Run decay pass on all eligible memories in a workspace."""
         pass
 
     @abstractmethod
-    async def archive_stale_memories(self, workspace_id: str, settings: Optional[DecaySettings] = None) -> int:
+    async def archive_stale_memories(self, workspace_id: str, settings: DecaySettings | None = None) -> int:
         """Archive stale low-importance memories. Returns count archived."""
         pass
 
     @abstractmethod
-    async def calculate_access_boost(self, memory: Memory, boost_factor: Optional[float] = None) -> Optional[float]:
+    async def calculate_access_boost(self, memory: Memory, boost_factor: float | None = None) -> float | None:
         pass
 
     @abstractmethod
-    async def boost_on_access(self, workspace_id: str, memory_id: str, boost_factor: Optional[float] = None) -> Optional[float]:
+    async def boost_on_access(self, workspace_id: str, memory_id: str, boost_factor: float | None = None) -> float | None:
         """Boost importance when memory is accessed. Returns new importance or None if not found."""
         pass
 
     @abstractmethod
-    async def decay_all_workspaces(self, settings: Optional[DecaySettings] = None) -> DecayResult:
+    async def decay_all_workspaces(self, settings: DecaySettings | None = None) -> DecayResult:
         """Run decay and archival across all workspaces."""
         pass
 

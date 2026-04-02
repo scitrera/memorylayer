@@ -1,13 +1,14 @@
 """Deduplication service package."""
-from .base import (
-    DeduplicationServicePluginBase,
-    EXT_DEDUPLICATION_SERVICE,
-    DeduplicationService,
-    DeduplicationAction,
-    DeduplicationResult,
-)
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    EXT_DEDUPLICATION_SERVICE,
+    DeduplicationAction,
+    DeduplicationResult,
+    DeduplicationService,
+    DeduplicationServicePluginBase,
+)
 
 
 def get_deduplication_service(v: Variables = None) -> DeduplicationService:
@@ -16,10 +17,10 @@ def get_deduplication_service(v: Variables = None) -> DeduplicationService:
 
 
 __all__ = (
-    'DeduplicationService',
-    'DeduplicationServicePluginBase',
-    'get_deduplication_service',
-    'EXT_DEDUPLICATION_SERVICE',
-    'DeduplicationAction',
-    'DeduplicationResult',
+    "DeduplicationService",
+    "DeduplicationServicePluginBase",
+    "get_deduplication_service",
+    "EXT_DEDUPLICATION_SERVICE",
+    "DeduplicationAction",
+    "DeduplicationResult",
 )

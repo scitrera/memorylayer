@@ -9,9 +9,10 @@ Configure via environment variables:
     MEMORYLAYER_LLM_OPENAI_API_KEY=local
     MEMORYLAYER_LLM_OPENAI_MODEL=nemotron3-30b-a3b-2512
 """
+
 import os
+
 import pytest
-import pytest_asyncio
 
 from memorylayer_server.services.extraction import ExtractionCategory
 from memorylayer_server.services.extraction.default import (
@@ -19,7 +20,6 @@ from memorylayer_server.services.extraction.default import (
     ExtractionOptions,
 )
 from memorylayer_server.services.llm.openai import OpenAILLMProvider
-
 
 # Skip all tests in this module if LLM is not configured
 pytestmark = pytest.mark.llm

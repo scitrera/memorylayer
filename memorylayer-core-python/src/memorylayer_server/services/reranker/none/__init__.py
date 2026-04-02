@@ -3,6 +3,6 @@
 from .provider import NoneRerankerProvider, NoneRerankerProviderPlugin
 
 __all__ = [
-    'NoneRerankerProvider',
-    'NoneRerankerProviderPlugin',
+    "NoneRerankerProvider",
+    "NoneRerankerProviderPlugin",
 ]

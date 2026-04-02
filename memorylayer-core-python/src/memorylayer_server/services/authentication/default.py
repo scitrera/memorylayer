@@ -6,26 +6,27 @@ This implementation provides:
 - Session resolution via session service
 - Workspace auto-creation on first access
 """
+
 import logging
-from typing import Optional, Iterable
+from collections.abc import Iterable
 
-from scitrera_app_framework import Variables, get_extension, ext_parse_bool
+from scitrera_app_framework import Variables, ext_parse_bool, get_extension
 
-from .base import (
-    AuthenticationService,
-    AuthenticationServicePluginBase,
-    EXT_AUTHENTICATION_SERVICE,
-)
-from ...models.auth import AuthIdentity
-from ...models.session import Session
 from ...config import (
+    DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE,
     DEFAULT_TENANT_ID,
     DEFAULT_WORKSPACE_ID,
     MEMORYLAYER_SESSION_IMPLICIT_CREATE,
-    DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE,
 )
-from ...services.session import SessionService, EXT_SESSION_SERVICE
-from ...services.workspace import WorkspaceService, EXT_WORKSPACE_SERVICE
+from ...models.auth import AuthIdentity
+from ...models.session import Session
+from ...services.session import EXT_SESSION_SERVICE, SessionService
+from ...services.workspace import EXT_WORKSPACE_SERVICE, WorkspaceService
+from .base import (
+    EXT_AUTHENTICATION_SERVICE,
+    AuthenticationService,
+    AuthenticationServicePluginBase,
+)
 
 
 class OpenAuthenticationService(AuthenticationService):
@@ -38,18 +39,18 @@ class OpenAuthenticationService(AuthenticationService):
     """
 
     def __init__(
-            self,
-            session_service: SessionService,
-            workspace_service: WorkspaceService,
-            implicit_session_create: bool = True,
-            logger: Optional[logging.Logger] = None,
+        self,
+        session_service: SessionService,
+        workspace_service: WorkspaceService,
+        implicit_session_create: bool = True,
+        logger: logging.Logger | None = None,
     ):
         super().__init__(logger)
         self.session_service = session_service
         self.workspace_service = workspace_service
         self._implicit_session_create = implicit_session_create
 
-    async def verify_api_key(self, api_key: Optional[str]) -> AuthIdentity:
+    async def verify_api_key(self, api_key: str | None) -> AuthIdentity:
         """
         Verify API key - always succeeds in OSS.
 
@@ -63,7 +64,7 @@ class OpenAuthenticationService(AuthenticationService):
             api_key_id=None,
         )
 
-    async def resolve_session(self, session_id: Optional[str]) -> Optional[Session]:
+    async def resolve_session(self, session_id: str | None) -> Session | None:
         """
         Resolve session from session service.
 
@@ -80,10 +81,10 @@ class OpenAuthenticationService(AuthenticationService):
             return None
 
     async def resolve_workspace(
-            self,
-            request_workspace_id: Optional[str],
-            session: Optional[Session],
-            tenant_id: str,
+        self,
+        request_workspace_id: str | None,
+        session: Session | None,
+        tenant_id: str,
     ) -> str:
         """
         Resolve workspace with priority order and auto-creation.
@@ -94,11 +95,7 @@ class OpenAuthenticationService(AuthenticationService):
         3. DEFAULT_WORKSPACE_ID ("_default")
         """
         # Priority resolution
-        workspace_id = (
-                request_workspace_id
-                or (session.workspace_id if session else None)
-                or DEFAULT_WORKSPACE_ID
-        )
+        workspace_id = request_workspace_id or (session.workspace_id if session else None) or DEFAULT_WORKSPACE_ID
 
         # Auto-create workspace if needed (OSS "just works" pattern)
         await self.workspace_service.ensure_workspace(
@@ -110,11 +107,11 @@ class OpenAuthenticationService(AuthenticationService):
         return workspace_id
 
     async def ensure_session(
-            self,
-            session_id: str,
-            workspace_id: str,
-            tenant_id: str,
-    ) -> Optional[Session]:
+        self,
+        session_id: str,
+        workspace_id: str,
+        tenant_id: str,
+    ) -> Session | None:
         """
         Auto-create session for unknown session_id when workspace is explicit.
 
@@ -138,20 +135,23 @@ class OpenAuthenticationService(AuthenticationService):
             created = await self.session_service.create_session(workspace_id, session)
             self.logger.info(
                 "Implicitly created session %s in workspace %s",
-                session_id, workspace_id,
+                session_id,
+                workspace_id,
             )
             return created
         except Exception as e:
             self.logger.warning(
                 "Failed to implicitly create session %s: %s",
-                session_id, e,
+                session_id,
+                e,
             )
             return None
 
 
 class OpenAuthenticationServicePlugin(AuthenticationServicePluginBase):
     """Plugin to register the OSS authentication service."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: logging.Logger) -> OpenAuthenticationService:
         session_service = self.get_extension(EXT_SESSION_SERVICE, v=v)
@@ -172,7 +172,10 @@ class OpenAuthenticationServicePlugin(AuthenticationServicePluginBase):
 
     # noinspection PyMethodMayBeStatic
     def get_dependencies(self, v: Variables) -> Iterable[str]:
-        return EXT_SESSION_SERVICE, EXT_WORKSPACE_SERVICE,
+        return (
+            EXT_SESSION_SERVICE,
+            EXT_WORKSPACE_SERVICE,
+        )
 
 
 def get_authentication_service(v: Variables) -> AuthenticationService:

@@ -1,24 +1,26 @@
 """Memory consolidation task handler — daily scheduled merge of low-importance similar memories."""
+
+from datetime import UTC
 from logging import Logger
-from typing import Optional, Any
+from typing import Any
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
+from ..config import (
+    DEFAULT_MEMORYLAYER_CONSOLIDATION_ENABLED,
+    DEFAULT_MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
+    DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
+    DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
+    MEMORYLAYER_CONSOLIDATION_ENABLED,
+    MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
+    MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
+    MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
+)
 from ..services.storage import EXT_STORAGE_BACKEND
 from ..services.storage.base import StorageBackend
 from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 from ..utils import dot_product as _dot_product
-from ..config import (
-    MEMORYLAYER_CONSOLIDATION_ENABLED,
-    DEFAULT_MEMORYLAYER_CONSOLIDATION_ENABLED,
-    MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
-    DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
-    MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
-    DEFAULT_MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
-    MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
-    DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
-)
 
 
 def _is_enabled(v: Variables) -> bool:
@@ -26,8 +28,7 @@ def _is_enabled(v: Variables) -> bool:
     raw = v.get(MEMORYLAYER_CONSOLIDATION_ENABLED, DEFAULT_MEMORYLAYER_CONSOLIDATION_ENABLED)
     if isinstance(raw, bool):
         return raw
-    return str(raw).lower() in ('1', 'true', 'yes')
-
+    return str(raw).lower() in ("1", "true", "yes")
 
 
 def _merge_memories_simplified(primary: Any, others: list[Any]) -> dict:
@@ -62,16 +63,16 @@ def _merge_memories_simplified(primary: Any, others: list[Any]) -> dict:
     new_importance = min(max_importance * 1.1, 1.0)
 
     # Record provenance in metadata
-    existing_provenance = merged_metadata.get('consolidated_from', [])
+    existing_provenance = merged_metadata.get("consolidated_from", [])
     if isinstance(existing_provenance, list):
-        merged_metadata['consolidated_from'] = existing_provenance + provenance_ids
+        merged_metadata["consolidated_from"] = existing_provenance + provenance_ids
     else:
-        merged_metadata['consolidated_from'] = provenance_ids
+        merged_metadata["consolidated_from"] = provenance_ids
 
     return {
-        'tags': list(merged_tags),
-        'metadata': merged_metadata,
-        'importance': new_importance,
+        "tags": list(merged_tags),
+        "metadata": merged_metadata,
+        "importance": new_importance,
     }
 
 
@@ -133,6 +134,7 @@ def _find_clusters(
 
     # Group by root
     from collections import defaultdict
+
     groups: dict[int, list[int]] = defaultdict(list)
     for i in range(n):
         groups[find(i)].append(i)
@@ -157,9 +159,9 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
     """
 
     def get_task_type(self) -> str:
-        return 'memory_consolidation'
+        return "memory_consolidation"
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         if not _is_enabled(v):
             return None
         return TaskSchedule(
@@ -174,20 +176,26 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
         logger: Logger = get_logger(v, name=self.get_task_type())
 
-        min_cluster_size = int(v.get(
-            MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
-            DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
-        ))
-        max_importance = float(v.get(
-            MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
-            DEFAULT_MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
-        ))
-        min_similarity = float(v.get(
-            MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
-            DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
-        ))
+        min_cluster_size = int(
+            v.get(
+                MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
+                DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_CLUSTER_SIZE,
+            )
+        )
+        max_importance = float(
+            v.get(
+                MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
+                DEFAULT_MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE,
+            )
+        )
+        min_similarity = float(
+            v.get(
+                MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
+                DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY,
+            )
+        )
 
-        workspace_id = payload.get('workspace_id')
+        workspace_id = payload.get("workspace_id")
 
         if workspace_id:
             workspaces_to_process = [workspace_id]
@@ -201,8 +209,12 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
         for ws_id in workspaces_to_process:
             try:
                 merged, deleted = await self._consolidate_workspace(
-                    storage, logger, ws_id,
-                    min_cluster_size, max_importance, min_similarity,
+                    storage,
+                    logger,
+                    ws_id,
+                    min_cluster_size,
+                    max_importance,
+                    min_similarity,
                 )
                 total_merged += merged
                 total_deleted += deleted
@@ -211,7 +223,8 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
 
         logger.info(
             "Consolidation complete: %d memories merged (primary updated), %d memories deleted",
-            total_merged, total_deleted,
+            total_merged,
+            total_deleted,
         )
 
     async def _consolidate_workspace(
@@ -228,9 +241,9 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
         Returns:
             (merged_count, deleted_count) tuple
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        epoch = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        epoch = datetime(2000, 1, 1, tzinfo=UTC)
 
         # Collect all low-importance memories with embeddings
         candidates = []
@@ -242,7 +255,7 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
                 workspace_id,
                 created_after=epoch,
                 limit=batch_size,
-                detail_level='full',
+                detail_level="full",
                 offset=offset,
             )
             if not batch:
@@ -250,16 +263,16 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
 
             for item in batch:
                 if isinstance(item, dict):
-                    mem_id = item.get('id')
-                    importance = item.get('importance', 1.0)
+                    mem_id = item.get("id")
+                    importance = item.get("importance", 1.0)
                     if importance is not None and importance <= max_importance and mem_id:
                         mem = await storage.get_memory(workspace_id, mem_id, track_access=False)
-                        if mem and mem.embedding and not getattr(mem, 'pinned', False):
+                        if mem and mem.embedding and not getattr(mem, "pinned", False):
                             candidates.append(mem)
                 else:
-                    importance = getattr(item, 'importance', 1.0)
-                    if importance <= max_importance and getattr(item, 'embedding', None):
-                        if not getattr(item, 'pinned', False):
+                    importance = getattr(item, "importance", 1.0)
+                    if importance <= max_importance and getattr(item, "embedding", None):
+                        if not getattr(item, "pinned", False):
                             candidates.append(item)
 
             offset += len(batch)
@@ -269,13 +282,15 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
         if len(candidates) < min_cluster_size:
             logger.debug(
                 "Workspace %s: only %d candidate(s) below importance threshold, skipping",
-                workspace_id, len(candidates),
+                workspace_id,
+                len(candidates),
             )
             return 0, 0
 
         logger.info(
             "Workspace %s: found %d candidate memories for consolidation",
-            workspace_id, len(candidates),
+            workspace_id,
+            len(candidates),
         )
 
         clusters = _find_clusters(candidates, min_similarity, min_cluster_size)
@@ -302,7 +317,8 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
             except Exception as exc:
                 logger.error(
                     "Failed to update primary memory %s during consolidation: %s",
-                    primary.id, exc,
+                    primary.id,
+                    exc,
                 )
                 continue
 
@@ -313,16 +329,22 @@ class ConsolidationTaskHandler(TaskHandlerPlugin):
                     deleted_count += 1
                     logger.debug(
                         "Consolidated memory %s into primary %s (workspace %s)",
-                        mem.id, primary.id, workspace_id,
+                        mem.id,
+                        primary.id,
+                        workspace_id,
                     )
                 except Exception as exc:
                     logger.error(
                         "Failed to delete memory %s during consolidation: %s",
-                        mem.id, exc,
+                        mem.id,
+                        exc,
                     )
 
         logger.info(
             "Workspace %s consolidation: %d cluster(s) processed, %d primaries updated, %d memories deleted",
-            workspace_id, len(clusters), merged_count, deleted_count,
+            workspace_id,
+            len(clusters),
+            merged_count,
+            deleted_count,
         )
         return merged_count, deleted_count

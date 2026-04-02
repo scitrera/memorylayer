@@ -9,19 +9,20 @@ Tests storage layer functionality from the spec (Section 4, 8):
 - Workspace storage
 - Session persistence storage
 """
-import hashlib
-import pytest
-from datetime import datetime, timedelta, timezone
 
-from memorylayer_server.services.storage.sqlite import SQLiteStorageBackend
-from memorylayer_server.models.memory import RememberInput, MemoryType, MemorySubtype
+import hashlib
+from datetime import UTC, datetime
+
+import pytest
+
 from memorylayer_server.models.association import AssociateInput
+from memorylayer_server.models.memory import MemorySubtype, MemoryType, RememberInput
+from memorylayer_server.models.session import Session
 from memorylayer_server.models.workspace import Workspace
-from memorylayer_server.models.session import Session, WorkingMemory
+from memorylayer_server.services.storage.sqlite import SQLiteStorageBackend
 
 # Embedding dimension constant (must match mock embedding provider)
 EMBEDDING_DIM = 384
-
 
 
 # ============================================================================
@@ -72,7 +73,7 @@ class TestMemoryOperations:
             subtype=MemorySubtype.PREFERENCE,
             importance=0.8,
             tags=["programming", "languages"],
-            metadata={"source": "conversation", "confidence": 0.95}
+            metadata={"source": "conversation", "confidence": 0.95},
         )
 
         memory = await storage_backend.create_memory(workspace_id, input_data)
@@ -94,11 +95,7 @@ class TestMemoryOperations:
     async def test_get_memory_retrieves_by_id(self, storage_backend, workspace_id):
         """Test get_memory() retrieves by ID."""
         # Create a memory
-        input_data = RememberInput(
-            content="Test memory content",
-            type=MemoryType.EPISODIC,
-            importance=0.7
-        )
+        input_data = RememberInput(content="Test memory content", type=MemoryType.EPISODIC, importance=0.7)
         created = await storage_backend.create_memory(workspace_id, input_data)
 
         # Retrieve it
@@ -146,20 +143,12 @@ class TestMemoryOperations:
     async def test_update_memory_modifies_fields(self, storage_backend, workspace_id):
         """Test update_memory() modifies fields correctly."""
         # Create a memory
-        input_data = RememberInput(
-            content="Original content",
-            importance=0.5,
-            tags=["tag1"]
-        )
+        input_data = RememberInput(content="Original content", importance=0.5, tags=["tag1"])
         created = await storage_backend.create_memory(workspace_id, input_data)
 
         # Update multiple fields
         updated = await storage_backend.update_memory(
-            workspace_id,
-            created.id,
-            importance=0.9,
-            tags=["tag1", "tag2", "tag3"],
-            metadata={"updated": True}
+            workspace_id, created.id, importance=0.9, tags=["tag1", "tag2", "tag3"], metadata={"updated": True}
         )
 
         assert updated is not None
@@ -180,11 +169,7 @@ class TestMemoryOperations:
 
         # Add embedding
         embedding = ([0.1, 0.2, 0.3, 0.4, 0.5] * 77)[:EMBEDDING_DIM]  # 384-dim vector
-        updated = await storage_backend.update_memory(
-            workspace_id,
-            created.id,
-            embedding=embedding
-        )
+        updated = await storage_backend.update_memory(workspace_id, created.id, embedding=embedding)
 
         assert updated.embedding is not None
         assert len(updated.embedding) == EMBEDDING_DIM
@@ -265,41 +250,18 @@ class TestVectorSearch:
         """Test search_memories() with embedding similarity."""
         workspace_id = class_workspace_id  # Local alias for cleaner code
         # Create memories with embeddings
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Python programming", importance=0.8)
-        )
-        await storage_backend.update_memory(
-            workspace_id, mem1.id,
-            embedding=[1.0] + [0.0] * (EMBEDDING_DIM - 1)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Python programming", importance=0.8))
+        await storage_backend.update_memory(workspace_id, mem1.id, embedding=[1.0] + [0.0] * (EMBEDDING_DIM - 1))
 
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="JavaScript development", importance=0.7)
-        )
-        await storage_backend.update_memory(
-            workspace_id, mem2.id,
-            embedding=[0.9, 0.1] + [0.0] * (EMBEDDING_DIM - 2)
-        )
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="JavaScript development", importance=0.7))
+        await storage_backend.update_memory(workspace_id, mem2.id, embedding=[0.9, 0.1] + [0.0] * (EMBEDDING_DIM - 2))
 
-        mem3 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Database design", importance=0.6)
-        )
-        await storage_backend.update_memory(
-            workspace_id, mem3.id,
-            embedding=[0.0, 0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 3)
-        )
+        mem3 = await storage_backend.create_memory(workspace_id, RememberInput(content="Database design", importance=0.6))
+        await storage_backend.update_memory(workspace_id, mem3.id, embedding=[0.0, 0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 3))
 
         # Search with query embedding similar to mem1
         query_embedding = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
-        results = await storage_backend.search_memories(
-            workspace_id,
-            query_embedding,
-            limit=10,
-            min_relevance=0.5
-        )
+        results = await storage_backend.search_memories(workspace_id, query_embedding, limit=10, min_relevance=0.5)
 
         # Should return memories ordered by relevance
         assert len(results) > 0
@@ -312,22 +274,12 @@ class TestVectorSearch:
         workspace_id = class_workspace_id
         # Create 5 memories with embeddings
         for i in range(5):
-            mem = await storage_backend.create_memory(
-                workspace_id,
-                RememberInput(content=f"Memory {i}", importance=0.5)
-            )
-            await storage_backend.update_memory(
-                workspace_id, mem.id,
-                embedding=[0.5] * EMBEDDING_DIM
-            )
+            mem = await storage_backend.create_memory(workspace_id, RememberInput(content=f"Memory {i}", importance=0.5))
+            await storage_backend.update_memory(workspace_id, mem.id, embedding=[0.5] * EMBEDDING_DIM)
 
         # Search with limit=3
         query_embedding = [0.5] * EMBEDDING_DIM
-        results = await storage_backend.search_memories(
-            workspace_id,
-            query_embedding,
-            limit=3
-        )
+        results = await storage_backend.search_memories(workspace_id, query_embedding, limit=3)
 
         assert len(results) == 3
 
@@ -335,22 +287,18 @@ class TestVectorSearch:
         """Test search_memories() respects min_relevance threshold."""
         workspace_id = class_workspace_id
         # Create memories with different similarity levels
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="High relevance", importance=0.8)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="High relevance", importance=0.8))
         await storage_backend.update_memory(
-            workspace_id, mem1.id,
-            embedding=[1.0] + [0.0] * (EMBEDDING_DIM - 1)  # Very similar
+            workspace_id,
+            mem1.id,
+            embedding=[1.0] + [0.0] * (EMBEDDING_DIM - 1),  # Very similar
         )
 
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Low relevance", importance=0.5)
-        )
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Low relevance", importance=0.5))
         await storage_backend.update_memory(
-            workspace_id, mem2.id,
-            embedding=[0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2)  # Very different
+            workspace_id,
+            mem2.id,
+            embedding=[0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2),  # Very different
         )
 
         # Search with high min_relevance
@@ -359,7 +307,7 @@ class TestVectorSearch:
             workspace_id,
             query_embedding,
             limit=10,
-            min_relevance=0.9  # High threshold
+            min_relevance=0.9,  # High threshold
         )
 
         # Should only return high relevance memory
@@ -373,39 +321,18 @@ class TestVectorSearch:
         workspace_id = class_workspace_id
         # Create memories of different types
         mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(
-                content="Episodic memory",
-                type=MemoryType.EPISODIC,
-                importance=0.7
-            )
+            workspace_id, RememberInput(content="Episodic memory", type=MemoryType.EPISODIC, importance=0.7)
         )
-        await storage_backend.update_memory(
-            workspace_id, mem1.id,
-            embedding=[0.5] * EMBEDDING_DIM
-        )
+        await storage_backend.update_memory(workspace_id, mem1.id, embedding=[0.5] * EMBEDDING_DIM)
 
         mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(
-                content="Semantic memory",
-                type=MemoryType.SEMANTIC,
-                importance=0.7
-            )
+            workspace_id, RememberInput(content="Semantic memory", type=MemoryType.SEMANTIC, importance=0.7)
         )
-        await storage_backend.update_memory(
-            workspace_id, mem2.id,
-            embedding=[0.5] * EMBEDDING_DIM
-        )
+        await storage_backend.update_memory(workspace_id, mem2.id, embedding=[0.5] * EMBEDDING_DIM)
 
         # Search filtered by type
         query_embedding = [0.5] * EMBEDDING_DIM
-        results = await storage_backend.search_memories(
-            workspace_id,
-            query_embedding,
-            limit=10,
-            types=["episodic"]
-        )
+        results = await storage_backend.search_memories(workspace_id, query_embedding, limit=10, types=["episodic"])
 
         # Should only return episodic memories
         assert len(results) == 1
@@ -417,39 +344,18 @@ class TestVectorSearch:
         workspace_id = class_workspace_id
         # Create memories with different subtypes
         mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(
-                content="Preference memory",
-                subtype=MemorySubtype.PREFERENCE,
-                importance=0.7
-            )
+            workspace_id, RememberInput(content="Preference memory", subtype=MemorySubtype.PREFERENCE, importance=0.7)
         )
-        await storage_backend.update_memory(
-            workspace_id, mem1.id,
-            embedding=[0.5] * EMBEDDING_DIM
-        )
+        await storage_backend.update_memory(workspace_id, mem1.id, embedding=[0.5] * EMBEDDING_DIM)
 
         mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(
-                content="Solution memory",
-                subtype=MemorySubtype.SOLUTION,
-                importance=0.7
-            )
+            workspace_id, RememberInput(content="Solution memory", subtype=MemorySubtype.SOLUTION, importance=0.7)
         )
-        await storage_backend.update_memory(
-            workspace_id, mem2.id,
-            embedding=[0.5] * EMBEDDING_DIM
-        )
+        await storage_backend.update_memory(workspace_id, mem2.id, embedding=[0.5] * EMBEDDING_DIM)
 
         # Search filtered by subtype
         query_embedding = [0.5] * EMBEDDING_DIM
-        results = await storage_backend.search_memories(
-            workspace_id,
-            query_embedding,
-            limit=10,
-            subtypes=["preference"]
-        )
+        results = await storage_backend.search_memories(workspace_id, query_embedding, limit=10, subtypes=["preference"])
 
         # Should only return preference memories
         assert len(results) == 1
@@ -461,39 +367,18 @@ class TestVectorSearch:
         workspace_id = class_workspace_id
         # Create memories with different tags
         mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(
-                content="Python memory",
-                tags=["python", "programming"],
-                importance=0.7
-            )
+            workspace_id, RememberInput(content="Python memory", tags=["python", "programming"], importance=0.7)
         )
-        await storage_backend.update_memory(
-            workspace_id, mem1.id,
-            embedding=[0.5] * EMBEDDING_DIM
-        )
+        await storage_backend.update_memory(workspace_id, mem1.id, embedding=[0.5] * EMBEDDING_DIM)
 
         mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(
-                content="JavaScript memory",
-                tags=["javascript", "programming"],
-                importance=0.7
-            )
+            workspace_id, RememberInput(content="JavaScript memory", tags=["javascript", "programming"], importance=0.7)
         )
-        await storage_backend.update_memory(
-            workspace_id, mem2.id,
-            embedding=[0.5] * EMBEDDING_DIM
-        )
+        await storage_backend.update_memory(workspace_id, mem2.id, embedding=[0.5] * EMBEDDING_DIM)
 
         # Search filtered by tag
         query_embedding = [0.5] * EMBEDDING_DIM
-        results = await storage_backend.search_memories(
-            workspace_id,
-            query_embedding,
-            limit=10,
-            tags=["python"]
-        )
+        results = await storage_backend.search_memories(workspace_id, query_embedding, limit=10, tags=["python"])
 
         # Should only return python-tagged memories
         assert len(results) == 1
@@ -517,18 +402,9 @@ class TestFullTextSearch:
         """Test full_text_search() finds content matches."""
         workspace_id = class_workspace_id
         # Create memories with searchable content
-        await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Python is great for backend development", importance=0.7)
-        )
-        await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="JavaScript is used for frontend", importance=0.6)
-        )
-        await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Database design patterns", importance=0.5)
-        )
+        await storage_backend.create_memory(workspace_id, RememberInput(content="Python is great for backend development", importance=0.7))
+        await storage_backend.create_memory(workspace_id, RememberInput(content="JavaScript is used for frontend", importance=0.6))
+        await storage_backend.create_memory(workspace_id, RememberInput(content="Database design patterns", importance=0.5))
 
         # Search for "Python"
         results = await storage_backend.full_text_search(workspace_id, "Python", limit=10)
@@ -541,10 +417,7 @@ class TestFullTextSearch:
         workspace_id = class_workspace_id
         # Create multiple memories with common word
         for i in range(5):
-            await storage_backend.create_memory(
-                workspace_id,
-                RememberInput(content=f"Programming language {i}", importance=0.5)
-            )
+            await storage_backend.create_memory(workspace_id, RememberInput(content=f"Programming language {i}", importance=0.5))
 
         # Search with limit
         results = await storage_backend.full_text_search(workspace_id, "programming", limit=3)
@@ -555,10 +428,7 @@ class TestFullTextSearch:
         """Test full_text_search() is case insensitive."""
         workspace_id = class_workspace_id
         # Use a unique word to avoid collision with other tests in same class
-        await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="UPPERCASE xyzuniqueterm LOWERCASE", importance=0.5)
-        )
+        await storage_backend.create_memory(workspace_id, RememberInput(content="UPPERCASE xyzuniqueterm LOWERCASE", importance=0.5))
 
         # Search with different cases
         results_lower = await storage_backend.full_text_search(workspace_id, "xyzuniqueterm", limit=10)
@@ -574,8 +444,7 @@ class TestFullTextSearch:
         workspace_id = class_workspace_id
         # Create and delete a memory
         mem = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="This will be deleted uniqueftsexcluded", importance=0.5)
+            workspace_id, RememberInput(content="This will be deleted uniqueftsexcluded", importance=0.5)
         )
         await storage_backend.delete_memory(workspace_id, mem.id, hard=False)
 
@@ -596,22 +465,12 @@ class TestAssociationStorage:
     async def test_create_association_stores_correctly(self, storage_backend, workspace_id):
         """Test create_association() stores correctly."""
         # Create two memories to associate
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 1", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 2", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 1", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 2", importance=0.5))
 
         # Create association
         assoc_input = AssociateInput(
-            source_id=mem1.id,
-            target_id=mem2.id,
-            relationship="solves",
-            strength=0.8,
-            metadata={"reason": "test association"}
+            source_id=mem1.id, target_id=mem2.id, relationship="solves", strength=0.8, metadata={"reason": "test association"}
         )
 
         association = await storage_backend.create_association(workspace_id, assoc_input)
@@ -628,45 +487,20 @@ class TestAssociationStorage:
     async def test_get_associations_retrieves_by_memory_id(self, storage_backend, workspace_id):
         """Test get_associations() retrieves by memory ID."""
         # Create memories
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Source memory", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Target memory 1", importance=0.5)
-        )
-        mem3 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Target memory 2", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Source memory", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Target memory 1", importance=0.5))
+        mem3 = await storage_backend.create_memory(workspace_id, RememberInput(content="Target memory 2", importance=0.5))
 
         # Create associations
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem2.id,
-                relationship="related_to",
-                strength=0.7
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem2.id, relationship="related_to", strength=0.7)
         )
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem3.id,
-                relationship="solves",
-                strength=0.9
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem3.id, relationship="solves", strength=0.9)
         )
 
         # Get all associations for mem1
-        associations = await storage_backend.get_associations(
-            workspace_id,
-            mem1.id,
-            direction="both"
-        )
+        associations = await storage_backend.get_associations(workspace_id, mem1.id, direction="both")
 
         assert len(associations) == 2
         assert all(assoc.source_id == mem1.id for assoc in associations)
@@ -674,42 +508,20 @@ class TestAssociationStorage:
     async def test_get_associations_filters_by_direction_outgoing(self, storage_backend, workspace_id):
         """Test get_associations() filters by direction (outgoing)."""
         # Create memories and bidirectional associations
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 1", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 2", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 1", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 2", importance=0.5))
 
         # mem1 -> mem2
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem2.id,
-                relationship="leads_to",
-                strength=0.8
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem2.id, relationship="leads_to", strength=0.8)
         )
         # mem2 -> mem1
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem2.id,
-                target_id=mem1.id,
-                relationship="builds_on",
-                strength=0.6
-            )
+            workspace_id, AssociateInput(source_id=mem2.id, target_id=mem1.id, relationship="builds_on", strength=0.6)
         )
 
         # Get outgoing associations from mem1
-        outgoing = await storage_backend.get_associations(
-            workspace_id,
-            mem1.id,
-            direction="outgoing"
-        )
+        outgoing = await storage_backend.get_associations(workspace_id, mem1.id, direction="outgoing")
 
         assert len(outgoing) == 1
         assert outgoing[0].source_id == mem1.id
@@ -717,42 +529,20 @@ class TestAssociationStorage:
 
     async def test_get_associations_filters_by_direction_incoming(self, storage_backend, workspace_id):
         """Test get_associations() filters by direction (incoming)."""
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 1", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 2", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 1", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 2", importance=0.5))
 
         # mem1 -> mem2
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem2.id,
-                relationship="leads_to",
-                strength=0.8
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem2.id, relationship="leads_to", strength=0.8)
         )
         # mem2 -> mem1
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem2.id,
-                target_id=mem1.id,
-                relationship="builds_on",
-                strength=0.6
-            )
+            workspace_id, AssociateInput(source_id=mem2.id, target_id=mem1.id, relationship="builds_on", strength=0.6)
         )
 
         # Get incoming associations to mem1
-        incoming = await storage_backend.get_associations(
-            workspace_id,
-            mem1.id,
-            direction="incoming"
-        )
+        incoming = await storage_backend.get_associations(workspace_id, mem1.id, direction="incoming")
 
         assert len(incoming) == 1
         assert incoming[0].source_id == mem2.id
@@ -760,45 +550,20 @@ class TestAssociationStorage:
 
     async def test_get_associations_filters_by_relationship_type(self, storage_backend, workspace_id):
         """Test get_associations() filters by relationship type."""
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Source", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Target 1", importance=0.5)
-        )
-        mem3 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Target 2", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Source", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Target 1", importance=0.5))
+        mem3 = await storage_backend.create_memory(workspace_id, RememberInput(content="Target 2", importance=0.5))
 
         # Different relationship types
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem2.id,
-                relationship="solves",
-                strength=0.8
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem2.id, relationship="solves", strength=0.8)
         )
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem3.id,
-                relationship="related_to",
-                strength=0.6
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem3.id, relationship="related_to", strength=0.6)
         )
 
         # Filter by SOLVES relationship
-        solves_assocs = await storage_backend.get_associations(
-            workspace_id,
-            mem1.id,
-            relationships=["solves"]
-        )
+        solves_assocs = await storage_backend.get_associations(workspace_id, mem1.id, relationships=["solves"])
 
         assert len(solves_assocs) == 1
         assert solves_assocs[0].relationship == "solves"
@@ -807,59 +572,24 @@ class TestAssociationStorage:
     async def test_traverse_graph_multi_hop_queries(self, storage_backend, workspace_id):
         """Test traverse_graph() multi-hop queries."""
         # Create a chain: mem1 -> mem2 -> mem3 -> mem4
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 1", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 2", importance=0.5)
-        )
-        mem3 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 3", importance=0.5)
-        )
-        mem4 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Memory 4", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 1", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 2", importance=0.5))
+        mem3 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 3", importance=0.5))
+        mem4 = await storage_backend.create_memory(workspace_id, RememberInput(content="Memory 4", importance=0.5))
 
         # Create chain
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem2.id,
-                relationship="leads_to",
-                strength=0.8
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem2.id, relationship="leads_to", strength=0.8)
         )
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem2.id,
-                target_id=mem3.id,
-                relationship="leads_to",
-                strength=0.9
-            )
+            workspace_id, AssociateInput(source_id=mem2.id, target_id=mem3.id, relationship="leads_to", strength=0.9)
         )
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem3.id,
-                target_id=mem4.id,
-                relationship="leads_to",
-                strength=0.7
-            )
+            workspace_id, AssociateInput(source_id=mem3.id, target_id=mem4.id, relationship="leads_to", strength=0.7)
         )
 
         # Traverse from mem1 with max_depth=3
-        result = await storage_backend.traverse_graph(
-            workspace_id,
-            mem1.id,
-            max_depth=3,
-            direction="outgoing"
-        )
+        result = await storage_backend.traverse_graph(workspace_id, mem1.id, max_depth=3, direction="outgoing")
 
         # Should find 3 paths: mem1->mem2 (depth 1), mem1->mem2->mem3 (depth 2), mem1->mem2->mem3->mem4 (depth 3)
         assert result.total_paths == 3
@@ -879,30 +609,16 @@ class TestAssociationStorage:
         # Create a long chain
         memories = []
         for i in range(5):
-            mem = await storage_backend.create_memory(
-                workspace_id,
-                RememberInput(content=f"Memory {i}", importance=0.5)
-            )
+            mem = await storage_backend.create_memory(workspace_id, RememberInput(content=f"Memory {i}", importance=0.5))
             memories.append(mem)
 
             if i > 0:
                 await storage_backend.create_association(
-                    workspace_id,
-                    AssociateInput(
-                        source_id=memories[i-1].id,
-                        target_id=mem.id,
-                        relationship="leads_to",
-                        strength=0.8
-                    )
+                    workspace_id, AssociateInput(source_id=memories[i - 1].id, target_id=mem.id, relationship="leads_to", strength=0.8)
                 )
 
         # Traverse with max_depth=2
-        result = await storage_backend.traverse_graph(
-            workspace_id,
-            memories[0].id,
-            max_depth=2,
-            direction="outgoing"
-        )
+        result = await storage_backend.traverse_graph(workspace_id, memories[0].id, max_depth=2, direction="outgoing")
 
         # Should only reach depth 2 (paths to memories[1] and memories[2])
         max_path_depth = max(path.depth for path in result.paths) if result.paths else 0
@@ -920,45 +636,19 @@ class TestAssociationStorage:
     async def test_traverse_graph_filters_by_relationship(self, storage_backend, workspace_id):
         """Test traverse_graph() filters by relationship types."""
         # Create memories with different relationships
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Start", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Solves path", importance=0.5)
-        )
-        mem3 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Related path", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Start", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Solves path", importance=0.5))
+        mem3 = await storage_backend.create_memory(workspace_id, RememberInput(content="Related path", importance=0.5))
 
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem2.id,
-                relationship="solves",
-                strength=0.8
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem2.id, relationship="solves", strength=0.8)
         )
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem3.id,
-                relationship="related_to",
-                strength=0.6
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem3.id, relationship="related_to", strength=0.6)
         )
 
         # Traverse with SOLVES filter
-        result = await storage_backend.traverse_graph(
-            workspace_id,
-            mem1.id,
-            max_depth=2,
-            relationships=["solves"]
-        )
+        result = await storage_backend.traverse_graph(workspace_id, mem1.id, max_depth=2, relationships=["solves"])
 
         # Should only find mem2
         assert mem2.id in result.unique_nodes
@@ -981,8 +671,8 @@ class TestWorkspaceStorage:
             tenant_id="tenant_abc",
             name="Test Workspace",
             settings={"auto_remember": True},
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
 
         # Create
@@ -1004,8 +694,6 @@ class TestWorkspaceStorage:
         assert result is None
 
 
-
-
 @pytest.mark.asyncio
 class TestWorkspaceStats:
     """Test workspace statistics.
@@ -1018,36 +706,15 @@ class TestWorkspaceStats:
         """Test get_workspace_stats() returns correct counts."""
         workspace_id = unique_workspace_id
         # Create memories of different types
-        await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Episodic 1", type=MemoryType.EPISODIC, importance=0.5)
-        )
-        await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Episodic 2", type=MemoryType.EPISODIC, importance=0.5)
-        )
-        await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Semantic 1", type=MemoryType.SEMANTIC, importance=0.5)
-        )
+        await storage_backend.create_memory(workspace_id, RememberInput(content="Episodic 1", type=MemoryType.EPISODIC, importance=0.5))
+        await storage_backend.create_memory(workspace_id, RememberInput(content="Episodic 2", type=MemoryType.EPISODIC, importance=0.5))
+        await storage_backend.create_memory(workspace_id, RememberInput(content="Semantic 1", type=MemoryType.SEMANTIC, importance=0.5))
 
         # Create associations
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Source", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Target", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Source", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Target", importance=0.5))
         await storage_backend.create_association(
-            workspace_id,
-            AssociateInput(
-                source_id=mem1.id,
-                target_id=mem2.id,
-                relationship="related_to",
-                strength=0.8
-            )
+            workspace_id, AssociateInput(source_id=mem1.id, target_id=mem2.id, relationship="related_to", strength=0.8)
         )
 
         # Get stats
@@ -1063,14 +730,8 @@ class TestWorkspaceStats:
         """Test get_workspace_stats() excludes soft-deleted memories."""
         workspace_id = unique_workspace_id
         # Create and delete a memory
-        mem1 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Active memory stats", importance=0.5)
-        )
-        mem2 = await storage_backend.create_memory(
-            workspace_id,
-            RememberInput(content="Deleted memory stats", importance=0.5)
-        )
+        mem1 = await storage_backend.create_memory(workspace_id, RememberInput(content="Active memory stats", importance=0.5))
+        mem2 = await storage_backend.create_memory(workspace_id, RememberInput(content="Deleted memory stats", importance=0.5))
         await storage_backend.delete_memory(workspace_id, mem2.id, hard=False)
 
         # Stats should only count active memory
@@ -1095,8 +756,8 @@ class TestSessionStorage:
                 id=workspace_id,
                 tenant_id="test_tenant",
                 name=f"Test Workspace {workspace_id}",
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
             await sqlite_storage.create_workspace(workspace)
 
@@ -1208,8 +869,8 @@ class TestWorkingMemoryStorage:
                 id=workspace_id,
                 tenant_id="test_tenant",
                 name=f"Test Workspace {workspace_id}",
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
             await sqlite_storage.create_workspace(workspace)
 
@@ -1293,12 +954,8 @@ class TestWorkingMemoryStorage:
         await storage_backend.create_session(workspace_id, session)
 
         # Set multiple contexts
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_get", "key1", "value1"
-        )
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_get", "key2", "value2"
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_get", "key1", "value1")
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_get", "key2", "value2")
 
         # Get specific key
         ctx = await storage_backend.get_working_memory(workspace_id, "sess_ctx_get", "key1")
@@ -1307,9 +964,7 @@ class TestWorkingMemoryStorage:
         assert ctx.key == "key1"
         assert ctx.value == "value1"
 
-    async def test_get_working_memory_returns_none_for_nonexistent_key(
-        self, storage_backend, unique_workspace_id
-    ):
+    async def test_get_working_memory_returns_none_for_nonexistent_key(self, storage_backend, unique_workspace_id):
         """Test get_working_memory() returns None for non-existent key."""
         workspace_id = unique_workspace_id
         await self._ensure_workspace(storage_backend, workspace_id)
@@ -1322,9 +977,7 @@ class TestWorkingMemoryStorage:
         )
         await storage_backend.create_session(workspace_id, session)
 
-        result = await storage_backend.get_working_memory(
-            workspace_id, "sess_ctx_nokey", "nonexistent_key"
-        )
+        result = await storage_backend.get_working_memory(workspace_id, "sess_ctx_nokey", "nonexistent_key")
         assert result is None
 
     async def test_get_all_working_memory_retrieves_all_keys(self, storage_backend, unique_workspace_id):
@@ -1341,15 +994,9 @@ class TestWorkingMemoryStorage:
         await storage_backend.create_session(workspace_id, session)
 
         # Set multiple contexts
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_all", "topic", "Python"
-        )
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_all", "mode", "learning"
-        )
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_all", "preferences", {"dark_mode": True}
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_all", "topic", "Python")
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_all", "mode", "learning")
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_all", "preferences", {"dark_mode": True})
 
         # Get all
         all_ctx = await storage_backend.get_all_working_memory(workspace_id, "sess_ctx_all")
@@ -1358,9 +1005,7 @@ class TestWorkingMemoryStorage:
         keys = {ctx.key for ctx in all_ctx}
         assert keys == {"topic", "mode", "preferences"}
 
-    async def test_get_all_working_memory_returns_empty_for_no_entries(
-        self, storage_backend, unique_workspace_id
-    ):
+    async def test_get_all_working_memory_returns_empty_for_no_entries(self, storage_backend, unique_workspace_id):
         """Test get_all_working_memory() returns empty list when no entries exist."""
         workspace_id = unique_workspace_id
         await self._ensure_workspace(storage_backend, workspace_id)
@@ -1390,29 +1035,17 @@ class TestWorkingMemoryStorage:
         await storage_backend.create_session(workspace_id, session)
 
         # String
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_types", "string_key", "string_value"
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_types", "string_key", "string_value")
         # Number
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_types", "number_key", 42.5
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_types", "number_key", 42.5)
         # Boolean
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_types", "bool_key", True
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_types", "bool_key", True)
         # List
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_types", "list_key", [1, 2, 3, "four"]
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_types", "list_key", [1, 2, 3, "four"])
         # Dict
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_types", "dict_key", {"nested": {"deep": "value"}}
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_types", "dict_key", {"nested": {"deep": "value"}})
         # None/null
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_ctx_types", "null_key", None
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_ctx_types", "null_key", None)
 
         # Verify all values
         ctx_str = await storage_backend.get_working_memory(workspace_id, "sess_ctx_types", "string_key")
@@ -1446,8 +1079,8 @@ class TestSessionCleanup:
                 id=workspace_id,
                 tenant_id="test_tenant",
                 name=f"Test Workspace {workspace_id}",
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
             await sqlite_storage.create_workspace(workspace)
 
@@ -1485,9 +1118,7 @@ class TestSessionCleanup:
         active = await storage_backend.get_session(workspace_id, "sess_active_cleanup")
         assert active is not None
 
-    async def test_cleanup_expired_sessions_returns_zero_when_none_expired(
-        self, storage_backend, unique_workspace_id
-    ):
+    async def test_cleanup_expired_sessions_returns_zero_when_none_expired(self, storage_backend, unique_workspace_id):
         """Test cleanup_expired_sessions() returns 0 when no sessions are expired."""
         workspace_id = unique_workspace_id
         await self._ensure_workspace(storage_backend, workspace_id)
@@ -1520,12 +1151,8 @@ class TestSessionCleanup:
         await storage_backend.create_session(workspace_id, session)
 
         # Add context entries
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_cascade_delete", "key1", "value1"
-        )
-        await storage_backend.set_working_memory(
-            workspace_id, "sess_cascade_delete", "key2", "value2"
-        )
+        await storage_backend.set_working_memory(workspace_id, "sess_cascade_delete", "key1", "value1")
+        await storage_backend.set_working_memory(workspace_id, "sess_cascade_delete", "key2", "value2")
 
         # Verify context exists
         ctx_before = await storage_backend.get_all_working_memory(workspace_id, "sess_cascade_delete")

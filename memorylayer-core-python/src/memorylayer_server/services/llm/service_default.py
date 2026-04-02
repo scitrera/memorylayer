@@ -1,11 +1,12 @@
 """Default LLM service implementation."""
+
+from collections.abc import AsyncIterator
 from logging import Logger
-from typing import AsyncIterator, Optional, List
 
-from scitrera_app_framework import get_logger, Variables
+from scitrera_app_framework import Variables, get_logger
 
-from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk, LLMMessage, LLMRole
-from .base import LLMProvider, EXT_LLM_REGISTRY, LLMServicePluginBase
+from ...models.llm import LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
+from .base import EXT_LLM_REGISTRY, LLMProvider, LLMServicePluginBase
 from .registry import LLMProviderRegistry
 
 
@@ -31,22 +32,22 @@ class LLMService:
         return await self.registry.complete(request, profile=profile)
 
     async def complete_stream(
-            self,
-            request: LLMRequest,
-            profile: str = "default",
+        self,
+        request: LLMRequest,
+        profile: str = "default",
     ) -> AsyncIterator[LLMStreamChunk]:
         """Route streaming completion to the provider for the given profile."""
         async for chunk in self.registry.complete_stream(request, profile=profile):
             yield chunk
 
     async def synthesize(
-            self,
-            prompt: str,
-            context: Optional[str] = None,
-            max_tokens: int = None,
-            temperature: float = None,
-            temperature_factor: float = None,
-            profile: str = "default",
+        self,
+        prompt: str,
+        context: str | None = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        temperature_factor: float = None,
+        profile: str = "default",
     ) -> str:
         """Simple synthesis - prompt with optional context.
 
@@ -64,10 +65,7 @@ class LLMService:
         messages = []
 
         if context:
-            messages.append(LLMMessage(
-                role=LLMRole.SYSTEM,
-                content=f"Use this context to inform your response:\n\n{context}"
-            ))
+            messages.append(LLMMessage(role=LLMRole.SYSTEM, content=f"Use this context to inform your response:\n\n{context}"))
 
         messages.append(LLMMessage(role=LLMRole.USER, content=prompt))
 
@@ -82,11 +80,11 @@ class LLMService:
         return response.content
 
     async def answer_question(
-            self,
-            question: str,
-            memories: List[str],
-            max_tokens: int = 500,
-            profile: str = "default",
+        self,
+        question: str,
+        memories: list[str],
+        max_tokens: int = 500,
+        profile: str = "default",
     ) -> str:
         """Answer question using memories as context.
 
@@ -135,7 +133,8 @@ Memories:
 
 class DefaultLLMServicePlugin(LLMServicePluginBase):
     """Plugin for default LLM service."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> LLMService:
         registry: LLMProviderRegistry = self.get_extension(EXT_LLM_REGISTRY, v)

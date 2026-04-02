@@ -10,31 +10,31 @@ Uses the OpenViking-inspired 6-category taxonomy:
 - CASES: Problems with solutions
 - PATTERNS: Reusable processes
 """
+
 import json
 import re
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ...models.memory import Memory, MemoryType, MemorySubtype
-from ...models.llm import LLMMessage, LLMRequest, LLMRole
-from ...utils import compute_content_hash, generate_id
-from ..storage import EXT_STORAGE_BACKEND, StorageBackend
-from ..llm import EXT_LLM_SERVICE, LLMService
-from ..embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
-from ..deduplication import EXT_DEDUPLICATION_SERVICE, DeduplicationService, DeduplicationAction
 from ...config import DEFAULT_TENANT_ID
+from ...models.llm import LLMMessage, LLMRequest, LLMRole
+from ...models.memory import Memory, MemorySubtype, MemoryType
+from ...utils import compute_content_hash, generate_id
+from ..deduplication import EXT_DEDUPLICATION_SERVICE, DeduplicationAction, DeduplicationService
+from ..embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
+from ..llm import EXT_LLM_SERVICE, LLMService
+from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from .base import (
-    ExtractionService,
-    ExtractionServicePluginBase,
+    CATEGORY_MAPPING,
+    ExtractedMemory,
     ExtractionCategory,
     ExtractionOptions,
-    ExtractedMemory,
     ExtractionResult,
-    CATEGORY_MAPPING,
+    ExtractionService,
+    ExtractionServicePluginBase,
 )
 
 # System prompt for LLM extraction
@@ -105,12 +105,12 @@ class DefaultExtractionService(ExtractionService):
     """Default extraction service implementation."""
 
     def __init__(
-            self,
-            llm_service: Optional[LLMService] = None,
-            storage: Optional[StorageBackend] = None,
-            deduplication_service=None,
-            embedding_service: Optional[EmbeddingService] = None,
-            v: Variables = None
+        self,
+        llm_service: LLMService | None = None,
+        storage: StorageBackend | None = None,
+        deduplication_service=None,
+        embedding_service: EmbeddingService | None = None,
+        v: Variables = None,
     ):
         """
         Initialize extraction service.
@@ -130,13 +130,7 @@ class DefaultExtractionService(ExtractionService):
         self.logger.info("Initialized DefaultExtractionService")
 
     async def extract_from_session(
-            self,
-            session_id: str,
-            workspace_id: str,
-            context_id: str,
-            session_content: str,
-            working_memory: dict,
-            options: ExtractionOptions
+        self, session_id: str, workspace_id: str, context_id: str, session_content: str, working_memory: dict, options: ExtractionOptions
     ) -> ExtractionResult:
         """
         Extract memories from a session.
@@ -171,22 +165,17 @@ class DefaultExtractionService(ExtractionService):
         extracted = [m for m in extracted if m.importance >= options.min_importance]
 
         # Limit count
-        extracted = extracted[:options.max_memories]
+        extracted = extracted[: options.max_memories]
 
         # Deduplicate if enabled
         memories_deduplicated = 0
         if options.deduplicate and self.deduplication_service:
-            extracted, memories_deduplicated = await self._deduplicate(
-                extracted, workspace_id
-            )
+            extracted, memories_deduplicated = await self._deduplicate(extracted, workspace_id)
 
         # Convert to Memory objects
         memories_created = []
         for em in extracted:
-            memory_type, memory_subtype = CATEGORY_MAPPING.get(
-                em.category,
-                (MemoryType.SEMANTIC, None)
-            )
+            memory_type, memory_subtype = CATEGORY_MAPPING.get(em.category, (MemoryType.SEMANTIC, None))
 
             memory = Memory(
                 id=generate_id("mem"),
@@ -202,8 +191,8 @@ class DefaultExtractionService(ExtractionService):
                 importance=em.importance,
                 tags=em.tags,
                 metadata=em.metadata,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
             memories_created.append(memory)
 
@@ -215,10 +204,7 @@ class DefaultExtractionService(ExtractionService):
 
         elapsed_ms = int((time.time() - start_time) * 1000)
 
-        self.logger.info(
-            "Extracted %s memories from session %s in %s ms",
-            len(memories_created), session_id, elapsed_ms
-        )
+        self.logger.info("Extracted %s memories from session %s in %s ms", len(memories_created), session_id, elapsed_ms)
 
         return ExtractionResult(
             session_id=session_id,
@@ -226,7 +212,7 @@ class DefaultExtractionService(ExtractionService):
             memories_deduplicated=memories_deduplicated,
             memories_created=memories_created,
             breakdown=breakdown,
-            extraction_time_ms=elapsed_ms
+            extraction_time_ms=elapsed_ms,
         )
 
     async def decompose_to_facts(self, content: str) -> list[dict]:
@@ -264,10 +250,7 @@ class DefaultExtractionService(ExtractionService):
             "Return ONLY the JSON array, no additional text."
         )
 
-        user_prompt = (
-            "Decompose this content into atomic facts:\n\n"
-            f"---\n{content}\n---"
-        )
+        user_prompt = f"Decompose this content into atomic facts:\n\n---\n{content}\n---"
 
         try:
             messages = [
@@ -294,7 +277,7 @@ class DefaultExtractionService(ExtractionService):
                 raw = "\n".join(lines)
 
             # Extract JSON array from response (handle surrounding text)
-            array_start = raw.find('[')
+            array_start = raw.find("[")
             if array_start > 0:
                 raw = raw[array_start:]
 
@@ -310,11 +293,13 @@ class DefaultExtractionService(ExtractionService):
             validated = []
             for item in facts:
                 if isinstance(item, dict) and "content" in item and item["content"].strip():
-                    validated.append({
-                        "content": item["content"].strip(),
-                        "type": item.get("type"),
-                        "subtype": item.get("subtype"),
-                    })
+                    validated.append(
+                        {
+                            "content": item["content"].strip(),
+                            "type": item.get("type"),
+                            "subtype": item.get("subtype"),
+                        }
+                    )
 
             if not validated:
                 self.logger.warning("No valid facts extracted, returning single fact")
@@ -343,17 +328,17 @@ class DefaultExtractionService(ExtractionService):
             json.JSONDecodeError: If the JSON cannot be recovered.
         """
         # Remove trailing commas before } or ]
-        cleaned = re.sub(r',\s*([}\]])', r'\1', raw)
+        cleaned = re.sub(r",\s*([}\]])", r"\1", raw)
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
             pass
 
         # Truncate at the last complete JSON object and close the array
-        last_brace = cleaned.rfind('}')
+        last_brace = cleaned.rfind("}")
         if last_brace >= 0:
-            candidate = cleaned[:last_brace + 1] + ']'
-            first_bracket = candidate.find('[')
+            candidate = cleaned[: last_brace + 1] + "]"
+            first_bracket = candidate.find("[")
             if first_bracket >= 0:
                 candidate = candidate[first_bracket:]
                 try:
@@ -367,11 +352,9 @@ class DefaultExtractionService(ExtractionService):
                 except json.JSONDecodeError:
                     pass
 
-        raise json.JSONDecodeError(
-            "Could not recover facts from malformed JSON", raw, 0
-        )
+        raise json.JSONDecodeError("Could not recover facts from malformed JSON", raw, 0)
 
-    async def classify_content(self, content: str) -> tuple[MemoryType, 'Optional[MemorySubtype]']:
+    async def classify_content(self, content: str) -> tuple[MemoryType, "MemorySubtype | None"]:
         """Classify a single memory's content into a type and subtype.
 
         Uses LLM to determine the extraction category, then maps through
@@ -419,11 +402,7 @@ class DefaultExtractionService(ExtractionService):
             self.logger.warning("Content classification failed: %s", e)
             return (MemoryType.SEMANTIC, None)
 
-    async def _llm_extraction(
-            self,
-            context: str,
-            categories: list[ExtractionCategory]
-    ) -> list[ExtractedMemory]:
+    async def _llm_extraction(self, context: str, categories: list[ExtractionCategory]) -> list[ExtractedMemory]:
         """
         Extract memories using LLM-based classification.
 
@@ -458,22 +437,18 @@ class DefaultExtractionService(ExtractionService):
 
             self.logger.info(
                 "LLM extraction completed: %d memories extracted (tokens: %d prompt, %d completion)",
-                len(extracted), response.prompt_tokens, (response.completion_tokens or -1),
+                len(extracted),
+                response.prompt_tokens,
+                (response.completion_tokens or -1),
             )
 
             return extracted
 
         except Exception as e:
-            self.logger.warning(
-                "LLM extraction failed, falling back to simple extraction: %s", str(e)
-            )
+            self.logger.warning("LLM extraction failed, falling back to simple extraction: %s", str(e))
             return self._simple_extraction(context, categories, ExtractionOptions())
 
-    def _parse_llm_response(
-            self,
-            response_content: str,
-            categories: list[ExtractionCategory]
-    ) -> list[ExtractedMemory]:
+    def _parse_llm_response(self, response_content: str, categories: list[ExtractionCategory]) -> list[ExtractedMemory]:
         """
         Parse LLM response into ExtractedMemory objects.
 
@@ -540,13 +515,15 @@ class DefaultExtractionService(ExtractionService):
                     tags = []
                 tags = [str(t) for t in tags]  # Ensure strings
 
-                extracted.append(ExtractedMemory(
-                    content=str(item["content"]),
-                    category=category,
-                    importance=importance,
-                    tags=tags,
-                    metadata={"extraction_method": "llm"}
-                ))
+                extracted.append(
+                    ExtractedMemory(
+                        content=str(item["content"]),
+                        category=category,
+                        importance=importance,
+                        tags=tags,
+                        metadata={"extraction_method": "llm"},
+                    )
+                )
 
             except (KeyError, ValueError, TypeError) as e:
                 self.logger.debug("Skipping invalid memory item: %s", str(e))
@@ -554,11 +531,7 @@ class DefaultExtractionService(ExtractionService):
 
         return extracted
 
-    def _build_extraction_context(
-            self,
-            session_content: str,
-            working_memory: dict
-    ) -> str:
+    def _build_extraction_context(self, session_content: str, working_memory: dict) -> str:
         """Build context string for extraction."""
         parts = [session_content]
 
@@ -568,12 +541,7 @@ class DefaultExtractionService(ExtractionService):
 
         return "\n".join(parts)
 
-    def _simple_extraction(
-            self,
-            context: str,
-            categories: list[ExtractionCategory],
-            options: ExtractionOptions
-    ) -> list[ExtractedMemory]:
+    def _simple_extraction(self, context: str, categories: list[ExtractionCategory], options: ExtractionOptions) -> list[ExtractedMemory]:
         """Simple extraction without LLM - returns the full context as one memory."""
         # Without LLM, we can't do sophisticated extraction
         # Just create a single memory from the context
@@ -586,15 +554,11 @@ class DefaultExtractionService(ExtractionService):
                 category=ExtractionCategory.CASES,
                 importance=0.6,  # TODO: configurable default (same as value at LLM extraction)
                 tags=["auto-extracted"],
-                metadata={"extraction_method": "simple"}
+                metadata={"extraction_method": "simple"},
             )
         ]
 
-    async def _deduplicate(
-            self,
-            extracted: list[ExtractedMemory],
-            workspace_id: str
-    ) -> tuple[list[ExtractedMemory], int]:
+    async def _deduplicate(self, extracted: list[ExtractedMemory], workspace_id: str) -> tuple[list[ExtractedMemory], int]:
         """
         Deduplicate extracted memories against existing memories.
 
@@ -624,9 +588,7 @@ class DefaultExtractionService(ExtractionService):
                 candidates.append((em.content, content_hash, embedding))
 
             # Run batch deduplication
-            results = await self.deduplication_service.deduplicate_batch(
-                candidates, workspace_id
-            )
+            results = await self.deduplication_service.deduplicate_batch(candidates, workspace_id)
 
             # Filter extracted memories based on deduplication results
             deduplicated = []
@@ -636,18 +598,12 @@ class DefaultExtractionService(ExtractionService):
                 if result.action == DeduplicationAction.SKIP:
                     # Exact duplicate - skip entirely
                     duplicates_count += 1
-                    self.logger.debug(
-                        "Skipping duplicate memory (exact match): %s",
-                        em.content[:50]
-                    )
+                    self.logger.debug("Skipping duplicate memory (exact match): %s", em.content[:50])
                 elif result.action == DeduplicationAction.UPDATE:
                     # Semantic duplicate - could update existing, but for extraction
                     # we'll skip to avoid redundancy (existing memory is sufficient)
                     duplicates_count += 1
-                    self.logger.debug(
-                        "Skipping duplicate memory (semantic match %.3f): %s",
-                        result.similarity_score or 0, em.content[:50]
-                    )
+                    self.logger.debug("Skipping duplicate memory (semantic match %.3f): %s", result.similarity_score or 0, em.content[:50])
                 elif result.action == DeduplicationAction.MERGE:
                     # Merge candidate - include but flag for potential merge
                     em.metadata["merge_candidate"] = True
@@ -659,22 +615,20 @@ class DefaultExtractionService(ExtractionService):
                     deduplicated.append(em)
 
             self.logger.info(
-                "Deduplication complete: %d memories in, %d out, %d duplicates removed",
-                len(extracted), len(deduplicated), duplicates_count
+                "Deduplication complete: %d memories in, %d out, %d duplicates removed", len(extracted), len(deduplicated), duplicates_count
             )
 
             return deduplicated, duplicates_count
 
         except Exception as e:
-            self.logger.warning(
-                "Deduplication failed, returning all extracted memories: %s", str(e)
-            )
+            self.logger.warning("Deduplication failed, returning all extracted memories: %s", str(e))
             return extracted, 0
 
 
 class DefaultExtractionServicePlugin(ExtractionServicePluginBase):
     """Default extraction service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger) -> ExtractionService:
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
@@ -683,9 +637,5 @@ class DefaultExtractionServicePlugin(ExtractionServicePluginBase):
         embedding_service: EmbeddingService = self.get_extension(EXT_EMBEDDING_SERVICE, v)
 
         return DefaultExtractionService(
-            llm_service=llm_service,
-            storage=storage,
-            deduplication_service=deduplication_service,
-            embedding_service=embedding_service,
-            v=v
+            llm_service=llm_service, storage=storage, deduplication_service=deduplication_service, embedding_service=embedding_service, v=v
         )

@@ -1,25 +1,26 @@
 """OpenTelemetry SDK initialization — configures TracerProvider and exporter."""
+
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 from scitrera_app_framework import Plugin, Variables, ext_parse_bool
 
 # Config constants
-MEMORYLAYER_OTEL_ENABLED = 'MEMORYLAYER_OTEL_ENABLED'
-MEMORYLAYER_OTEL_EXPORTER = 'MEMORYLAYER_OTEL_EXPORTER'  # 'otlp', 'console', 'none'
-MEMORYLAYER_OTEL_ENDPOINT = 'MEMORYLAYER_OTEL_ENDPOINT'  # e.g., 'http://localhost:4317'
-MEMORYLAYER_OTEL_SERVICE_NAME = 'MEMORYLAYER_OTEL_SERVICE_NAME'
+MEMORYLAYER_OTEL_ENABLED = "MEMORYLAYER_OTEL_ENABLED"
+MEMORYLAYER_OTEL_EXPORTER = "MEMORYLAYER_OTEL_EXPORTER"  # 'otlp', 'console', 'none'
+MEMORYLAYER_OTEL_ENDPOINT = "MEMORYLAYER_OTEL_ENDPOINT"  # e.g., 'http://localhost:4317'
+MEMORYLAYER_OTEL_SERVICE_NAME = "MEMORYLAYER_OTEL_SERVICE_NAME"
 
-DEFAULT_MEMORYLAYER_OTEL_SERVICE_NAME = 'memorylayer'
-DEFAULT_MEMORYLAYER_OTEL_ENDPOINT = 'http://localhost:4317'
+DEFAULT_MEMORYLAYER_OTEL_SERVICE_NAME = "memorylayer"
+DEFAULT_MEMORYLAYER_OTEL_ENDPOINT = "http://localhost:4317"
 
-EXT_OTEL_INIT = 'memorylayer-server-otel-init'
+EXT_OTEL_INIT = "memorylayer-server-otel-init"
 
 try:
     from opentelemetry import trace
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
 
     HAS_OTEL_SDK = True
 except ImportError:
@@ -58,20 +59,19 @@ class OTelInitPlugin(Plugin):
             MEMORYLAYER_OTEL_SERVICE_NAME,
             default=DEFAULT_MEMORYLAYER_OTEL_SERVICE_NAME,
         )
-        exporter_type = v.environ(MEMORYLAYER_OTEL_EXPORTER, default='none').lower()
+        exporter_type = v.environ(MEMORYLAYER_OTEL_EXPORTER, default="none").lower()
 
         resource = Resource(attributes={SERVICE_NAME: service_name})
         provider = TracerProvider(resource=resource)
 
-        if exporter_type == 'console':
+        if exporter_type == "console":
             exporter = ConsoleSpanExporter()
             provider.add_span_processor(BatchSpanProcessor(exporter))
             logger.info("OTel initialized: exporter=%s", exporter_type)
-        elif exporter_type == 'otlp':
+        elif exporter_type == "otlp":
             if not HAS_OTLP:
                 logger.warning(
-                    "OTel exporter=otlp requested but opentelemetry-exporter-otlp-proto-grpc "
-                    "is not installed; spans will not be exported"
+                    "OTel exporter=otlp requested but opentelemetry-exporter-otlp-proto-grpc is not installed; spans will not be exported"
                 )
             else:
                 endpoint = v.environ(

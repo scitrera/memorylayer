@@ -1,14 +1,14 @@
 """Default decay service implementation."""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
 from ...models import Memory
 from ..storage import EXT_STORAGE_BACKEND, StorageBackend
-from .base import DecayService, DecayServicePluginBase, DecaySettings, DecayResult
+from .base import DecayResult, DecayService, DecayServicePluginBase, DecaySettings
 
 
 class DefaultDecayService(DecayService):
@@ -18,7 +18,7 @@ class DefaultDecayService(DecayService):
         self._storage = storage
         self.logger = get_logger(v, name=self.__class__.__name__)
 
-    async def decay_workspace(self, workspace_id: str, settings: Optional[DecaySettings] = None) -> DecayResult:
+    async def decay_workspace(self, workspace_id: str, settings: DecaySettings | None = None) -> DecayResult:
         settings = settings or DecaySettings()
         result = DecayResult()
 
@@ -29,34 +29,29 @@ class DefaultDecayService(DecayService):
         )
         result.processed = len(memories)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for memory in memories:
             last_access = memory.last_accessed_at or memory.created_at
             # Ensure timezone-aware comparison
             if last_access.tzinfo is None:
-                last_access = last_access.replace(tzinfo=timezone.utc)
+                last_access = last_access.replace(tzinfo=UTC)
             days_since_access = max(0, (now - last_access).days)
 
-            new_importance = max(
-                settings.min_importance,
-                memory.importance * (settings.decay_rate ** days_since_access)
-            )
+            new_importance = max(settings.min_importance, memory.importance * (settings.decay_rate**days_since_access))
 
             if abs(new_importance - memory.importance) > 0.001:
                 await self._storage.update_memory(
-                    workspace_id, memory.id,
+                    workspace_id,
+                    memory.id,
                     importance=new_importance,
                     decay_factor=new_importance / max(memory.importance, 0.001),
                 )
                 result.decayed += 1
 
-        self.logger.debug(
-            "Decay pass for workspace %s: %d processed, %d decayed",
-            workspace_id, result.processed, result.decayed
-        )
+        self.logger.debug("Decay pass for workspace %s: %d processed, %d decayed", workspace_id, result.processed, result.decayed)
         return result
 
-    async def archive_stale_memories(self, workspace_id: str, settings: Optional[DecaySettings] = None) -> int:
+    async def archive_stale_memories(self, workspace_id: str, settings: DecaySettings | None = None) -> int:
         settings = settings or DecaySettings()
 
         candidates = await self._storage.get_archival_candidates(
@@ -69,19 +64,17 @@ class DefaultDecayService(DecayService):
         archived = 0
         for memory in candidates:
             await self._storage.update_memory(
-                workspace_id, memory.id,
-                status='archived',
+                workspace_id,
+                memory.id,
+                status="archived",
             )
             archived += 1
 
         if archived:
-            self.logger.info(
-                "Archived %d stale memories in workspace %s",
-                archived, workspace_id
-            )
+            self.logger.info("Archived %d stale memories in workspace %s", archived, workspace_id)
         return archived
 
-    async def calculate_access_boost(self, memory: Memory, boost_factor: Optional[float] = None) -> Optional[float]:
+    async def calculate_access_boost(self, memory: Memory, boost_factor: float | None = None) -> float | None:
         boost = boost_factor or DecaySettings().access_boost
         if not memory or memory.pinned:
             return memory.importance if memory else None
@@ -89,7 +82,7 @@ class DefaultDecayService(DecayService):
         new_importance = min(1.0, memory.importance * boost)
         return new_importance
 
-    async def boost_on_access(self, workspace_id: str, memory_id: str, boost_factor: Optional[float] = None) -> Optional[float]:
+    async def boost_on_access(self, workspace_id: str, memory_id: str, boost_factor: float | None = None) -> float | None:
         memory = await self._storage.get_memory(workspace_id, memory_id, track_access=False)
         if not memory or memory.pinned:
             return memory.importance if memory else None
@@ -97,12 +90,13 @@ class DefaultDecayService(DecayService):
         new_importance = await self.calculate_access_boost(memory, boost_factor=boost_factor)
         if abs(new_importance - memory.importance) > 0.001:
             await self._storage.update_memory(
-                workspace_id, memory_id,
+                workspace_id,
+                memory_id,
                 importance=new_importance,
             )
         return new_importance
 
-    async def decay_all_workspaces(self, settings: Optional[DecaySettings] = None) -> DecayResult:
+    async def decay_all_workspaces(self, settings: DecaySettings | None = None) -> DecayResult:
         settings = settings or DecaySettings()
         total = DecayResult()
 
@@ -116,16 +110,14 @@ class DefaultDecayService(DecayService):
             archived = await self.archive_stale_memories(ws_id, settings)
             total.archived += archived
 
-        self.logger.info(
-            "Decay all workspaces: %d processed, %d decayed, %d archived",
-            total.processed, total.decayed, total.archived
-        )
+        self.logger.info("Decay all workspaces: %d processed, %d decayed, %d archived", total.processed, total.decayed, total.archived)
         return total
 
 
 class DefaultDecayServicePlugin(DecayServicePluginBase):
     """Plugin that creates the default decay service."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> DecayService:
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)

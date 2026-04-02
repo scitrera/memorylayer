@@ -3,7 +3,6 @@
 These tests verify the SDK client works correctly against the actual server API.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 
 
@@ -265,6 +264,7 @@ class TestSDKSessions:
     def test_sdk_session_context(self, test_client: TestClient, workspace_headers: dict[str, str]) -> None:
         """Test setting session working memory (v2: /memory endpoint)."""
         import uuid
+
         session_id = f"test_session_ctx_{uuid.uuid4().hex[:8]}"
 
         # Create session first

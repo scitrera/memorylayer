@@ -3,29 +3,30 @@
 Wraps the smolagents LocalPythonExecutor to provide a sandboxed Python
 execution environment with controlled imports and built-in functions.
 """
+
 import asyncio
 import logging
 from typing import Any
 
-from .base import ExecutorProvider, ExecutionResult
+from .base import ExecutionResult, ExecutorProvider
 
 logger = logging.getLogger(__name__)
 
 # Modules allowed for import in the sandbox
 _IMPORT_WHITELIST = [
-    'collections',
-    'datetime',
-    'itertools',
-    'math',
-    'queue',
-    'random',
-    're',
-    'stat',
-    'statistics',
-    'time',
-    'unicodedata',
-    'json',
-    'functools',
+    "collections",
+    "datetime",
+    "itertools",
+    "math",
+    "queue",
+    "random",
+    "re",
+    "stat",
+    "statistics",
+    "time",
+    "unicodedata",
+    "json",
+    "functools",
 ]
 
 
@@ -67,8 +68,7 @@ class SmolagentsExecutor(ExecutorProvider):
             from smolagents.local_python_executor import LocalPythonExecutor
         except ImportError as exc:
             raise RuntimeError(
-                "smolagents package is required for SmolagentsExecutor. "
-                "Install it with: pip install 'smolagents>=1.0,<2.0'"
+                "smolagents package is required for SmolagentsExecutor. Install it with: pip install 'smolagents>=1.0,<2.0'"
             ) from exc
 
         all_imports = list(set(_IMPORT_WHITELIST) | set(self._additional_imports))
@@ -108,7 +108,7 @@ class SmolagentsExecutor(ExecutorProvider):
         """
         code = code.strip()
         if not code:
-            return ExecutionResult(output='', result=None, error=None)
+            return ExecutionResult(output="", result=None, error=None)
 
         self._ensure_executor()
 
@@ -130,45 +130,43 @@ class SmolagentsExecutor(ExecutorProvider):
             # Run in thread pool to avoid blocking the event loop
             loop = asyncio.get_event_loop()
             try:
-                code_output = await loop.run_in_executor(
-                    None, self._executor, code
-                )
+                code_output = await loop.run_in_executor(None, self._executor, code)
             except InterpreterError as e:
                 return ExecutionResult(
-                    output='',
+                    output="",
                     result=None,
                     error=f"InterpreterError: {e}",
                 )
             except TimeoutError:
                 return ExecutionResult(
-                    output='',
+                    output="",
                     result=None,
                     error=f"Execution timed out after {max_seconds}s",
                 )
             except Exception as e:
                 return ExecutionResult(
-                    output='',
+                    output="",
                     result=None,
                     error=f"{type(e).__name__}: {e}",
                 )
 
             # Extract results
-            output = code_output.logs or ''
+            output = code_output.logs or ""
             if len(output) > max_output_chars:
                 output = output[:max_output_chars]
 
             result_value = code_output.output
 
             # Track operations count from smolagents internal counter
-            ops_counter = self._executor.state.get('_operations_count', {})
-            operations_count = ops_counter.get('counter', 0) if isinstance(ops_counter, dict) else 0
+            ops_counter = self._executor.state.get("_operations_count", {})
+            operations_count = ops_counter.get("counter", 0) if isinstance(ops_counter, dict) else 0
 
             # Sync state changes back
             variables_changed: list[str] = []
             executor_state = self._executor.state
 
             for key in list(executor_state.keys()):
-                if key.startswith('_'):
+                if key.startswith("_"):
                     continue
                 if key not in keys_before:
                     # New variable
@@ -183,7 +181,7 @@ class SmolagentsExecutor(ExecutorProvider):
                     state[key] = executor_state[key]
 
             # Track deletions
-            executor_user_keys = {k for k in executor_state if not k.startswith('_')}
+            executor_user_keys = {k for k in executor_state if not k.startswith("_")}
             for deleted_key in keys_before - executor_user_keys:
                 if deleted_key in state:
                     del state[deleted_key]

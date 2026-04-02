@@ -1,15 +1,16 @@
 """Tests for _global workspace functionality."""
+
 import pytest
 import pytest_asyncio
+
+from memorylayer_server.config import DEFAULT_TENANT_ID, GLOBAL_WORKSPACE_ID
 from memorylayer_server.models import (
-    RememberInput,
+    MemoryType,
     RecallInput,
     RecallMode,
-    MemoryType,
+    RememberInput,
     Workspace,
-    WorkspaceSettings,
 )
-from memorylayer_server.config import GLOBAL_WORKSPACE_ID, DEFAULT_TENANT_ID
 
 
 @pytest_asyncio.fixture
@@ -61,9 +62,7 @@ async def test_recall_input_include_global_can_be_disabled():
 
 
 @pytest.mark.asyncio
-async def test_recall_searches_global_workspace_by_default(
-        memory_service, test_workspace, global_workspace
-):
+async def test_recall_searches_global_workspace_by_default(memory_service, test_workspace, global_workspace):
     """Test that recall searches both workspace and _global by default."""
     # Store memory in test workspace
     workspace_memory = await memory_service.remember(
@@ -116,9 +115,7 @@ async def test_recall_searches_global_workspace_by_default(
 
 
 @pytest.mark.asyncio
-async def test_recall_can_exclude_global_workspace(
-        memory_service, test_workspace, global_workspace
-):
+async def test_recall_can_exclude_global_workspace(memory_service, test_workspace, global_workspace):
     """Test that recall can exclude _global workspace when include_global=False."""
     # Store memory in test workspace
     workspace_memory = await memory_service.remember(
@@ -159,9 +156,7 @@ async def test_recall_can_exclude_global_workspace(
 
 
 @pytest.mark.asyncio
-async def test_recall_from_global_workspace_does_not_duplicate(
-        memory_service, global_workspace
-):
+async def test_recall_from_global_workspace_does_not_duplicate(memory_service, global_workspace):
     """Test that searching _global workspace directly doesn't duplicate results."""
     # Store memory in _global workspace
     global_memory = await memory_service.remember(
@@ -190,9 +185,7 @@ async def test_recall_from_global_workspace_does_not_duplicate(
 
 
 @pytest.mark.asyncio
-async def test_scope_boosts_prioritize_workspace_over_global(
-        memory_service, test_workspace, global_workspace
-):
+async def test_scope_boosts_prioritize_workspace_over_global(memory_service, test_workspace, global_workspace):
     """Test that scope boosts prioritize workspace memories over global."""
     # Store identical content in both workspaces
     workspace_memory = await memory_service.remember(
@@ -230,9 +223,7 @@ async def test_scope_boosts_prioritize_workspace_over_global(
 
 
 @pytest.mark.asyncio
-async def test_global_workspace_persists_across_sessions(
-        storage_backend, global_workspace
-):
+async def test_global_workspace_persists_across_sessions(storage_backend, global_workspace):
     """Test that _global workspace can be retrieved."""
     retrieved = await storage_backend.get_workspace(GLOBAL_WORKSPACE_ID)
     assert retrieved is not None

@@ -1,11 +1,11 @@
 """Decay task handler for periodic background decay."""
+
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ..services.decay import DecayService, EXT_DECAY_SERVICE
+from ..services.decay import EXT_DECAY_SERVICE, DecayService
 from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 
 
@@ -17,9 +17,9 @@ class DecayTaskHandler(TaskHandlerPlugin):
     """
 
     def get_task_type(self) -> str:
-        return 'decay_memories'
+        return "decay_memories"
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         return TaskSchedule(
             interval_seconds=6 * 3600,  # Every 6 hours  # TODO: make configurable
             default_payload={},
@@ -29,19 +29,13 @@ class DecayTaskHandler(TaskHandlerPlugin):
         decay_service: DecayService = self.get_extension(EXT_DECAY_SERVICE, v)
         logger: Logger = get_logger(v, name=self.get_task_type())
 
-        workspace_id = payload.get('workspace_id')
+        workspace_id = payload.get("workspace_id")
         if workspace_id:
             logger.info("Running decay for workspace %s", workspace_id)
             result = await decay_service.decay_workspace(workspace_id)
             archived = await decay_service.archive_stale_memories(workspace_id)
-            logger.info(
-                "Decay complete for workspace %s: %d decayed, %d archived",
-                workspace_id, result.decayed, archived
-            )
+            logger.info("Decay complete for workspace %s: %d decayed, %d archived", workspace_id, result.decayed, archived)
         else:
             logger.info("Running decay for all workspaces")
             result = await decay_service.decay_all_workspaces()
-            logger.info(
-                "Decay complete: %d processed, %d decayed, %d archived",
-                result.processed, result.decayed, result.archived
-            )
+            logger.info("Decay complete: %d processed, %d decayed, %d archived", result.processed, result.decayed, result.archived)

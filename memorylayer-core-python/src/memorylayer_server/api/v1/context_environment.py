@@ -11,22 +11,34 @@ Endpoints:
 - GET /v1/context/status - Get sandbox status
 - DELETE /v1/context/cleanup - Clean up sandbox
 """
-import logging
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Header, Request, status
+import logging
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from scitrera_app_framework import Plugin, Variables
 
-from .. import EXT_MULTI_API_ROUTERS
 from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
+
+from ...services.audit import AuditEvent, AuditService
+from ...services.authentication import AuthenticationError, AuthenticationService
+from ...services.authorization import AuthorizationService
+from ...services.context_environment import (
+    ContextEnvironmentService,
+)
+from ...services.context_environment import (
+    get_context_environment_service as _get_ctx_env_service,
+)
+from ...services.session import SessionService
+from .. import EXT_MULTI_API_ROUTERS
+from .deps import get_audit_service, get_auth_service, get_authz_service, get_session_service
 from .schemas import (
     ContextExecuteRequest,
     ContextExecuteResponse,
+    ContextInjectRequest,
+    ContextInjectResponse,
     ContextInspectResponse,
     ContextLoadRequest,
     ContextLoadResponse,
-    ContextInjectRequest,
-    ContextInjectResponse,
     ContextQueryRequest,
     ContextQueryResponse,
     ContextRLMRequest,
@@ -34,15 +46,6 @@ from .schemas import (
     ContextStatusResponse,
     ErrorResponse,
 )
-from ...services.context_environment import (
-    get_context_environment_service as _get_ctx_env_service,
-    ContextEnvironmentService,
-)
-from ...services.session import SessionService
-from ...services.authentication import AuthenticationService, AuthenticationError
-from ...services.authorization import AuthorizationService
-from .deps import get_auth_service, get_authz_service, get_session_service, get_audit_service
-from ...services.audit import AuditService, AuditEvent
 
 router = APIRouter(prefix="/v1/context", tags=["context-environment"])
 
@@ -53,7 +56,7 @@ def get_context_env_service(v: Variables = Depends(get_variables_dep)) -> Contex
 
 
 async def _resolve_session_id(
-    x_session_id: Optional[str],
+    x_session_id: str | None,
     session_service: SessionService,
     logger: logging.Logger,
 ) -> str:
@@ -85,7 +88,7 @@ async def _resolve_session_id(
 async def execute_code(
     http_request: Request,
     request: ContextExecuteRequest,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -111,15 +114,17 @@ async def execute_code(
         )
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="execute",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="execute",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context execute")
         return ContextExecuteResponse(**result)
@@ -148,9 +153,9 @@ async def execute_code(
 )
 async def inspect_state(
     http_request: Request,
-    variable: Optional[str] = None,
+    variable: str | None = None,
     preview_chars: int = 200,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -174,15 +179,17 @@ async def inspect_state(
         )
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context inspect")
         return ContextInspectResponse(**result)
@@ -212,7 +219,7 @@ async def inspect_state(
 async def load_memories(
     http_request: Request,
     request: ContextLoadRequest,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -241,15 +248,17 @@ async def load_memories(
         )
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context load")
         return ContextLoadResponse(**result)
@@ -279,7 +288,7 @@ async def load_memories(
 async def inject_value(
     http_request: Request,
     request: ContextInjectRequest,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -304,15 +313,17 @@ async def inject_value(
         )
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="write",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="write",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context inject")
         return ContextInjectResponse(**result)
@@ -342,7 +353,7 @@ async def inject_value(
 async def query_llm(
     http_request: Request,
     request: ContextQueryRequest,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -368,15 +379,17 @@ async def query_llm(
         )
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="execute",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="execute",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context query")
         return ContextQueryResponse(**result)
@@ -406,7 +419,7 @@ async def query_llm(
 async def run_rlm(
     http_request: Request,
     request: ContextRLMRequest,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -435,15 +448,17 @@ async def run_rlm(
         )
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="execute",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="execute",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context rlm")
         return ContextRLMResponse(**result)
@@ -472,7 +487,7 @@ async def run_rlm(
 )
 async def get_status(
     http_request: Request,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -490,15 +505,17 @@ async def get_status(
         result = await ctx_env_service.status(session_id)
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context status")
         return ContextStatusResponse(**result)
@@ -527,7 +544,7 @@ async def get_status(
 )
 async def checkpoint_environment(
     http_request: Request,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -544,15 +561,17 @@ async def checkpoint_environment(
         logger.info("Context checkpoint for session: %s", session_id)
         await ctx_env_service.checkpoint(session_id)
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="write",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="write",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context checkpoint")
     except AuthenticationError as e:
@@ -579,7 +598,7 @@ async def checkpoint_environment(
 )
 async def cleanup_environment(
     http_request: Request,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     ctx_env_service: ContextEnvironmentService = Depends(get_context_env_service),
@@ -599,15 +618,17 @@ async def cleanup_environment(
         await ctx_env_service.cleanup_environment(session_id)
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="context",
-                action="write",
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-                resource_type="context",
-                resource_id=session_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="write",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=session_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for context cleanup")
 

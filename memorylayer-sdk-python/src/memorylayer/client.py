@@ -2,7 +2,8 @@
 
 import json
 import logging
-from typing import Any, AsyncGenerator, Optional, Union
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 from pydantic import TypeAdapter
@@ -22,7 +23,6 @@ from .models import (
     ChatMessage,
     ChatThread,
     ChatThreadWithMessages,
-    DatasetColumn,
     DatasetInfo,
     DatasetJobInfo,
     DatasetSliceResult,
@@ -81,9 +81,9 @@ class MemoryLayerClient:
     def __init__(
         self,
         base_url: str = "http://localhost:61001",
-        api_key: Optional[str] = None,
-        workspace_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        api_key: str | None = None,
+        workspace_id: str | None = None,
+        session_id: str | None = None,
         timeout: float = 30.0,
     ):
         """
@@ -101,7 +101,7 @@ class MemoryLayerClient:
         self.workspace_id = workspace_id
         self.session_id = session_id
         self.timeout = timeout
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "MemoryLayerClient":
         """Async context manager entry."""
@@ -143,7 +143,7 @@ class MemoryLayerClient:
         if self._client and "X-Session-ID" in self._client.headers:
             del self._client.headers["X-Session-ID"]
 
-    def get_session_id(self) -> Optional[str]:
+    def get_session_id(self) -> str | None:
         """
         Get the current session ID, if any.
 
@@ -168,9 +168,9 @@ class MemoryLayerClient:
         method: str,
         path: str,
         *,
-        json: Optional[dict[str, Any]] = None,
-        params: Optional[dict[str, Any]] = None,
-        enterprise_feature: Optional[str] = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        enterprise_feature: str | None = None,
     ) -> dict[str, Any]:
         """
         Make HTTP request with error handling.
@@ -244,13 +244,13 @@ class MemoryLayerClient:
     async def remember(
         self,
         content: str,
-        type: Optional[Union[str, MemoryType]] = None,
-        subtype: Optional[Union[str, MemorySubtype]] = None,
+        type: str | MemoryType | None = None,
+        subtype: str | MemorySubtype | None = None,
         importance: float = 0.5,
-        tags: Optional[list[str]] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        context_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        context_id: str | None = None,
+        user_id: str | None = None,
     ) -> Memory:
         """
         Store a new memory.
@@ -299,20 +299,20 @@ class MemoryLayerClient:
     async def recall(
         self,
         query: str,
-        types: Optional[list[Union[str, MemoryType]]] = None,
-        subtypes: Optional[list[Union[str, MemorySubtype]]] = None,
-        tags: Optional[list[str]] = None,
-        mode: Optional[Union[str, RecallMode]] = None,
+        types: list[str | MemoryType] | None = None,
+        subtypes: list[str | MemorySubtype] | None = None,
+        tags: list[str] | None = None,
+        mode: str | RecallMode | None = None,
         limit: int = 10,
-        min_relevance: Optional[float] = None,
-        recency_weight: Optional[float] = None,
-        tolerance: Optional[Union[str, SearchTolerance]] = None,
-        include_associations: Optional[bool] = None,
-        traverse_depth: Optional[int] = None,
-        max_expansion: Optional[int] = None,
-        created_after: Optional[str] = None,
-        created_before: Optional[str] = None,
-        user_id: Optional[str] = None,
+        min_relevance: float | None = None,
+        recency_weight: float | None = None,
+        tolerance: str | SearchTolerance | None = None,
+        include_associations: bool | None = None,
+        traverse_depth: int | None = None,
+        max_expansion: int | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        user_id: str | None = None,
     ) -> RecallResult:
         """
         Search memories by semantic query.
@@ -459,10 +459,10 @@ class MemoryLayerClient:
     async def update_memory(
         self,
         memory_id: str,
-        content: Optional[str] = None,
-        importance: Optional[float] = None,
-        tags: Optional[list[str]] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        content: str | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Memory:
         """
         Update an existing memory.
@@ -503,9 +503,9 @@ class MemoryLayerClient:
         self,
         source_id: str,
         target_id: str,
-        relationship: Union[str, RelationshipType],
+        relationship: str | RelationshipType,
         strength: float = 0.5,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Association:
         """
         Link two memories with a relationship.
@@ -569,8 +569,8 @@ class MemoryLayerClient:
     async def create_session(
         self,
         ttl_seconds: int = 3600,
-        workspace_id: Optional[str] = None,
-        context_id: Optional[str] = None,
+        workspace_id: str | None = None,
+        context_id: str | None = None,
         auto_set_session: bool = True,
     ) -> Session:
         """
@@ -629,7 +629,7 @@ class MemoryLayerClient:
         session_id: str,
         key: str,
         value: Any,
-        ttl_seconds: Optional[int] = None,
+        ttl_seconds: int | None = None,
     ) -> None:
         """
         Set a context value in a session.
@@ -683,7 +683,7 @@ class MemoryLayerClient:
 
     async def get_briefing(
         self,
-        lookback_hours: Optional[int] = None,
+        lookback_hours: int | None = None,
         lookback_minutes: int = 60,
         detail_level: str = "abstract",
         limit: int = 10,
@@ -736,7 +736,7 @@ class MemoryLayerClient:
         data = await self._request("POST", "/workspaces", json=payload)
         return Workspace(**data)
 
-    async def get_workspace(self, workspace_id: Optional[str] = None) -> Workspace:
+    async def get_workspace(self, workspace_id: str | None = None) -> Workspace:
         """
         Get workspace details.
 
@@ -759,8 +759,8 @@ class MemoryLayerClient:
     async def update_workspace(
         self,
         workspace_id: str,
-        name: Optional[str] = None,
-        settings: Optional[dict[str, Any]] = None,
+        name: str | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> Workspace:
         """
         Update an existing workspace.
@@ -793,8 +793,8 @@ class MemoryLayerClient:
         self,
         workspace_id: str,
         name: str,
-        description: Optional[str] = None,
-        settings: Optional[dict[str, Any]] = None,
+        description: str | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Create a context within a workspace.
@@ -860,7 +860,7 @@ class MemoryLayerClient:
 
     async def export_workspace(
         self,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
         include_associations: bool = True,
         offset: int = 0,
         limit: int = 0,
@@ -911,8 +911,9 @@ class MemoryLayerClient:
 
         # Parse NDJSON response
         import json
+
         text = response.text
-        lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+        lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
 
         header = None
         memories = []
@@ -956,15 +957,12 @@ class MemoryLayerClient:
             result = await client.import_workspace("ws_123", export_data)
             print(f"Imported {result['imported']} memories")
         """
-        response = await self._request(
-            "POST", f"/workspaces/{workspace_id}/import",
-            json={"data": data}
-        )
+        response = await self._request("POST", f"/workspaces/{workspace_id}/import", json={"data": data})
         return response
 
     async def export_workspace_stream(
         self,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
         include_associations: bool = True,
         offset: int = 0,
         limit: int = 0,
@@ -1015,7 +1013,7 @@ class MemoryLayerClient:
         response.raise_for_status()
 
         text = response.text
-        lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+        lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
 
         for line in lines:
             yield json.loads(line)
@@ -1043,13 +1041,11 @@ class MemoryLayerClient:
             print(f"Imported {result['imported']} memories")
         """
         # Serialize to NDJSON
-        ndjson_body = '\n'.join(json.dumps(line) for line in ndjson_lines)
+        ndjson_body = "\n".join(json.dumps(line) for line in ndjson_lines)
 
         client = self._ensure_client()
         response = await client.post(
-            f"/workspaces/{workspace_id}/import",
-            content=ndjson_body,
-            headers={"Content-Type": "application/x-ndjson"}
+            f"/workspaces/{workspace_id}/import", content=ndjson_body, headers={"Content-Type": "application/x-ndjson"}
         )
 
         if response.status_code >= 400:
@@ -1144,8 +1140,8 @@ class MemoryLayerClient:
 
     async def list_sessions(
         self,
-        workspace_id: Optional[str] = None,
-        context_id: Optional[str] = None,
+        workspace_id: str | None = None,
+        context_id: str | None = None,
         include_expired: bool = False,
     ) -> list[dict[str, Any]]:
         """
@@ -1194,7 +1190,7 @@ class MemoryLayerClient:
         session_id: str,
         min_importance: float = 0.5,
         deduplicate: bool = True,
-        categories: Optional[list[str]] = None,
+        categories: list[str] | None = None,
         max_memories: int = 50,
     ) -> dict[str, Any]:
         """
@@ -1248,7 +1244,7 @@ class MemoryLayerClient:
     async def context_exec(
         self,
         code: str,
-        result_var: Optional[str] = None,
+        result_var: str | None = None,
         return_result: bool = True,
         max_return_chars: int = 10_000,
     ) -> dict[str, Any]:
@@ -1283,7 +1279,7 @@ class MemoryLayerClient:
 
     async def context_inspect(
         self,
-        variable: Optional[str] = None,
+        variable: str | None = None,
         preview_chars: int = 200,
     ) -> dict[str, Any]:
         """
@@ -1313,9 +1309,9 @@ class MemoryLayerClient:
         var: str,
         query: str,
         limit: int = 50,
-        types: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None,
-        min_relevance: Optional[float] = None,
+        types: list[str] | None = None,
+        tags: list[str] | None = None,
+        min_relevance: float | None = None,
         include_embeddings: bool = False,
     ) -> dict[str, Any]:
         """
@@ -1391,8 +1387,8 @@ class MemoryLayerClient:
         self,
         prompt: str,
         variables: list[str],
-        max_context_chars: Optional[int] = None,
-        result_var: Optional[str] = None,
+        max_context_chars: int | None = None,
+        result_var: str | None = None,
     ) -> dict[str, Any]:
         """
         Send sandbox variables and a prompt to the LLM.
@@ -1429,11 +1425,11 @@ class MemoryLayerClient:
     async def context_rlm(
         self,
         goal: str,
-        memory_query: Optional[str] = None,
+        memory_query: str | None = None,
         memory_limit: int = 100,
         max_iterations: int = 10,
-        variables: Optional[list[str]] = None,
-        result_var: Optional[str] = None,
+        variables: list[str] | None = None,
+        result_var: str | None = None,
         detail_level: str = "standard",
     ) -> dict[str, Any]:
         """
@@ -1524,15 +1520,15 @@ class MemoryLayerClient:
     async def create_thread(
         self,
         *,
-        workspace_id: Optional[str] = None,
-        thread_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        context_id: Optional[str] = None,
-        observer_id: Optional[str] = None,
-        subject_id: Optional[str] = None,
-        title: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        expires_at: Optional[str] = None,
+        workspace_id: str | None = None,
+        thread_id: str | None = None,
+        user_id: str | None = None,
+        context_id: str | None = None,
+        observer_id: str | None = None,
+        subject_id: str | None = None,
+        title: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        expires_at: str | None = None,
     ) -> ChatThread:
         """
         Create a new chat thread.
@@ -1581,8 +1577,8 @@ class MemoryLayerClient:
     async def list_threads(
         self,
         *,
-        workspace_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        workspace_id: str | None = None,
+        user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[ChatThread]:
@@ -1616,7 +1612,7 @@ class MemoryLayerClient:
         self,
         thread_id: str,
         *,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
     ) -> ChatThread:
         """
         Get thread metadata.
@@ -1643,7 +1639,7 @@ class MemoryLayerClient:
         self,
         thread_id: str,
         *,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
         order: str = "asc",
@@ -1676,7 +1672,7 @@ class MemoryLayerClient:
         self,
         thread_id: str,
         *,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
     ) -> None:
         """
         Delete a thread and its messages.
@@ -1700,7 +1696,7 @@ class MemoryLayerClient:
         thread_id: str,
         messages: list[dict[str, Any]],
         *,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
     ) -> list[ChatMessage]:
         """
         Append messages to a thread.
@@ -1726,8 +1722,10 @@ class MemoryLayerClient:
 
         payload: dict[str, Any] = {"messages": messages}
         data = await self._request(
-            "POST", f"/threads/{thread_id}/messages",
-            json=payload, params=params or None,
+            "POST",
+            f"/threads/{thread_id}/messages",
+            json=payload,
+            params=params or None,
         )
         messages_adapter = TypeAdapter(list[ChatMessage])
         return messages_adapter.validate_python(data.get("messages", data if isinstance(data, list) else []))
@@ -1736,10 +1734,10 @@ class MemoryLayerClient:
         self,
         thread_id: str,
         *,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
-        after_index: Optional[int] = None,
+        after_index: int | None = None,
         order: str = "asc",
     ) -> list[ChatMessage]:
         """
@@ -1774,7 +1772,7 @@ class MemoryLayerClient:
         self,
         thread_id: str,
         *,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
     ) -> DecompositionResult:
         """
         Trigger memory decomposition for unprocessed messages.
@@ -1796,7 +1794,8 @@ class MemoryLayerClient:
             params["workspace_id"] = ws_id
 
         data = await self._request(
-            "POST", f"/threads/{thread_id}/decompose",
+            "POST",
+            f"/threads/{thread_id}/decompose",
             params=params or None,
         )
         return DecompositionResult(**data)
@@ -1865,13 +1864,14 @@ class MemoryLayerClient:
             raise
         except httpx.HTTPStatusError as exc:
             raise MemoryLayerError(
-                str(exc), status_code=exc.response.status_code,
+                str(exc),
+                status_code=exc.response.status_code,
             )
 
     async def list_documents(
         self,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[DocumentInfo], int]:
@@ -1886,7 +1886,9 @@ class MemoryLayerClient:
             params["status"] = status
 
         data = await self._request(
-            "GET", "/documents", params=params,
+            "GET",
+            "/documents",
+            params=params,
             enterprise_feature="Document management",
         )
         docs = [DocumentInfo(**d) for d in data.get("documents", [])]
@@ -1895,17 +1897,22 @@ class MemoryLayerClient:
     async def get_document(self, document_id: str) -> DocumentInfo:
         """Get document metadata and processing status."""
         data = await self._request(
-            "GET", f"/documents/{document_id}",
+            "GET",
+            f"/documents/{document_id}",
             enterprise_feature="Document management",
         )
         return DocumentInfo(**data)
 
     async def delete_document(
-        self, document_id: str, *, delete_memories: bool = False,
+        self,
+        document_id: str,
+        *,
+        delete_memories: bool = False,
     ) -> None:
         """Delete a document and optionally its extracted memories."""
         await self._request(
-            "DELETE", f"/documents/{document_id}",
+            "DELETE",
+            f"/documents/{document_id}",
             params={"delete_memories": str(delete_memories).lower()},
             enterprise_feature="Document management",
         )
@@ -1915,7 +1922,7 @@ class MemoryLayerClient:
         query: str,
         *,
         limit: int = 10,
-        doc_ids: Optional[list[str]] = None,
+        doc_ids: list[str] | None = None,
     ) -> PageSearchResult:
         """
         Search document pages using ColPali MaxSim visual similarity.
@@ -1935,7 +1942,9 @@ class MemoryLayerClient:
             payload["doc_ids"] = doc_ids
 
         data = await self._request(
-            "POST", "/documents/search", json=payload,
+            "POST",
+            "/documents/search",
+            json=payload,
             enterprise_feature="Document page search",
         )
         return PageSearchResult(
@@ -1947,7 +1956,8 @@ class MemoryLayerClient:
     async def get_document_pages(self, document_id: str) -> list[DocumentPage]:
         """Get all pages for a document."""
         data = await self._request(
-            "GET", f"/documents/{document_id}/pages",
+            "GET",
+            f"/documents/{document_id}/pages",
             enterprise_feature="Document pages",
         )
         return [DocumentPage(**p) for p in data.get("pages", [])]
@@ -1972,13 +1982,15 @@ class MemoryLayerClient:
             raise
         except httpx.HTTPStatusError as exc:
             raise MemoryLayerError(
-                str(exc), status_code=exc.response.status_code,
+                str(exc),
+                status_code=exc.response.status_code,
             )
 
     async def get_job(self, job_id: str) -> JobInfo:
         """Get ingestion job status and progress."""
         data = await self._request(
-            "GET", f"/documents/jobs/{job_id}",
+            "GET",
+            f"/documents/jobs/{job_id}",
             enterprise_feature="Document ingestion jobs",
         )
         return JobInfo(**data)
@@ -1986,7 +1998,7 @@ class MemoryLayerClient:
     async def list_jobs(
         self,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
     ) -> list[JobInfo]:
         """List ingestion jobs in the workspace."""
@@ -1995,7 +2007,9 @@ class MemoryLayerClient:
             params["status"] = status
 
         data = await self._request(
-            "GET", "/documents/jobs", params=params,
+            "GET",
+            "/documents/jobs",
+            params=params,
             enterprise_feature="Document ingestion jobs",
         )
         return [JobInfo(**j) for j in data.get("jobs", [])]
@@ -2003,7 +2017,8 @@ class MemoryLayerClient:
     async def cancel_job(self, job_id: str) -> None:
         """Cancel a queued or running ingestion job."""
         await self._request(
-            "POST", f"/documents/jobs/{job_id}/cancel",
+            "POST",
+            f"/documents/jobs/{job_id}/cancel",
             enterprise_feature="Document ingestion jobs",
         )
 
@@ -2011,11 +2026,11 @@ class MemoryLayerClient:
         self,
         document_id: str,
         *,
-        target_context_id: Optional[str] = None,
-        chunking_strategy: Optional[str] = None,
-        chunk_size: Optional[int] = None,
-        chunk_overlap: Optional[int] = None,
-        importance: Optional[float] = None,
+        target_context_id: str | None = None,
+        chunking_strategy: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+        importance: float | None = None,
     ) -> JobInfo:
         """Reprocess a document with optionally different extraction options."""
         payload: dict[str, Any] = {}
@@ -2031,7 +2046,8 @@ class MemoryLayerClient:
             payload["importance"] = importance
 
         data = await self._request(
-            "POST", f"/documents/{document_id}/reprocess",
+            "POST",
+            f"/documents/{document_id}/reprocess",
             json=payload if payload else None,
             enterprise_feature="Document reprocessing",
         )
@@ -2046,7 +2062,7 @@ class MemoryLayerClient:
         file_data: bytes,
         filename: str,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         target_context_id: str = "_default",
         importance: float = 0.5,
         sample_rows: int = 1000,
@@ -2104,13 +2120,14 @@ class MemoryLayerClient:
             raise
         except httpx.HTTPStatusError as exc:
             raise MemoryLayerError(
-                str(exc), status_code=exc.response.status_code,
+                str(exc),
+                status_code=exc.response.status_code,
             )
 
     async def list_datasets(
         self,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[DatasetInfo], int]:
@@ -2125,7 +2142,9 @@ class MemoryLayerClient:
             params["status"] = status
 
         data = await self._request(
-            "GET", "/datasets", params=params,
+            "GET",
+            "/datasets",
+            params=params,
             enterprise_feature="Dataset management",
         )
         datasets = [DatasetInfo(**d) for d in data.get("datasets", [])]
@@ -2134,23 +2153,29 @@ class MemoryLayerClient:
     async def get_dataset(self, dataset_id: str) -> DatasetInfo:
         """Get dataset metadata, schema, and profile."""
         data = await self._request(
-            "GET", f"/datasets/{dataset_id}",
+            "GET",
+            f"/datasets/{dataset_id}",
             enterprise_feature="Dataset management",
         )
         return DatasetInfo(**data)
 
     async def delete_dataset(
-        self, dataset_id: str, *, delete_memories: bool = False,
+        self,
+        dataset_id: str,
+        *,
+        delete_memories: bool = False,
     ) -> None:
         """Delete a dataset and optionally its extracted memories."""
         await self._request(
-            "DELETE", f"/datasets/{dataset_id}",
+            "DELETE",
+            f"/datasets/{dataset_id}",
             params={"delete_memories": str(delete_memories).lower()},
             enterprise_feature="Dataset management",
         )
 
     async def get_dataset_memories(
-        self, dataset_id: str,
+        self,
+        dataset_id: str,
     ) -> list[dict[str, Any]]:
         """
         Get memories extracted from a dataset.
@@ -2159,7 +2184,8 @@ class MemoryLayerClient:
             List of memory dicts with id, content, type, importance, tags, created_at.
         """
         data = await self._request(
-            "GET", f"/datasets/{dataset_id}/memories",
+            "GET",
+            f"/datasets/{dataset_id}/memories",
             enterprise_feature="Dataset management",
         )
         return data.get("memories", [])
@@ -2168,10 +2194,10 @@ class MemoryLayerClient:
         self,
         dataset_id: str,
         *,
-        sql: Optional[str] = None,
-        columns: Optional[list[str]] = None,
-        filters: Optional[list[dict[str, Any]]] = None,
-        order_by: Optional[str] = None,
+        sql: str | None = None,
+        columns: list[str] | None = None,
+        filters: list[dict[str, Any]] | None = None,
+        order_by: str | None = None,
         descending: bool = False,
         limit: int = 100,
         offset: int = 0,
@@ -2210,7 +2236,8 @@ class MemoryLayerClient:
             payload["order_by"] = order_by
 
         data = await self._request(
-            "POST", f"/datasets/{dataset_id}/slice",
+            "POST",
+            f"/datasets/{dataset_id}/slice",
             json=payload,
             enterprise_feature="Dataset management",
         )
@@ -2219,7 +2246,8 @@ class MemoryLayerClient:
     async def get_dataset_job(self, job_id: str) -> DatasetJobInfo:
         """Get dataset processing job status and progress."""
         data = await self._request(
-            "GET", f"/datasets/jobs/{job_id}",
+            "GET",
+            f"/datasets/jobs/{job_id}",
             enterprise_feature="Dataset processing jobs",
         )
         return DatasetJobInfo(**data)
@@ -2227,7 +2255,7 @@ class MemoryLayerClient:
     async def list_dataset_jobs(
         self,
         *,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
     ) -> list[DatasetJobInfo]:
         """List dataset processing jobs in the workspace."""
@@ -2236,7 +2264,9 @@ class MemoryLayerClient:
             params["status"] = status
 
         data = await self._request(
-            "GET", "/datasets/jobs", params=params,
+            "GET",
+            "/datasets/jobs",
+            params=params,
             enterprise_feature="Dataset processing jobs",
         )
         return [DatasetJobInfo(**j) for j in data.get("jobs", [])]
@@ -2244,6 +2274,7 @@ class MemoryLayerClient:
     async def cancel_dataset_job(self, job_id: str) -> None:
         """Cancel a queued or running dataset processing job."""
         await self._request(
-            "POST", f"/datasets/jobs/{job_id}/cancel",
+            "POST",
+            f"/datasets/jobs/{job_id}/cancel",
             enterprise_feature="Dataset processing jobs",
         )

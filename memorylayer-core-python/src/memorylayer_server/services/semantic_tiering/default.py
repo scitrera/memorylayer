@@ -3,19 +3,18 @@ Default Tier Generation Service implementation.
 
 Generates hierarchical summaries (abstract, overview) for memories using LLM.
 """
-from logging import Logger
-from typing import Optional
 
-from scitrera_app_framework import get_logger, ext_parse_bool
+from logging import Logger
+
+from scitrera_app_framework import ext_parse_bool, get_logger
 from scitrera_app_framework.api import Variables
 
-from ...config import MEMORYLAYER_SEMANTIC_TIERING_ENABLED, DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_ENABLED
+from ...config import DEFAULT_MEMORYLAYER_SEMANTIC_TIERING_ENABLED, MEMORYLAYER_SEMANTIC_TIERING_ENABLED
+from ...models.llm import LLMMessage, LLMRequest, LLMRole
 from ...models.memory import Memory
-from ...models.llm import LLMRequest, LLMMessage, LLMRole
-from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from ..llm import EXT_LLM_SERVICE, LLMService
+from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from ..tasks.base import EXT_TASK_SERVICE, TaskService
-
 from .base import SemanticTieringService, SemanticTieringServicePluginBase
 
 
@@ -45,7 +44,7 @@ class DefaultSemanticTieringService(SemanticTieringService):
         storage: StorageBackend,
         v: Variables = None,
         enabled: bool = True,
-        task_service: Optional[TaskService] = None,
+        task_service: TaskService | None = None,
     ):
         """
         Initialize tier generation service.
@@ -63,16 +62,10 @@ class DefaultSemanticTieringService(SemanticTieringService):
         self.task_service = task_service
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info(
-            "Initialized DefaultTierGenerationService (enabled=%s, background=%s)",
-            self.enabled,
-            self.task_service is not None
+            "Initialized DefaultTierGenerationService (enabled=%s, background=%s)", self.enabled, self.task_service is not None
         )
 
-    async def generate_abstract(
-        self,
-        content: str,
-        max_tokens: int = 500
-    ) -> str:
+    async def generate_abstract(self, content: str, max_tokens: int = 500) -> str:
         """
         Generate brief abstract (tier 1) from memory content.
 
@@ -100,11 +93,7 @@ class DefaultSemanticTieringService(SemanticTieringService):
             # Fallback: truncate content
             return content[:100] + "..." if len(content) > 100 else content
 
-    async def generate_overview(
-        self,
-        content: str,
-        max_tokens: int = 500
-    ) -> str:
+    async def generate_overview(self, content: str, max_tokens: int = 500) -> str:
         """
         Generate overview (tier 2) from memory content.
 
@@ -132,12 +121,7 @@ class DefaultSemanticTieringService(SemanticTieringService):
             # Fallback: truncate content
             return content[:500] + "..." if len(content) > 500 else content
 
-    async def generate_tiers(
-        self,
-        memory_id: str,
-        workspace_id: str,
-        force: bool = False
-    ) -> Memory:
+    async def generate_tiers(self, memory_id: str, workspace_id: str, force: bool = False) -> Memory:
         """
         Generate all tiers (abstract, overview) for a memory.
 
@@ -176,19 +160,13 @@ class DefaultSemanticTieringService(SemanticTieringService):
 
         # Update memory in storage
         updated_memory = await self.storage.update_memory(
-            workspace_id=workspace_id,
-            memory_id=memory_id,
-            abstract=abstract,
-            overview=overview
+            workspace_id=workspace_id, memory_id=memory_id, abstract=abstract, overview=overview
         )
 
         self.logger.info("Generated tiers for memory %s", memory_id)
         return updated_memory
 
-    async def generate_tiers_for_content(
-        self,
-        content: str
-    ) -> tuple[str, str]:
+    async def generate_tiers_for_content(self, content: str) -> tuple[str, str]:
         """
         Generate tiers for content without persisting.
 
@@ -205,7 +183,7 @@ class DefaultSemanticTieringService(SemanticTieringService):
         abstract = await self.generate_abstract(overview)
         return abstract, overview
 
-    async def request_tier_generation(self, memory_id: str, workspace_id: str) -> Optional[str]:
+    async def request_tier_generation(self, memory_id: str, workspace_id: str) -> str | None:
         """
         Request tier generation, scheduling as background task if possible.
 
@@ -222,8 +200,8 @@ class DefaultSemanticTieringService(SemanticTieringService):
 
         if self.task_service:
             task_id = await self.task_service.schedule_task(
-                task_type='generate_tiers',
-                payload={'memory_id': memory_id, 'workspace_id': workspace_id},
+                task_type="generate_tiers",
+                payload={"memory_id": memory_id, "workspace_id": workspace_id},
             )
             self.logger.debug("Scheduled background tier generation for memory %s (task=%s)", memory_id, task_id)
             return task_id
@@ -236,7 +214,8 @@ class DefaultSemanticTieringService(SemanticTieringService):
 
 class DefaultSemanticTieringServicePlugin(SemanticTieringServicePluginBase):
     """Default tier generation service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> DefaultSemanticTieringService:
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
@@ -249,7 +228,7 @@ class DefaultSemanticTieringServicePlugin(SemanticTieringServicePluginBase):
         )
 
         # TaskService is optional — tier generation works inline without it
-        task_service: Optional[TaskService] = None
+        task_service: TaskService | None = None
         try:
             task_service = self.get_extension(EXT_TASK_SERVICE, v)
         except Exception:

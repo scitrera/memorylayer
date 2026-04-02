@@ -1,9 +1,14 @@
 """
 Unit tests for MemoryStatus enum and status/pinned fields.
 """
+
 import pytest
+
 from memorylayer_server.models.memory import (
-    Memory, MemoryType, MemoryStatus, RememberInput, RecallInput,
+    Memory,
+    MemoryStatus,
+    MemoryType,
+    RememberInput,
 )
 from memorylayer_server.services.memory import MemoryService
 from memorylayer_server.services.storage.base import StorageBackend
@@ -131,9 +136,7 @@ class TestStatusInStorage:
             workspace_id,
             RememberInput(content="Archive status test", type=MemoryType.SEMANTIC),
         )
-        updated = await storage_backend.update_memory(
-            workspace_id, memory.id, status="archived"
-        )
+        updated = await storage_backend.update_memory(workspace_id, memory.id, status="archived")
         assert updated is not None
         assert updated.status == MemoryStatus.ARCHIVED
 
@@ -148,9 +151,7 @@ class TestStatusInStorage:
             workspace_id,
             RememberInput(content="Pinned test memory", type=MemoryType.SEMANTIC),
         )
-        updated = await storage_backend.update_memory(
-            workspace_id, memory.id, pinned=1
-        )
+        updated = await storage_backend.update_memory(workspace_id, memory.id, pinned=1)
         assert updated is not None
         assert updated.pinned is True
 
@@ -170,13 +171,14 @@ class TestStatusInStorage:
             ),
         )
         # Archive it
-        await storage_backend.update_memory(
-            workspace_id, memory.id, status="archived"
-        )
+        await storage_backend.update_memory(workspace_id, memory.id, status="archived")
         # Search should not find it
         embedding = (await embedding_service.embed_batch(["Archived search exclusion test unique_xyzzy"]))[0]
         results = await storage_backend.search_memories(
-            workspace_id, embedding, limit=50, min_relevance=0.0,
+            workspace_id,
+            embedding,
+            limit=50,
+            min_relevance=0.0,
         )
         found_ids = [m.id for m, _ in results]
         assert memory.id not in found_ids
@@ -198,13 +200,14 @@ class TestStatusInStorage:
             ),
         )
         # Archive it
-        await storage_backend.update_memory(
-            workspace_id, memory.id, status="archived"
-        )
+        await storage_backend.update_memory(workspace_id, memory.id, status="archived")
         # Search with include_archived should find it
         embedding = (await embedding_service.embed_batch(["Archived include test unique_qwerty"]))[0]
         results = await storage_backend.search_memories(
-            workspace_id, embedding, limit=50, min_relevance=0.0,
+            workspace_id,
+            embedding,
+            limit=50,
+            min_relevance=0.0,
             include_archived=True,
         )
         found_ids = [m.id for m, _ in results]

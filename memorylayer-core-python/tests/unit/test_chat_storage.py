@@ -4,23 +4,24 @@ Integration tests for chat history storage in the SQLite backend.
 Tests the SQLite storage backend directly with chat thread and message operations.
 Each test class gets its own isolated storage backend with an in-memory (temp file) database.
 """
+
+from datetime import UTC, datetime, timedelta
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timezone, timedelta
 
-from memorylayer_server.services.storage.sqlite import SQLiteStorageBackend
 from memorylayer_server.models.chat import (
-    ChatThread,
-    ChatMessage,
     ChatMessageContent,
+    ChatThread,
     MessageInput,
 )
 from memorylayer_server.models.workspace import Workspace
-
+from memorylayer_server.services.storage.sqlite import SQLiteStorageBackend
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture
 async def storage(tmp_path):
@@ -46,8 +47,8 @@ async def workspace_id(storage) -> str:
         id=ws_id,
         tenant_id="_default",
         name="Chat Test Workspace",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     await storage.create_workspace(workspace)
     return ws_id
@@ -55,7 +56,7 @@ async def workspace_id(storage) -> str:
 
 def _make_thread(workspace_id: str, thread_id: str = "thread-1", **kwargs) -> ChatThread:
     """Helper: build a ChatThread with sensible defaults."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return ChatThread(
         id=thread_id,
         workspace_id=workspace_id,
@@ -74,6 +75,7 @@ def _make_msg_input(role: str = "user", content: str = "hello") -> MessageInput:
 # ---------------------------------------------------------------------------
 # TestChatThreadStorage
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 class TestChatThreadStorage:
@@ -125,9 +127,7 @@ class TestChatThreadStorage:
     async def test_list_threads(self, storage, workspace_id):
         """Create multiple threads and verify list_threads returns all of them."""
         for i in range(3):
-            await storage.create_thread(
-                _make_thread(workspace_id, thread_id=f"t-list-{i}", title=f"Thread {i}")
-            )
+            await storage.create_thread(_make_thread(workspace_id, thread_id=f"t-list-{i}", title=f"Thread {i}"))
 
         threads = await storage.list_threads(workspace_id)
 
@@ -138,15 +138,9 @@ class TestChatThreadStorage:
 
     async def test_list_threads_by_user(self, storage, workspace_id):
         """list_threads with user_id filters to that user's threads only."""
-        await storage.create_thread(
-            _make_thread(workspace_id, thread_id="t-user-a", user_id="alice")
-        )
-        await storage.create_thread(
-            _make_thread(workspace_id, thread_id="t-user-b", user_id="bob")
-        )
-        await storage.create_thread(
-            _make_thread(workspace_id, thread_id="t-user-a2", user_id="alice")
-        )
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-user-a", user_id="alice"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-user-b", user_id="bob"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-user-a2", user_id="alice"))
 
         alice_threads = await storage.list_threads(workspace_id, user_id="alice")
         thread_ids = {t.id for t in alice_threads}
@@ -157,15 +151,11 @@ class TestChatThreadStorage:
 
     async def test_list_threads_excludes_expired(self, storage, workspace_id):
         """list_threads does not return threads whose expires_at is in the past."""
-        past = datetime.now(timezone.utc) - timedelta(hours=1)
-        future = datetime.now(timezone.utc) + timedelta(hours=1)
+        past = datetime.now(UTC) - timedelta(hours=1)
+        future = datetime.now(UTC) + timedelta(hours=1)
 
-        await storage.create_thread(
-            _make_thread(workspace_id, thread_id="t-expired", expires_at=past)
-        )
-        await storage.create_thread(
-            _make_thread(workspace_id, thread_id="t-active", expires_at=future)
-        )
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-expired", expires_at=past))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-active", expires_at=future))
         await storage.create_thread(
             _make_thread(workspace_id, thread_id="t-permanent")  # no expiry
         )
@@ -210,6 +200,7 @@ class TestChatThreadStorage:
 # TestChatMessageStorage
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestChatMessageStorage:
     """Tests for chat message operations in SQLite."""
@@ -239,16 +230,24 @@ class TestChatMessageStorage:
         thread = _make_thread(workspace_id, thread_id="t-count")
         await storage.create_thread(thread)
 
-        await storage.append_messages(workspace_id, "t-count", [
-            _make_msg_input("user", "msg 1"),
-            _make_msg_input("assistant", "msg 2"),
-        ])
+        await storage.append_messages(
+            workspace_id,
+            "t-count",
+            [
+                _make_msg_input("user", "msg 1"),
+                _make_msg_input("assistant", "msg 2"),
+            ],
+        )
         t = await storage.get_thread(workspace_id, "t-count")
         assert t.message_count == 2
 
-        await storage.append_messages(workspace_id, "t-count", [
-            _make_msg_input("user", "msg 3"),
-        ])
+        await storage.append_messages(
+            workspace_id,
+            "t-count",
+            [
+                _make_msg_input("user", "msg 3"),
+            ],
+        )
         t = await storage.get_thread(workspace_id, "t-count")
         assert t.message_count == 3
 
@@ -257,11 +256,15 @@ class TestChatMessageStorage:
         thread = _make_thread(workspace_id, thread_id="t-order")
         await storage.create_thread(thread)
 
-        await storage.append_messages(workspace_id, "t-order", [
-            _make_msg_input("user", "first"),
-            _make_msg_input("assistant", "second"),
-            _make_msg_input("user", "third"),
-        ])
+        await storage.append_messages(
+            workspace_id,
+            "t-order",
+            [
+                _make_msg_input("user", "first"),
+                _make_msg_input("assistant", "second"),
+                _make_msg_input("user", "third"),
+            ],
+        )
 
         messages = await storage.get_messages(workspace_id, "t-order")
 
@@ -333,10 +336,14 @@ class TestChatMessageStorage:
         thread = _make_thread(workspace_id, thread_id="t-cascade")
         await storage.create_thread(thread)
 
-        await storage.append_messages(workspace_id, "t-cascade", [
-            _make_msg_input("user", "will be gone"),
-            _make_msg_input("assistant", "also gone"),
-        ])
+        await storage.append_messages(
+            workspace_id,
+            "t-cascade",
+            [
+                _make_msg_input("user", "will be gone"),
+                _make_msg_input("assistant", "also gone"),
+            ],
+        )
 
         # Confirm messages exist before deletion
         before = await storage.get_messages(workspace_id, "t-cascade")

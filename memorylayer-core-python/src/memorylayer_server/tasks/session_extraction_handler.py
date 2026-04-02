@@ -1,14 +1,14 @@
 """Session extraction task handler for on-demand token-budget-triggered extraction."""
+
 import json
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ..services.tasks import TaskHandlerPlugin, TaskSchedule
+from ..models import MemoryType, RememberInput
 from ..services._constants import EXT_MEMORY_SERVICE, EXT_SESSION_SERVICE
-from ..models import RememberInput, MemoryType
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 
 
 class SessionExtractionTaskHandler(TaskHandlerPlugin):
@@ -24,32 +24,33 @@ class SessionExtractionTaskHandler(TaskHandlerPlugin):
     """
 
     def get_task_type(self) -> str:
-        return 'session_extraction'
+        return "session_extraction"
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         # No recurring schedule - triggered on-demand by token budget logic
         return None
 
     async def handle(self, v: Variables, payload: dict) -> None:
         logger: Logger = get_logger(v, name=self.get_task_type())
 
-        workspace_id = payload.get('workspace_id')
-        session_id = payload.get('session_id')
-        context_id = payload.get('context_id')
+        workspace_id = payload.get("workspace_id")
+        session_id = payload.get("session_id")
+        context_id = payload.get("context_id")
 
         if not workspace_id or not session_id:
             logger.warning(
                 "Missing required payload fields: workspace_id=%s, session_id=%s",
-                workspace_id, session_id,
+                workspace_id,
+                session_id,
             )
             return
 
-        from ..services.session import SessionService
-        from ..services.memory import MemoryService
         from ..config import (
-            MEMORYLAYER_SESSION_TOKEN_BUDGET_TOTAL,
             DEFAULT_MEMORYLAYER_SESSION_TOKEN_BUDGET_TOTAL,
+            MEMORYLAYER_SESSION_TOKEN_BUDGET_TOTAL,
         )
+        from ..services.memory import MemoryService
+        from ..services.session import SessionService
 
         session_service: SessionService = self.get_extension(EXT_SESSION_SERVICE, v)
         memory_service: MemoryService = self.get_extension(EXT_MEMORY_SERVICE, v)
@@ -66,7 +67,9 @@ class SessionExtractionTaskHandler(TaskHandlerPlugin):
         except Exception as e:
             logger.warning(
                 "Failed to fetch working memory for session %s in workspace %s: %s",
-                session_id, workspace_id, e,
+                session_id,
+                workspace_id,
+                e,
             )
             return
 
@@ -76,7 +79,9 @@ class SessionExtractionTaskHandler(TaskHandlerPlugin):
 
         logger.info(
             "Extracting %d working memory entries for session %s (token budget: %d)",
-            len(working_memory_entries), session_id, token_budget,
+            len(working_memory_entries),
+            session_id,
+            token_budget,
         )
 
         # Extract entries respecting the token budget
@@ -90,7 +95,8 @@ class SessionExtractionTaskHandler(TaskHandlerPlugin):
             if tokens_used + entry_tokens > token_budget:
                 logger.debug(
                     "Token budget (%d) reached after %d entries, stopping extraction",
-                    token_budget, extracted_count,
+                    token_budget,
+                    extracted_count,
                 )
                 break
 
@@ -99,9 +105,9 @@ class SessionExtractionTaskHandler(TaskHandlerPlugin):
                 type=MemoryType.WORKING,
                 importance=0.5,
                 metadata={
-                    'session_id': session_id,
-                    'working_memory_key': wm.key,
-                    'extraction_trigger': 'token_budget',
+                    "session_id": session_id,
+                    "working_memory_key": wm.key,
+                    "extraction_trigger": "token_budget",
                 },
                 context_id=context_id,
             )
@@ -115,15 +121,21 @@ class SessionExtractionTaskHandler(TaskHandlerPlugin):
                 extracted_count += 1
                 logger.debug(
                     "Extracted working memory key '%s' as memory %s",
-                    wm.key, memory.id,
+                    wm.key,
+                    memory.id,
                 )
             except Exception as e:
                 logger.warning(
                     "Failed to extract working memory key '%s' for session %s: %s",
-                    wm.key, session_id, e,
+                    wm.key,
+                    session_id,
+                    e,
                 )
 
         logger.info(
             "Session extraction complete for %s: %d/%d entries extracted (%d tokens)",
-            session_id, extracted_count, len(working_memory_entries), tokens_used,
+            session_id,
+            extracted_count,
+            len(working_memory_entries),
+            tokens_used,
         )

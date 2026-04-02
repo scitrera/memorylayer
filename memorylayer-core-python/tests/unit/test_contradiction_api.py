@@ -1,7 +1,8 @@
 """Tests for contradiction API endpoints."""
+
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from memorylayer_server.models.memory import RememberInput
 from memorylayer_server.services.contradiction.base import ContradictionRecord
@@ -33,9 +34,7 @@ class TestListContradictions:
         assert "count" in data
         assert data["count"] == 0
 
-    async def test_list_contradictions_with_data(
-            self, async_client, storage_backend, workspace_id
-    ):
+    async def test_list_contradictions_with_data(self, async_client, storage_backend, workspace_id):
         """Should return unresolved contradictions."""
         # Create real memories for FK constraints
         input_a = RememberInput(content="API test memory A", importance=0.5)
@@ -64,9 +63,7 @@ class TestListContradictions:
         found = any(c["id"] == record.id for c in data["contradictions"])
         assert found
 
-    async def test_list_contradictions_with_limit(
-            self, async_client, workspace_id
-    ):
+    async def test_list_contradictions_with_limit(self, async_client, workspace_id):
         """Limit parameter should be respected."""
         response = await async_client.get(
             f"/v1/workspaces/{workspace_id}/contradictions?limit=1",
@@ -81,9 +78,7 @@ class TestListContradictions:
 class TestResolveContradiction:
     """Test POST /v1/contradictions/{contradiction_id}/resolve endpoint."""
 
-    async def test_resolve_keep_both(
-            self, async_client, storage_backend, workspace_id
-    ):
+    async def test_resolve_keep_both(self, async_client, storage_backend, workspace_id):
         """Resolve a contradiction with keep_both strategy."""
         # Create real memories for FK constraints
         input_a = RememberInput(content="Resolve API test A", importance=0.5)
@@ -111,9 +106,7 @@ class TestResolveContradiction:
         assert data["id"] == stored.id
         assert data["resolution"] == "keep_both"
 
-    async def test_resolve_invalid_strategy(
-            self, async_client, workspace_id
-    ):
+    async def test_resolve_invalid_strategy(self, async_client, workspace_id):
         """Invalid resolution strategy should return 400."""
         response = await async_client.post(
             "/v1/contradictions/contra_fake/resolve",
@@ -122,9 +115,7 @@ class TestResolveContradiction:
         )
         assert response.status_code == 400
 
-    async def test_resolve_merge_without_content(
-            self, async_client, workspace_id
-    ):
+    async def test_resolve_merge_without_content(self, async_client, workspace_id):
         """Merge without merged_content should return 400."""
         response = await async_client.post(
             "/v1/contradictions/contra_fake/resolve",
@@ -133,9 +124,7 @@ class TestResolveContradiction:
         )
         assert response.status_code == 400
 
-    async def test_resolve_nonexistent_contradiction(
-            self, async_client, workspace_id
-    ):
+    async def test_resolve_nonexistent_contradiction(self, async_client, workspace_id):
         """Resolving nonexistent contradiction should return 404."""
         response = await async_client.post(
             "/v1/contradictions/contra_nonexistent_xxx/resolve",

@@ -1,6 +1,6 @@
 """No-op metrics service - discards all observations (OSS default)."""
+
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework.api import Variables
 
@@ -22,7 +22,8 @@ class NoopMetricsService(MetricsService):
 
 class NoopMetricsServicePlugin(MetricsServicePluginBase):
     """Plugin for no-op metrics service."""
-    PROVIDER_NAME = 'noop'
 
-    def initialize(self, v: Variables, logger: Logger) -> Optional[NoopMetricsService]:
+    PROVIDER_NAME = "noop"
+
+    def initialize(self, v: Variables, logger: Logger) -> NoopMetricsService | None:
         return NoopMetricsService()

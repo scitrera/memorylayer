@@ -6,18 +6,18 @@ from fastapi import Depends, Request
 from scitrera_app_framework import Variables, get_extension
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
-from ...services.tasks import TaskService, EXT_TASK_SERVICE
-from ...services.authentication import AuthenticationService, EXT_AUTHENTICATION_SERVICE
-from ...services.authorization import AuthorizationService, EXT_AUTHORIZATION_SERVICE
-from ...services.session import SessionService, EXT_SESSION_SERVICE
-from ...services.workspace import WorkspaceService, EXT_WORKSPACE_SERVICE
-from ...services.memory import MemoryService, EXT_MEMORY_SERVICE
-from ...services.inference import DefaultInferenceService, EXT_INFERENCE_SERVICE
+from ...services.audit import EXT_AUDIT_SERVICE, AuditService
+from ...services.authentication import EXT_AUTHENTICATION_SERVICE, AuthenticationService
+from ...services.authorization import EXT_AUTHORIZATION_SERVICE, AuthorizationService
+from ...services.cache import EXT_CACHE_SERVICE, CacheService
+from ...services.chat import EXT_CHAT_SERVICE, ChatService
+from ...services.inference import EXT_INFERENCE_SERVICE, DefaultInferenceService
+from ...services.memory import EXT_MEMORY_SERVICE, MemoryService
+from ...services.metrics import EXT_METRICS_SERVICE, MetricsService
 from ...services.reflect import EXT_REFLECT_SERVICE
-from ...services.cache import CacheService, EXT_CACHE_SERVICE
-from ...services.chat import ChatService, EXT_CHAT_SERVICE
-from ...services.audit import AuditService, EXT_AUDIT_SERVICE
-from ...services.metrics import MetricsService, EXT_METRICS_SERVICE
+from ...services.session import EXT_SESSION_SERVICE, SessionService
+from ...services.tasks import EXT_TASK_SERVICE, TaskService
+from ...services.workspace import EXT_WORKSPACE_SERVICE, WorkspaceService
 from ...tasks.session_touch_handler import SESSION_TOUCH_HANDLER_TASK
 
 
@@ -26,9 +26,9 @@ async def get_task_service(v: Variables = Depends(get_variables_dep)) -> TaskSer
 
 
 async def get_active_session(
-        http_request: Request,
-        task_service: TaskService = Depends(get_task_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    task_service: TaskService = Depends(get_task_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> str | None:
     session_id = http_request.headers.get("X-Session-ID")
     if not session_id:

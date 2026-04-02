@@ -4,13 +4,13 @@ Tier Generation Task Handler.
 Background task handler for generating memory tiers (abstract, overview)
 via the TaskService infrastructure.
 """
+
 from logging import Logger
-from typing import Optional
 
-from scitrera_app_framework import get_logger, Variables
+from scitrera_app_framework import Variables, get_logger
 
+from ..services.semantic_tiering import EXT_SEMANTIC_TIERING_SERVICE, SemanticTieringService
 from ..services.tasks import TaskHandlerPlugin, TaskSchedule
-from ..services.semantic_tiering import SemanticTieringService, EXT_SEMANTIC_TIERING_SERVICE
 
 
 class TierGenerationTaskHandler(TaskHandlerPlugin):
@@ -22,14 +22,14 @@ class TierGenerationTaskHandler(TaskHandlerPlugin):
     """
 
     def get_task_type(self) -> str:
-        return 'generate_tiers'
+        return "generate_tiers"
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         return None  # On-demand only, not recurring
 
     async def handle(self, v: Variables, payload: dict) -> None:
-        memory_id = payload['memory_id']
-        workspace_id = payload['workspace_id']
+        memory_id = payload["memory_id"]
+        workspace_id = payload["workspace_id"]
 
         tier_service: SemanticTieringService = self.get_extension(EXT_SEMANTIC_TIERING_SERVICE, v)
         logger: Logger = get_logger(v, name=self.get_task_type())

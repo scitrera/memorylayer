@@ -3,15 +3,27 @@ Core domain models for MemoryLayer.ai.
 
 Exports all Pydantic models for memory, associations, workspaces, and sessions.
 """
+
 from .association import (
-    Association,
+    KNOWN_RELATIONSHIP_TYPES,
     AssociateInput,
+    Association,
     GraphPath,
     GraphQueryInput,
     GraphQueryResult,
-    KNOWN_RELATIONSHIP_TYPES,
     RelationshipCategory,
     get_relationship_category,
+)
+from .auth import AuthIdentity, RequestContext
+from .chat import (
+    AppendMessagesInput,
+    ChatMessage,
+    ChatMessageContent,
+    ChatThread,
+    ChatThreadWithMessages,
+    CreateThreadInput,
+    DecompositionResult,
+    MessageInput,
 )
 from .memory import (
     DetailLevel,
@@ -36,17 +48,6 @@ from .session import (
     SessionBriefing,
     WorkingMemory,
     WorkspaceSummary,
-)
-from .auth import AuthIdentity, RequestContext
-from .chat import (
-    ChatMessage,
-    ChatMessageContent,
-    ChatThread,
-    ChatThreadWithMessages,
-    CreateThreadInput,
-    AppendMessagesInput,
-    MessageInput,
-    DecompositionResult,
 )
 from .workspace import (
     Context,

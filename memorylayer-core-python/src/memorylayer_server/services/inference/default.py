@@ -3,23 +3,27 @@ Inference Service - Default LLM-based implementation.
 
 Derives higher-order insights from accumulated memories about entities.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from .base import InferenceServicePluginBase, InferenceResult
-from ..storage import StorageBackend, EXT_STORAGE_BACKEND
-from ..memory import MemoryService, EXT_MEMORY_SERVICE
-from ..association import AssociationService, EXT_ASSOCIATION_SERVICE
-from ..cache import CacheService, EXT_CACHE_SERVICE
-from ..llm import LLMService, EXT_LLM_SERVICE, LLMNotConfiguredError
 from ...models import (
-    Memory, RememberInput, RecallInput, RecallMode,
-    MemoryType, MemorySubtype, MemoryStatus,
+    Memory,
+    MemorySubtype,
+    MemoryType,
+    RecallInput,
+    RecallMode,
+    RememberInput,
 )
+from ..association import EXT_ASSOCIATION_SERVICE, AssociationService
+from ..cache import EXT_CACHE_SERVICE, CacheService
+from ..llm import EXT_LLM_SERVICE, LLMNotConfiguredError, LLMService
+from ..memory import EXT_MEMORY_SERVICE, MemoryService
+from ..storage import EXT_STORAGE_BACKEND, StorageBackend
+from .base import InferenceResult, InferenceServicePluginBase
 
 # Cache TTL for insights (15 minutes)
 INSIGHTS_CACHE_TTL = 900
@@ -47,13 +51,13 @@ class DefaultInferenceService:
     """LLM-based inference service that derives insights from memory patterns."""
 
     def __init__(
-            self,
-            storage: StorageBackend,
-            memory_service: MemoryService,
-            llm_service: Optional[LLMService] = None,
-            association_service: Optional[AssociationService] = None,
-            cache_service: Optional[CacheService] = None,
-            v: Variables = None,
+        self,
+        storage: StorageBackend,
+        memory_service: MemoryService,
+        llm_service: LLMService | None = None,
+        association_service: AssociationService | None = None,
+        cache_service: CacheService | None = None,
+        v: Variables = None,
     ):
         self.storage = storage
         self.memory_service = memory_service
@@ -64,16 +68,15 @@ class DefaultInferenceService:
         self.logger.info("Initialized DefaultInferenceService")
 
     async def derive_insights(
-            self,
-            workspace_id: str,
-            subject_id: str,
-            observer_id: Optional[str] = None,
-            force: bool = False,
+        self,
+        workspace_id: str,
+        subject_id: str,
+        observer_id: str | None = None,
+        force: bool = False,
     ) -> InferenceResult:
         """Derive higher-order insights about a subject from accumulated memories."""
         self.logger.info(
-            "Deriving insights for subject=%s in workspace=%s (observer=%s, force=%s)",
-            subject_id, workspace_id, observer_id, force
+            "Deriving insights for subject=%s in workspace=%s (observer=%s, force=%s)", subject_id, workspace_id, observer_id, force
         )
 
         # Check cache unless forced
@@ -94,9 +97,7 @@ class DefaultInferenceService:
                 )
 
         # Recall all memories about this subject
-        source_memories = await self._gather_subject_memories(
-            workspace_id, subject_id, observer_id
-        )
+        source_memories = await self._gather_subject_memories(workspace_id, subject_id, observer_id)
 
         if not source_memories:
             self.logger.info("No memories found for subject=%s, skipping inference", subject_id)
@@ -106,9 +107,7 @@ class DefaultInferenceService:
                 source_memory_count=0,
             )
 
-        self.logger.debug(
-            "Gathered %d source memories for subject=%s", len(source_memories), subject_id
-        )
+        self.logger.debug("Gathered %d source memories for subject=%s", len(source_memories), subject_id)
 
         # Derive insights via LLM
         raw_insights = await self._derive_with_llm(source_memories, subject_id)
@@ -149,18 +148,17 @@ class DefaultInferenceService:
         )
 
         self.logger.info(
-            "Derived %d insights for subject=%s from %d source memories",
-            len(created_insights), subject_id, len(source_memories)
+            "Derived %d insights for subject=%s from %d source memories", len(created_insights), subject_id, len(source_memories)
         )
 
         return result
 
     async def get_insights(
-            self,
-            workspace_id: str,
-            subject_id: str,
-            observer_id: Optional[str] = None,
-            limit: int = 20,
+        self,
+        workspace_id: str,
+        subject_id: str,
+        observer_id: str | None = None,
+        limit: int = 20,
     ) -> list[Memory]:
         """Retrieve existing derived insights about a subject."""
         # Search for INFERENCE-subtype memories about this subject
@@ -188,10 +186,10 @@ class DefaultInferenceService:
             return []
 
     async def _gather_subject_memories(
-            self,
-            workspace_id: str,
-            subject_id: str,
-            observer_id: Optional[str] = None,
+        self,
+        workspace_id: str,
+        subject_id: str,
+        observer_id: str | None = None,
     ) -> list[Memory]:
         """Gather all memories about a subject for analysis."""
         # Use a broad query to get all relevant memories
@@ -214,18 +212,15 @@ class DefaultInferenceService:
                 input=recall_input,
             )
             # Exclude existing inferences to avoid circular derivation
-            return [
-                m for m in result.memories
-                if m.subtype != MemorySubtype.INFERENCE
-            ]
+            return [m for m in result.memories if m.subtype != MemorySubtype.INFERENCE]
         except Exception as e:
             self.logger.error("Failed to gather memories for subject=%s: %s", subject_id, e)
             return []
 
     async def _derive_with_llm(
-            self,
-            memories: list[Memory],
-            subject_id: str,
+        self,
+        memories: list[Memory],
+        subject_id: str,
     ) -> list[tuple[float, str]]:
         """Use LLM to derive insights from memories."""
         if not self.llm:
@@ -237,9 +232,7 @@ class DefaultInferenceService:
         for i, memory in enumerate(memories[:50], 1):  # Cap at 50 memories
             type_label = memory.type.value.upper()
             subtype_label = f" ({memory.subtype.value})" if memory.subtype else ""
-            context_parts.append(
-                f"[{i}] {type_label}{subtype_label}: {memory.content}"
-            )
+            context_parts.append(f"[{i}] {type_label}{subtype_label}: {memory.content}")
 
         context = "\n".join(context_parts)
 
@@ -281,7 +274,7 @@ Output each insight on its own line with an importance score."""
                     bracket_end = line.index("]")
                     importance = float(line[1:bracket_end])
                     importance = max(0.0, min(1.0, importance))
-                    text = line[bracket_end + 1:].strip()
+                    text = line[bracket_end + 1 :].strip()
                     if text:
                         insights.append((importance, text))
                 except (ValueError, IndexError):
@@ -293,9 +286,9 @@ Output each insight on its own line with an importance score."""
         return insights
 
     def _derive_fallback(
-            self,
-            memories: list[Memory],
-            subject_id: str,
+        self,
+        memories: list[Memory],
+        subject_id: str,
     ) -> list[tuple[float, str]]:
         """Simple fallback inference without LLM.
 
@@ -318,11 +311,7 @@ Output each insight on its own line with an importance score."""
         for type_name, type_memories in by_type.items():
             if len(type_memories) >= 2:
                 importance = min(0.8, 0.3 + (len(type_memories) * 0.05))
-                insights.append((
-                    importance,
-                    f"Has {len(type_memories)} {type_name} memories indicating "
-                    f"significant {type_name} patterns"
-                ))
+                insights.append((importance, f"Has {len(type_memories)} {type_name} memories indicating significant {type_name} patterns"))
 
         # Group by subtype for more specific insights
         by_subtype: dict[str, list[Memory]] = {}
@@ -336,23 +325,19 @@ Output each insight on its own line with an importance score."""
         for subtype_name, subtype_memories in by_subtype.items():
             if len(subtype_memories) >= 2:
                 importance = min(0.9, 0.4 + (len(subtype_memories) * 0.05))
-                insights.append((
-                    importance,
-                    f"Recurring {subtype_name} pattern observed across "
-                    f"{len(subtype_memories)} memories"
-                ))
+                insights.append((importance, f"Recurring {subtype_name} pattern observed across {len(subtype_memories)} memories"))
 
         return insights[:10]  # Cap at 10 insights
 
     async def _store_insight(
-            self,
-            workspace_id: str,
-            subject_id: str,
-            observer_id: Optional[str],
-            content: str,
-            importance: float,
-            source_memory_ids: list[str],
-    ) -> Optional[Memory]:
+        self,
+        workspace_id: str,
+        subject_id: str,
+        observer_id: str | None,
+        content: str,
+        importance: float,
+        source_memory_ids: list[str],
+    ) -> Memory | None:
         """Store a derived insight as a memory."""
         try:
             input_data = RememberInput(
@@ -363,7 +348,7 @@ Output each insight on its own line with an importance score."""
                 tags=["inference", "derived"],
                 metadata={
                     "source_memory_count": len(source_memory_ids),
-                    "derived_at": datetime.now(timezone.utc).isoformat(),
+                    "derived_at": datetime.now(UTC).isoformat(),
                 },
                 observer_id=observer_id,
                 subject_id=subject_id,
@@ -379,6 +364,7 @@ Output each insight on its own line with an importance score."""
                 for source_id in source_memory_ids[:5]:  # Cap associations
                     try:
                         from ...models.association import AssociateInput
+
                         await self.association_service.create_association(
                             workspace_id=workspace_id,
                             input_data=AssociateInput(
@@ -398,14 +384,15 @@ Output each insight on its own line with an importance score."""
             return None
 
     @staticmethod
-    def _cache_key(workspace_id: str, subject_id: str, observer_id: Optional[str]) -> str:
+    def _cache_key(workspace_id: str, subject_id: str, observer_id: str | None) -> str:
         obs = observer_id or "_any"
         return f"inference:{workspace_id}:{subject_id}:{obs}"
 
 
 class DefaultInferenceServicePlugin(InferenceServicePluginBase):
     """Default inference service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> DefaultInferenceService:
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)

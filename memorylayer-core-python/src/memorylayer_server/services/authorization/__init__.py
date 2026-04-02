@@ -1,11 +1,12 @@
 """Authorization service package."""
-from .base import (
-    AuthorizationService,
-    AuthorizationServicePluginBase,
-    EXT_AUTHORIZATION_SERVICE,
-)
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    EXT_AUTHORIZATION_SERVICE,
+    AuthorizationService,
+    AuthorizationServicePluginBase,
+)
 
 
 def get_authorization_service(v: Variables = None) -> AuthorizationService:
@@ -14,8 +15,8 @@ def get_authorization_service(v: Variables = None) -> AuthorizationService:
 
 
 __all__ = (
-    'AuthorizationService',
-    'AuthorizationServicePluginBase',
-    'get_authorization_service',
-    'EXT_AUTHORIZATION_SERVICE',
+    "AuthorizationService",
+    "AuthorizationServicePluginBase",
+    "get_authorization_service",
+    "EXT_AUTHORIZATION_SERVICE",
 )

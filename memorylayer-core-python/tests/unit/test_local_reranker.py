@@ -1,9 +1,10 @@
 """Unit tests for local sentence-transformers CrossEncoder reranker."""
+
 import math
-import pytest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 
 def _sigmoid(x):
@@ -16,6 +17,7 @@ class TestLocalRerankerProvider:
     @pytest.fixture
     def provider(self):
         from memorylayer_server.services.reranker.local.provider import LocalRerankerProvider
+
         return LocalRerankerProvider(
             model_name="cross-encoder/ms-marco-MiniLM-L-6-v2",
         )
@@ -106,12 +108,12 @@ class TestLocalRerankerProvider:
     @pytest.mark.asyncio
     async def test_preload_loads_model(self, provider):
         mock_model = MagicMock()
-        with patch.object(provider, '_get_model', return_value=mock_model) as mock_get:
+        with patch.object(provider, "_get_model", return_value=mock_model) as mock_get:
             await provider.preload()
             mock_get.assert_called_once()
 
     def test_lazy_client_import_error(self, provider):
-        with patch.dict('sys.modules', {'sentence_transformers': None}):
+        with patch.dict("sys.modules", {"sentence_transformers": None}):
             provider._model = None
             with pytest.raises(ImportError, match="sentence-transformers package not installed"):
                 provider._get_model()
@@ -122,14 +124,17 @@ class TestSigmoid:
 
     def test_sigmoid_zero(self):
         from memorylayer_server.services.reranker.local.provider import _sigmoid
+
         assert _sigmoid(0.0) == pytest.approx(0.5)
 
     def test_sigmoid_large_positive(self):
         from memorylayer_server.services.reranker.local.provider import _sigmoid
+
         assert _sigmoid(10.0) == pytest.approx(1.0, abs=1e-4)
 
     def test_sigmoid_large_negative(self):
         from memorylayer_server.services.reranker.local.provider import _sigmoid
+
         assert _sigmoid(-10.0) == pytest.approx(0.0, abs=1e-4)
 
 
@@ -137,12 +142,14 @@ class TestLocalRerankerProviderPlugin:
     """Tests for LocalRerankerProviderPlugin."""
 
     def test_plugin_provider_name(self):
-        from memorylayer_server.services.reranker.local.provider import LocalRerankerProviderPlugin
         from memorylayer_server.config import RerankerProviderType
+        from memorylayer_server.services.reranker.local.provider import LocalRerankerProviderPlugin
+
         plugin = LocalRerankerProviderPlugin()
         assert plugin.PROVIDER_NAME == RerankerProviderType.LOCAL
 
     def test_plugin_name(self):
         from memorylayer_server.services.reranker.local.provider import LocalRerankerProviderPlugin
+
         plugin = LocalRerankerProviderPlugin()
-        assert 'local' in plugin.name().lower()
+        assert "local" in plugin.name().lower()

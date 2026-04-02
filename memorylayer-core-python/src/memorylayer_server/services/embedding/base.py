@@ -1,27 +1,28 @@
 import base64
-from logging import Logger
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from logging import Logger
 from pathlib import Path
-from typing import Optional, Union
 
-from scitrera_app_framework.api import Variables, Plugin, enabled_option_pattern
-from scitrera_app_framework import get_extension, get_logger, ext_parse_bool
-
-from .._plugin_factory import make_service_plugin_base
+from scitrera_app_framework import ext_parse_bool, get_logger
+from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import (
-    MEMORYLAYER_EMBEDDING_PROVIDER, DEFAULT_MEMORYLAYER_EMBEDDING_PROVIDER,
-    MEMORYLAYER_EMBEDDING_SERVICE, DEFAULT_MEMORYLAYER_EMBEDDING_SERVICE,
-    MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED, DEFAULT_MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED
+    DEFAULT_MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED,
+    DEFAULT_MEMORYLAYER_EMBEDDING_PROVIDER,
+    DEFAULT_MEMORYLAYER_EMBEDDING_SERVICE,
+    MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED,
+    MEMORYLAYER_EMBEDDING_PROVIDER,
+    MEMORYLAYER_EMBEDDING_SERVICE,
 )
 from .._constants import EXT_CACHE_SERVICE, EXT_EMBEDDING_PROVIDER, EXT_EMBEDDING_SERVICE
+from .._plugin_factory import make_service_plugin_base
 
 
 class EmbeddingType(str, Enum):
     """Type of content being embedded."""
+
     TEXT = "text"
     IMAGE = "image"
     MULTIMODAL = "multimodal"  # Combined text + image
@@ -30,8 +31,9 @@ class EmbeddingType(str, Enum):
 @dataclass
 class EmbeddingInput:
     """Input for embedding generation, supporting multimodal content."""
-    text: Optional[str] = None
-    image: Optional[Union[str, bytes, Path]] = None  # Base64, bytes, URL, or file path
+
+    text: str | None = None
+    image: str | bytes | Path | None = None  # Base64, bytes, URL, or file path
 
     def __post_init__(self):
         if not self.text and not self.image:
@@ -58,7 +60,7 @@ class EmbeddingInput:
 class EmbeddingProvider(ABC):
     """Abstract embedding provider."""
 
-    def __init__(self, v: Variables = None, output_dimensions: Optional[int] = None):
+    def __init__(self, v: Variables = None, output_dimensions: int | None = None):
         self._dimensions = output_dimensions
         self.logger = get_logger(v, name=self.__class__.__name__)
 
@@ -95,16 +97,12 @@ class MultimodalEmbeddingProvider(EmbeddingProvider):
     """
 
     @abstractmethod
-    async def embed_image(self, image: Union[str, bytes, Path]) -> list[float]:
+    async def embed_image(self, image: str | bytes | Path) -> list[float]:
         """Generate embedding for an image."""
         pass
 
     @abstractmethod
-    async def embed_multimodal(
-            self,
-            text: Optional[str] = None,
-            image: Optional[Union[str, bytes, Path]] = None
-    ) -> list[float]:
+    async def embed_multimodal(self, text: str | None = None, image: str | bytes | Path | None = None) -> list[float]:
         """Generate embedding for combined text and image."""
         pass
 
@@ -118,7 +116,7 @@ class MultimodalEmbeddingProvider(EmbeddingProvider):
             return await self.embed_multimodal(input.text, input.image)
 
     @staticmethod
-    def load_image_bytes(image: Union[str, bytes, Path]) -> bytes:
+    def load_image_bytes(image: str | bytes | Path) -> bytes:
         """Load image as bytes from various input formats."""
         if isinstance(image, bytes):
             return image
@@ -133,6 +131,7 @@ class MultimodalEmbeddingProvider(EmbeddingProvider):
             elif image.startswith(("http://", "https://")):
                 # URL - download
                 import urllib.request
+
                 with urllib.request.urlopen(image) as response:
                     return response.read()
             elif len(image) > 500 and not Path(image).exists():
@@ -147,7 +146,8 @@ class MultimodalEmbeddingProvider(EmbeddingProvider):
 # noinspection PyAbstractClass
 class EmbeddingProviderPluginBase(Plugin):
     """Base Plugin Implementation for embedding providers."""
-    PROVIDER_NAME: str = ''
+
+    PROVIDER_NAME: str = ""
 
     def name(self) -> str:
         return f"{EXT_EMBEDDING_PROVIDER}|{self.PROVIDER_NAME}"
@@ -156,7 +156,7 @@ class EmbeddingProviderPluginBase(Plugin):
         return EXT_EMBEDDING_PROVIDER
 
     def is_enabled(self, v: Variables) -> bool:
-        return enabled_option_pattern(self, v, MEMORYLAYER_EMBEDDING_PROVIDER, self_attr='PROVIDER_NAME')
+        return enabled_option_pattern(self, v, MEMORYLAYER_EMBEDDING_PROVIDER, self_attr="PROVIDER_NAME")
 
     def on_registration(self, v: Variables) -> None:
         v.set_default_value(MEMORYLAYER_EMBEDDING_PROVIDER, DEFAULT_MEMORYLAYER_EMBEDDING_PROVIDER)
@@ -164,8 +164,9 @@ class EmbeddingProviderPluginBase(Plugin):
     async def async_ready(self, v: Variables, logger: Logger, value: object | None) -> None:
         # noinspection PyTypeChecker
         embedding_provider: EmbeddingProvider = value
-        preload = v.environ(MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED,
-                            default=DEFAULT_MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED, type_fn=ext_parse_bool)
+        preload = v.environ(
+            MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED, default=DEFAULT_MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED, type_fn=ext_parse_bool
+        )
 
         # initiate preload if implemented in the embedding provider
         if preload:

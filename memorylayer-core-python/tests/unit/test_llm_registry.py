@@ -1,25 +1,30 @@
 """Unit tests for LLM Provider Registry."""
+
 import os
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from scitrera_app_framework.api import Variables
 
+from memorylayer_server.models.llm import (
+    LLMMessage,
+    LLMRequest,
+    LLMResponse,
+    LLMRole,
+    LLMStreamChunk,
+)
+from memorylayer_server.services.llm.noop import NoOpLLMProvider
 from memorylayer_server.services.llm.registry import (
-    LLMProviderRegistry,
     DefaultLLMProviderRegistryPlugin,
+    LLMProviderRegistry,
     create_provider_from_config,
 )
 from memorylayer_server.services.llm.service_default import LLMService
-from memorylayer_server.services.llm.noop import NoOpLLMProvider, LLMNotConfiguredError
-from memorylayer_server.models.llm import (
-    LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk,
-)
-
 
 # ============================================
 # Helper factories
 # ============================================
+
 
 def _mock_provider(name: str = "mock") -> AsyncMock:
     """Create a mock LLMProvider with standard defaults."""
@@ -53,6 +58,7 @@ def _make_request() -> LLMRequest:
 # ============================================
 # LLMProviderRegistry Tests
 # ============================================
+
 
 class TestLLMProviderRegistry:
     """Tests for LLMProviderRegistry."""
@@ -173,6 +179,7 @@ class TestLLMProviderRegistry:
 # create_provider_from_config Tests
 # ============================================
 
+
 class TestCreateProviderFromConfig:
     """Tests for create_provider_from_config factory function."""
 
@@ -186,6 +193,7 @@ class TestCreateProviderFromConfig:
             base_url="https://api.example.com",
         )
         from memorylayer_server.services.llm.openai import OpenAILLMProvider
+
         assert isinstance(provider, OpenAILLMProvider)
         assert provider.model == "gpt-4o-mini"
         assert provider.api_key == "test-key"
@@ -200,6 +208,7 @@ class TestCreateProviderFromConfig:
             api_key="test-key",
         )
         from memorylayer_server.services.llm.anthropic import AnthropicLLMProvider
+
         assert isinstance(provider, AnthropicLLMProvider)
         assert provider.model == "claude-sonnet-4-20250514"
         assert provider.api_key == "test-key"
@@ -213,6 +222,7 @@ class TestCreateProviderFromConfig:
             api_key="test-key",
         )
         from memorylayer_server.services.llm.google import GoogleLLMProvider
+
         assert isinstance(provider, GoogleLLMProvider)
         assert provider.model == "gemini-3-flash-preview"
         assert provider.api_key == "test-key"
@@ -251,6 +261,7 @@ class TestCreateProviderFromConfig:
 # DefaultLLMProviderRegistryPlugin Tests
 # ============================================
 
+
 class TestDefaultLLMProviderRegistryPlugin:
     """Tests for DefaultLLMProviderRegistryPlugin environment discovery."""
 
@@ -259,11 +270,15 @@ class TestDefaultLLMProviderRegistryPlugin:
         """Create a real Variables instance that reads from os.environ."""
         return Variables()
 
-    @patch.dict(os.environ, {
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER': 'openai',
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL': 'gpt-4o-mini',
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_API_KEY': 'test-key',
-    }, clear=False)
+    @patch.dict(
+        os.environ,
+        {
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER": "openai",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL": "gpt-4o-mini",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_API_KEY": "test-key",
+        },
+        clear=False,
+    )
     def test_discover_single_profile(self):
         """One DEFAULT profile creates one provider."""
         plugin = DefaultLLMProviderRegistryPlugin()
@@ -275,17 +290,21 @@ class TestDefaultLLMProviderRegistryPlugin:
         assert "default" in registry.profile_names
         assert len(registry.profile_names) == 1
 
-    @patch.dict(os.environ, {
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER': 'openai',
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL': 'gpt-4o-mini',
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_API_KEY': 'test-key',
-        'MEMORYLAYER_LLM_PROFILE_CHEAP_PROVIDER': 'openai',
-        'MEMORYLAYER_LLM_PROFILE_CHEAP_MODEL': 'gpt-4o-mini',
-        'MEMORYLAYER_LLM_PROFILE_CHEAP_API_KEY': 'test-key-2',
-        'MEMORYLAYER_LLM_PROFILE_REASONING_PROVIDER': 'anthropic',
-        'MEMORYLAYER_LLM_PROFILE_REASONING_MODEL': 'claude-sonnet-4-20250514',
-        'MEMORYLAYER_LLM_PROFILE_REASONING_API_KEY': 'test-key-3',
-    }, clear=False)
+    @patch.dict(
+        os.environ,
+        {
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER": "openai",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL": "gpt-4o-mini",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_API_KEY": "test-key",
+            "MEMORYLAYER_LLM_PROFILE_CHEAP_PROVIDER": "openai",
+            "MEMORYLAYER_LLM_PROFILE_CHEAP_MODEL": "gpt-4o-mini",
+            "MEMORYLAYER_LLM_PROFILE_CHEAP_API_KEY": "test-key-2",
+            "MEMORYLAYER_LLM_PROFILE_REASONING_PROVIDER": "anthropic",
+            "MEMORYLAYER_LLM_PROFILE_REASONING_MODEL": "claude-sonnet-4-20250514",
+            "MEMORYLAYER_LLM_PROFILE_REASONING_API_KEY": "test-key-3",
+        },
+        clear=False,
+    )
     def test_discover_multiple_profiles(self):
         """DEFAULT + CHEAP + REASONING profiles are all discovered."""
         plugin = DefaultLLMProviderRegistryPlugin()
@@ -310,12 +329,16 @@ class TestDefaultLLMProviderRegistryPlugin:
         provider = registry.get_provider("default")
         assert isinstance(provider, NoOpLLMProvider)
 
-    @patch.dict(os.environ, {
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER': 'noop',
-        'MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL': 'unused',
-        'MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION': 'cheap',
-        'MEMORYLAYER_LLM_ASSIGN_EMBEDDING': 'fast',
-    }, clear=False)
+    @patch.dict(
+        os.environ,
+        {
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER": "noop",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL": "unused",
+            "MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION": "cheap",
+            "MEMORYLAYER_LLM_ASSIGN_EMBEDDING": "fast",
+        },
+        clear=False,
+    )
     def test_assignment_mapping(self):
         """MEMORYLAYER_LLM_ASSIGN_* creates profile_map entries."""
         plugin = DefaultLLMProviderRegistryPlugin()
@@ -328,11 +351,15 @@ class TestDefaultLLMProviderRegistryPlugin:
         assert profile_map["tier_generation"] == "cheap"
         assert profile_map["embedding"] == "fast"
 
-    @patch.dict(os.environ, {
-        'MEMORYLAYER_LLM_PROFILE_BAD_MODEL': 'gpt-4o-mini',
-        'MEMORYLAYER_LLM_PROFILE_BAD_API_KEY': 'test-key',
-        # Missing PROVIDER
-    }, clear=True)
+    @patch.dict(
+        os.environ,
+        {
+            "MEMORYLAYER_LLM_PROFILE_BAD_MODEL": "gpt-4o-mini",
+            "MEMORYLAYER_LLM_PROFILE_BAD_API_KEY": "test-key",
+            # Missing PROVIDER
+        },
+        clear=True,
+    )
     def test_missing_provider_type_skips(self):
         """Profile without PROVIDER is skipped, falls back to NoOp default."""
         plugin = DefaultLLMProviderRegistryPlugin()
@@ -344,18 +371,21 @@ class TestDefaultLLMProviderRegistryPlugin:
         # "bad" profile should be skipped; only default (NoOp) remains
         provider = registry.get_provider("default")
         assert isinstance(provider, NoOpLLMProvider)
-        mock_logger.warning.assert_any_call(
-            "LLM profile '%s' missing PROVIDER, skipping", "bad"
-        )
+        mock_logger.warning.assert_any_call("LLM profile '%s' missing PROVIDER, skipping", "bad")
 
-    @patch.dict(os.environ, {
-        'MEMORYLAYER_LLM_PROFILE_BAD_PROVIDER': 'openai',
-        'MEMORYLAYER_LLM_PROFILE_BAD_API_KEY': 'test-key',
-        # Missing MODEL — provider uses its built-in default
-    }, clear=True)
+    @patch.dict(
+        os.environ,
+        {
+            "MEMORYLAYER_LLM_PROFILE_BAD_PROVIDER": "openai",
+            "MEMORYLAYER_LLM_PROFILE_BAD_API_KEY": "test-key",
+            # Missing MODEL — provider uses its built-in default
+        },
+        clear=True,
+    )
     def test_missing_model_uses_provider_default(self):
         """Profile without MODEL uses the provider's built-in default model."""
-        from memorylayer_server.services.llm.openai import OpenAILLMProvider, DEFAULT_LLM_OPENAI_MODEL
+        from memorylayer_server.services.llm.openai import DEFAULT_LLM_OPENAI_MODEL, OpenAILLMProvider
+
         plugin = DefaultLLMProviderRegistryPlugin()
         mock_v = self._make_v()
         mock_logger = MagicMock()
@@ -372,11 +402,11 @@ class TestDefaultLLMProviderRegistryPlugin:
         """Profiles set directly on Variables instance (no env vars) are discovered."""
         v = Variables()
         # Set profile config directly on Variables — simulates converged config
-        v.set('MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER', 'noop')
-        v.set('MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL', 'test-model')
-        v.set('MEMORYLAYER_LLM_PROFILE_FAST_PROVIDER', 'noop')
-        v.set('MEMORYLAYER_LLM_PROFILE_FAST_MODEL', 'fast-model')
-        v.set('MEMORYLAYER_LLM_ASSIGN_EXTRACTION', 'fast')
+        v.set("MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER", "noop")
+        v.set("MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL", "test-model")
+        v.set("MEMORYLAYER_LLM_PROFILE_FAST_PROVIDER", "noop")
+        v.set("MEMORYLAYER_LLM_PROFILE_FAST_MODEL", "fast-model")
+        v.set("MEMORYLAYER_LLM_ASSIGN_EXTRACTION", "fast")
 
         plugin = DefaultLLMProviderRegistryPlugin()
         mock_logger = MagicMock()
@@ -392,6 +422,7 @@ class TestDefaultLLMProviderRegistryPlugin:
 # ============================================
 # LLMService with Registry Tests
 # ============================================
+
 
 class TestLLMServiceWithRegistry:
     """Tests for LLMService profile-based routing through registry."""

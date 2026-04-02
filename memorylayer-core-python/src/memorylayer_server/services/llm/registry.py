@@ -1,12 +1,13 @@
 """LLM Provider Registry - profile-based provider routing."""
+
+from collections.abc import AsyncIterator
 from logging import Logger
-from typing import AsyncIterator
 
-from scitrera_app_framework import get_logger, Variables
+from scitrera_app_framework import Variables
 
-from .base import LLMProvider, LLMProviderRegistryPluginBase, EXT_LLM_REGISTRY
-from .noop import NoOpLLMProvider
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
+from .base import LLMProvider, LLMProviderRegistryPluginBase
+from .noop import NoOpLLMProvider
 
 
 class LLMProviderRegistry:
@@ -35,9 +36,7 @@ class LLMProviderRegistry:
         provider = self.get_provider(profile)
         return await provider.complete(request)
 
-    async def complete_stream(
-        self, request: LLMRequest, profile: str = "default"
-    ) -> AsyncIterator[LLMStreamChunk]:
+    async def complete_stream(self, request: LLMRequest, profile: str = "default") -> AsyncIterator[LLMStreamChunk]:
         """Route streaming request to the provider for the given profile."""
         provider = self.get_provider(profile)
         async for chunk in provider.complete_stream(request):
@@ -87,21 +86,34 @@ def create_provider_from_config(
 
     if provider_type == "openai":
         from .openai import OpenAILLMProvider
+
         return OpenAILLMProvider(
-            api_key=api_key, base_url=base_url, **model_kwarg,
-            default_max_tokens=max_tokens, default_temperature=temperature, v=v,
+            api_key=api_key,
+            base_url=base_url,
+            **model_kwarg,
+            default_max_tokens=max_tokens,
+            default_temperature=temperature,
+            v=v,
         )
     elif provider_type == "anthropic":
         from .anthropic import AnthropicLLMProvider
+
         return AnthropicLLMProvider(
-            api_key=api_key, **model_kwarg,
-            default_max_tokens=max_tokens, default_temperature=temperature, v=v,
+            api_key=api_key,
+            **model_kwarg,
+            default_max_tokens=max_tokens,
+            default_temperature=temperature,
+            v=v,
         )
     elif provider_type == "google":
         from .google import GoogleLLMProvider
+
         return GoogleLLMProvider(
-            api_key=api_key, **model_kwarg,
-            default_max_tokens=max_tokens, default_temperature=temperature, v=v,
+            api_key=api_key,
+            **model_kwarg,
+            default_max_tokens=max_tokens,
+            default_temperature=temperature,
+            v=v,
         )
     elif provider_type == "noop":
         return NoOpLLMProvider(v=v)
@@ -123,7 +135,8 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
     Activity-to-profile assignment uses:
         MEMORYLAYER_LLM_ASSIGN_<ACTIVITY>=<profile_name>
     """
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> LLMProviderRegistry:
         """Build LLM provider registry from environment configuration.
@@ -132,18 +145,18 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
         from either real environment variables **or** values already loaded
         into the ``Variables`` instance (converged configuration).
         """
-        known_fields = {'provider', 'base_url', 'api_key', 'model', 'max_tokens', 'temperature'}
+        known_fields = {"provider", "base_url", "api_key", "model", "max_tokens", "temperature"}
 
         # Import MEMORYLAYER_LLM_PROFILE_* into Variables and get flattened dict.
         # Keys are lowercased with prefix stripped, e.g. "default_provider".
-        profile_vars = v.import_from_env_by_prefix('MEMORYLAYER_LLM_PROFILE')
+        profile_vars = v.import_from_env_by_prefix("MEMORYLAYER_LLM_PROFILE")
 
         # Discover profile names by stripping known field suffixes from keys
         profile_names: set[str] = set()
         for key in profile_vars:
             for fld in known_fields:
-                if key.endswith(f'_{fld}'):
-                    name = key[:-(len(fld) + 1)]
+                if key.endswith(f"_{fld}"):
+                    name = key[: -(len(fld) + 1)]
                     if name:
                         profile_names.add(name)
                     break
@@ -151,53 +164,57 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
         # Build providers from discovered profiles
         providers: dict[str, LLMProvider] = {}
         for name in sorted(profile_names):
-            provider_type = profile_vars.get(f'{name}_provider')
+            provider_type = profile_vars.get(f"{name}_provider")
             if not provider_type:
                 logger.warning("LLM profile '%s' missing PROVIDER, skipping", name)
                 continue
 
-            model = profile_vars.get(f'{name}_model')  # None = provider default
+            model = profile_vars.get(f"{name}_model")  # None = provider default
 
-            max_tokens_raw = profile_vars.get(f'{name}_max_tokens')
+            max_tokens_raw = profile_vars.get(f"{name}_max_tokens")
             max_tokens = int(max_tokens_raw) if max_tokens_raw is not None else None
 
-            temp_raw = profile_vars.get(f'{name}_temperature')
+            temp_raw = profile_vars.get(f"{name}_temperature")
             temperature = float(temp_raw) if temp_raw is not None else None
 
             provider = create_provider_from_config(
-                name=name, provider_type=provider_type, model=model,
-                base_url=profile_vars.get(f'{name}_base_url'),
-                api_key=profile_vars.get(f'{name}_api_key'),
-                max_tokens=max_tokens, temperature=temperature, v=v,
+                name=name,
+                provider_type=provider_type,
+                model=model,
+                base_url=profile_vars.get(f"{name}_base_url"),
+                api_key=profile_vars.get(f"{name}_api_key"),
+                max_tokens=max_tokens,
+                temperature=temperature,
+                v=v,
             )
 
             # Post-init validation: provider must resolve to a non-None model
             if provider.default_model is None:
                 logger.warning(
                     "LLM profile '%s' (%s) resolved to model=None, skipping",
-                    name, provider_type,
+                    name,
+                    provider_type,
                 )
                 continue
 
             providers[name] = provider
             logger.info("LLM registry: profile '%s' (%s/%s)", name, provider_type, provider.default_model)
 
-        if 'default' not in providers:
+        if "default" not in providers:
             logger.info("No LLM profiles configured, using NoOp provider for 'default'")
-            providers['default'] = NoOpLLMProvider(v=v)
+            providers["default"] = NoOpLLMProvider(v=v)
 
         # Read activity-to-profile assignments via Variables
-        assign_vars = v.import_from_env_by_prefix('MEMORYLAYER_LLM_ASSIGN')
-        profile_map: dict[str, str] = {
-            activity: str(profile_name).lower()
-            for activity, profile_name in assign_vars.items()
-        }
+        assign_vars = v.import_from_env_by_prefix("MEMORYLAYER_LLM_ASSIGN")
+        profile_map: dict[str, str] = {activity: str(profile_name).lower() for activity, profile_name in assign_vars.items()}
         for activity, profile_name in profile_map.items():
             logger.info("LLM registry: assign '%s' -> profile '%s'", activity, profile_name)
 
         registry = LLMProviderRegistry(providers=providers, profile_map=profile_map)
         logger.info(
             "LLM registry initialized: %d profiles (%s), %d assignments",
-            len(registry.profile_names), ', '.join(registry.profile_names), len(profile_map),
+            len(registry.profile_names),
+            ", ".join(registry.profile_names),
+            len(profile_map),
         )
         return registry

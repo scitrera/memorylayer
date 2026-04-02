@@ -11,25 +11,24 @@ When triggered:
 5. Routes each memory through MemoryService.remember() for full pipeline
 6. Updates thread decomposition watermark
 """
+
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Optional
 
-from scitrera_app_framework import get_logger, Variables
+from scitrera_app_framework import Variables, get_logger
 
-from ..models.memory import RememberInput
-from ..services.storage import StorageBackend, EXT_STORAGE_BACKEND
-from ..services.tasks import TaskHandlerPlugin, TaskSchedule
-from ..services.memory import MemoryService, EXT_MEMORY_SERVICE
-from ..services.llm import EXT_LLM_SERVICE
-from ..services._constants import EXT_CHAT_SERVICE
 from ..config import (
-    MEMORYLAYER_CHAT_DECOMPOSE_CHUNK_SIZE,
     DEFAULT_MEMORYLAYER_CHAT_DECOMPOSE_CHUNK_SIZE,
-    MEMORYLAYER_CHAT_DECOMPOSE_OVERLAP,
     DEFAULT_MEMORYLAYER_CHAT_DECOMPOSE_OVERLAP,
+    MEMORYLAYER_CHAT_DECOMPOSE_CHUNK_SIZE,
+    MEMORYLAYER_CHAT_DECOMPOSE_OVERLAP,
 )
+from ..models.memory import RememberInput
+from ..services.llm import EXT_LLM_SERVICE
+from ..services.memory import EXT_MEMORY_SERVICE, MemoryService
+from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 
 CHAT_DECOMPOSITION_TASK = "chat_decomposition"
 
@@ -70,7 +69,7 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
     def get_task_type(self) -> str:
         return CHAT_DECOMPOSITION_TASK
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         return None  # On-demand only
 
     async def handle(self, v: Variables, payload: dict) -> None:
@@ -84,7 +83,8 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
         if not workspace_id or not thread_id:
             logger.warning(
                 "Missing required payload fields: workspace_id=%s, thread_id=%s",
-                workspace_id, thread_id,
+                workspace_id,
+                thread_id,
             )
             return
 
@@ -113,8 +113,10 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
 
         logger.info(
             "Decomposing %d messages from thread %s (index %d to %d)",
-            len(messages), thread_id,
-            thread.last_decomposed_index, thread.message_count,
+            len(messages),
+            thread_id,
+            thread.last_decomposed_index,
+            thread.message_count,
         )
 
         # 3. Chunk messages
@@ -146,12 +148,14 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
             except Exception as e:
                 logger.error(
                     "Failed to decompose chunk for thread %s: %s",
-                    thread_id, e, exc_info=True,
+                    thread_id,
+                    e,
+                    exc_info=True,
                 )
 
         # 5. Update watermark
         max_index = max(m.message_index for m in messages) + 1
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await storage.update_thread(
             workspace_id,
             thread_id,
@@ -161,7 +165,9 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
 
         logger.info(
             "Decomposed thread %s: %d memories created from %d messages",
-            thread_id, total_memories_created, len(messages),
+            thread_id,
+            total_memories_created,
+            len(messages),
         )
 
     def _chunk_messages(self, messages: list, chunk_size: int, overlap: int) -> list[list]:
@@ -171,21 +177,21 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
         chunks = []
         step = max(1, chunk_size - overlap)
         for i in range(0, len(messages), step):
-            chunk = messages[i:i + chunk_size]
+            chunk = messages[i : i + chunk_size]
             chunks.append(chunk)
             if i + chunk_size >= len(messages):
                 break
         return chunks
 
     async def _decompose_chunk(
-            self,
-            v: Variables,
-            logger: Logger,
-            storage: StorageBackend,
-            memory_service: MemoryService,
-            workspace_id: str,
-            thread,
-            messages: list,
+        self,
+        v: Variables,
+        logger: Logger,
+        storage: StorageBackend,
+        memory_service: MemoryService,
+        workspace_id: str,
+        thread,
+        messages: list,
     ) -> int:
         """Decompose a chunk of messages into memories via LLM."""
         # Format conversation for LLM
@@ -263,7 +269,8 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
             except Exception as e:
                 logger.warning(
                     "Failed to store decomposed memory from thread %s: %s",
-                    thread.id, e,
+                    thread.id,
+                    e,
                 )
 
         return memories_created

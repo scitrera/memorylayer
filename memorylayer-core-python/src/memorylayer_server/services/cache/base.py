@@ -1,9 +1,9 @@
 """Cache Service - Pluggable caching interface."""
+
 from abc import ABC, abstractmethod
-from typing import Optional, Any
+from typing import Any
 
-from ...config import MEMORYLAYER_CACHE_SERVICE, DEFAULT_MEMORYLAYER_CACHE_SERVICE
-
+from ...config import DEFAULT_MEMORYLAYER_CACHE_SERVICE, MEMORYLAYER_CACHE_SERVICE
 from .._constants import EXT_CACHE_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
@@ -16,7 +16,7 @@ class CacheService(ABC):
     """
 
     @abstractmethod
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """Get value from cache.
 
         Args:
@@ -28,12 +28,7 @@ class CacheService(ABC):
         pass
 
     @abstractmethod
-    async def set(
-            self,
-            key: str,
-            value: Any,
-            ttl_seconds: Optional[int] = None
-    ) -> bool:
+    async def set(self, key: str, value: Any, ttl_seconds: int | None = None) -> bool:
         """Set value in cache.
 
         Args:
@@ -83,10 +78,10 @@ class CacheService(ABC):
         pass
 
     async def get_or_set(
-            self,
-            key: str,
-            factory,
-            ttl_seconds: Optional[int] = None,
+        self,
+        key: str,
+        factory,
+        ttl_seconds: int | None = None,
     ) -> Any:
         """Get from cache or compute and cache.
 

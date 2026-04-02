@@ -9,15 +9,19 @@ Tests:
 - _parse_insights parses LLM output format
 - _derive_fallback generates type/subtype-based insights
 """
+
+from datetime import UTC
+
 import pytest
+from scitrera_app_framework import get_extension
 
 from memorylayer_server.models.memory import (
-    RememberInput, MemoryType, MemorySubtype,
+    MemorySubtype,
+    MemoryType,
+    RememberInput,
 )
+from memorylayer_server.services.inference import EXT_INFERENCE_SERVICE, DefaultInferenceService
 from memorylayer_server.services.memory import MemoryService
-from memorylayer_server.services.inference import DefaultInferenceService, EXT_INFERENCE_SERVICE
-
-from scitrera_app_framework import get_extension
 
 
 @pytest.fixture
@@ -31,9 +35,9 @@ class TestInferenceDerivation:
 
     @pytest.mark.asyncio
     async def test_derive_no_memories_returns_empty(
-            self,
-            inference_service: DefaultInferenceService,
-            workspace_id: str,
+        self,
+        inference_service: DefaultInferenceService,
+        workspace_id: str,
     ):
         """Derivation with no source memories returns zero insights."""
         result = await inference_service.derive_insights(
@@ -48,10 +52,10 @@ class TestInferenceDerivation:
 
     @pytest.mark.asyncio
     async def test_derive_with_fallback_creates_insights(
-            self,
-            inference_service: DefaultInferenceService,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        inference_service: DefaultInferenceService,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Fallback derivation (no LLM) generates type-based insights from multiple memories."""
         subject = "test-derive-subject"
@@ -63,12 +67,15 @@ class TestInferenceDerivation:
             "Subject has experience with PostgreSQL",
             "Subject values clean code practices",
         ]:
-            await memory_service.remember(workspace_id, RememberInput(
-                content=content,
-                type=MemoryType.SEMANTIC,
-                subject_id=subject,
-                importance=0.7,
-            ))
+            await memory_service.remember(
+                workspace_id,
+                RememberInput(
+                    content=content,
+                    type=MemoryType.SEMANTIC,
+                    subject_id=subject,
+                    importance=0.7,
+                ),
+            )
 
         result = await inference_service.derive_insights(
             workspace_id=workspace_id,
@@ -85,10 +92,10 @@ class TestInferenceDerivation:
 
     @pytest.mark.asyncio
     async def test_derived_insights_are_inference_subtype(
-            self,
-            inference_service: DefaultInferenceService,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        inference_service: DefaultInferenceService,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """Derived insights are stored with subtype=INFERENCE."""
         subject = "test-subtype-subject"
@@ -98,12 +105,15 @@ class TestInferenceDerivation:
             "This subject reviews PRs carefully",
             "This subject mentors junior developers",
         ]:
-            await memory_service.remember(workspace_id, RememberInput(
-                content=content,
-                type=MemoryType.SEMANTIC,
-                subject_id=subject,
-                importance=0.7,
-            ))
+            await memory_service.remember(
+                workspace_id,
+                RememberInput(
+                    content=content,
+                    type=MemoryType.SEMANTIC,
+                    subject_id=subject,
+                    importance=0.7,
+                ),
+            )
 
         result = await inference_service.derive_insights(
             workspace_id=workspace_id,
@@ -122,10 +132,10 @@ class TestGetInsights:
 
     @pytest.mark.asyncio
     async def test_get_insights_returns_derived(
-            self,
-            inference_service: DefaultInferenceService,
-            memory_service: MemoryService,
-            workspace_id: str,
+        self,
+        inference_service: DefaultInferenceService,
+        memory_service: MemoryService,
+        workspace_id: str,
     ):
         """get_insights returns previously derived insights."""
         subject = "test-get-insights-subject"
@@ -136,12 +146,15 @@ class TestGetInsights:
             "Subject A uses TDD methodology",
             "Subject A writes comprehensive unit tests",
         ]:
-            await memory_service.remember(workspace_id, RememberInput(
-                content=content,
-                type=MemoryType.SEMANTIC,
-                subject_id=subject,
-                importance=0.7,
-            ))
+            await memory_service.remember(
+                workspace_id,
+                RememberInput(
+                    content=content,
+                    type=MemoryType.SEMANTIC,
+                    subject_id=subject,
+                    importance=0.7,
+                ),
+            )
 
         derive_result = await inference_service.derive_insights(
             workspace_id=workspace_id,
@@ -166,8 +179,8 @@ class TestGetInsights:
 
     @pytest.mark.asyncio
     async def test_get_insights_empty_for_unknown_subject(
-            self,
-            inference_service: DefaultInferenceService,
+        self,
+        inference_service: DefaultInferenceService,
     ):
         """get_insights returns empty list for unknown subject."""
         insights = await inference_service.get_insights(
@@ -226,8 +239,9 @@ class TestDeriveFallback:
 
     def test_fallback_needs_minimum_memories(self, inference_service: DefaultInferenceService):
         """Fallback returns empty with fewer than 2 memories."""
+        from datetime import datetime
+
         from memorylayer_server.models.memory import Memory
-        from datetime import datetime, timezone
 
         single_memory = Memory(
             id="mem_1",
@@ -237,8 +251,8 @@ class TestDeriveFallback:
             content_hash="abc123",
             type=MemoryType.SEMANTIC,
             importance=0.5,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
 
         results = inference_service._derive_fallback([single_memory], "subj")
@@ -246,15 +260,23 @@ class TestDeriveFallback:
 
     def test_fallback_groups_by_type(self, inference_service: DefaultInferenceService):
         """Fallback generates insights based on type grouping."""
-        from memorylayer_server.models.memory import Memory
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(timezone.utc)
+        from memorylayer_server.models.memory import Memory
+
+        now = datetime.now(UTC)
         memories = [
-            Memory(id=f"mem_{i}", workspace_id="ws", tenant_id="_default",
-                   content=f"Memory {i}", content_hash=f"hash_{i}",
-                   type=MemoryType.SEMANTIC, importance=0.5,
-                   created_at=now, updated_at=now)
+            Memory(
+                id=f"mem_{i}",
+                workspace_id="ws",
+                tenant_id="_default",
+                content=f"Memory {i}",
+                content_hash=f"hash_{i}",
+                type=MemoryType.SEMANTIC,
+                importance=0.5,
+                created_at=now,
+                updated_at=now,
+            )
             for i in range(5)
         ]
 

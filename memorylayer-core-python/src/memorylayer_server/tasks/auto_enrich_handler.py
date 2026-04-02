@@ -3,16 +3,16 @@
 Delegates association work to AssociationService (which owns ontology-based
 relationship classification).  Type classification uses ExtractionService.
 """
+
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import Variables, get_logger
 
-from ..services.tasks import TaskHandlerPlugin, TaskSchedule
-from ..services.storage import StorageBackend, EXT_STORAGE_BACKEND
-from ..services.embedding import EmbeddingService, EXT_EMBEDDING_SERVICE
 from ..services.association import EXT_ASSOCIATION_SERVICE
+from ..services.embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
 from ..services.extraction import EXT_EXTRACTION_SERVICE
+from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
+from ..services.tasks import TaskHandlerPlugin, TaskSchedule
 
 
 class AutoEnrichTaskHandler(TaskHandlerPlugin):
@@ -35,24 +35,25 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
     SIMILARITY_THRESHOLD = 0.6
 
     def get_task_type(self) -> str:
-        return 'auto_enrich'
+        return "auto_enrich"
 
-    def get_schedule(self, v: Variables) -> Optional[TaskSchedule]:
+    def get_schedule(self, v: Variables) -> TaskSchedule | None:
         # No recurring schedule - triggered on-demand after remember
         return None
 
     async def handle(self, v: Variables, payload: dict) -> None:
         logger: Logger = get_logger(v, name=self.get_task_type())
 
-        memory_id = payload.get('memory_id')
-        workspace_id = payload.get('workspace_id')
-        content = payload.get('content')
-        embedding = payload.get('embedding')
+        memory_id = payload.get("memory_id")
+        workspace_id = payload.get("workspace_id")
+        content = payload.get("content")
+        embedding = payload.get("embedding")
 
         if not memory_id or not workspace_id:
             logger.warning(
                 "Missing required payload fields: workspace_id=%s, memory_id=%s",
-                workspace_id, memory_id,
+                workspace_id,
+                memory_id,
             )
             return
 
@@ -95,10 +96,7 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
 
         # Delegate association creation to AssociationService
         if similar_memories:
-            candidates = [
-                (mem.id, score) for mem, score in similar_memories
-                if mem.id != memory_id
-            ]
+            candidates = [(mem.id, score) for mem, score in similar_memories if mem.id != memory_id]
             if candidates:
                 try:
                     association_service = self.get_extension(EXT_ASSOCIATION_SERVICE, v)
@@ -111,17 +109,21 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
                     )
                     logger.info(
                         "Created %d auto-association(s) for memory %s in workspace %s",
-                        len(associations), memory_id, workspace_id,
+                        len(associations),
+                        memory_id,
+                        workspace_id,
                     )
                 except Exception as e:
                     logger.warning(
-                        "Auto-association failed for memory %s: %s", memory_id, e,
+                        "Auto-association failed for memory %s: %s",
+                        memory_id,
+                        e,
                     )
         else:
             logger.debug("No similar memories found for %s in workspace %s", memory_id, workspace_id)
 
         # Type classification (when flag is set)
-        if payload.get('classify_type', False):
+        if payload.get("classify_type", False):
             try:
                 extraction_service = self.get_extension(EXT_EXTRACTION_SERVICE, v)
                 classified_type, classified_subtype = await extraction_service.classify_content(content)
@@ -129,9 +131,9 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
                 # Fetch current memory to compare types
                 current_memory = await storage.get_memory(workspace_id, memory_id)
                 if current_memory and current_memory.type != classified_type:
-                    update_kwargs = {'type': classified_type.value}
+                    update_kwargs = {"type": classified_type.value}
                     if classified_subtype is not None:
-                        update_kwargs['subtype'] = classified_subtype.value
+                        update_kwargs["subtype"] = classified_subtype.value
                     await storage.update_memory(
                         workspace_id=workspace_id,
                         memory_id=memory_id,
@@ -139,7 +141,9 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
                     )
                     logger.info(
                         "Reclassified memory %s from %s to %s",
-                        memory_id, current_memory.type, classified_type,
+                        memory_id,
+                        current_memory.type,
+                        classified_type,
                     )
             except Exception as e:
                 logger.debug("Type classification skipped for %s: %s", memory_id, e)

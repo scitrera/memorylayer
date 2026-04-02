@@ -1,13 +1,14 @@
 """Session service package."""
-from .base import (
-    SessionService,
-    SessionServicePluginBase,
-    EXT_SESSION_SERVICE,
-    CommitResult,
-    CommitOptions,
-)
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    EXT_SESSION_SERVICE,
+    CommitOptions,
+    CommitResult,
+    SessionService,
+    SessionServicePluginBase,
+)
 
 
 def get_session_service(v: Variables = None) -> SessionService:
@@ -16,10 +17,10 @@ def get_session_service(v: Variables = None) -> SessionService:
 
 
 __all__ = (
-    'SessionService',
-    'SessionServicePluginBase',
-    'get_session_service',
-    'EXT_SESSION_SERVICE',
-    'CommitResult',
-    'CommitOptions',
+    "SessionService",
+    "SessionServicePluginBase",
+    "get_session_service",
+    "EXT_SESSION_SERVICE",
+    "CommitResult",
+    "CommitOptions",
 )

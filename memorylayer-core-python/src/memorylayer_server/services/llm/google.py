@@ -1,13 +1,14 @@
 """Google GenAI (Gemini) LLM provider."""
-from typing import AsyncIterator
+
+from collections.abc import AsyncIterator
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from .base import LLMProvider
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
+from .base import LLMProvider
 
-DEFAULT_LLM_GOOGLE_MODEL = 'gemini-3-flash-preview'
+DEFAULT_LLM_GOOGLE_MODEL = "gemini-3-flash-preview"
 
 # Google finish_reason -> our finish_reason
 _FINISH_REASON_MAP = {
@@ -27,12 +28,12 @@ class GoogleLLMProvider(LLMProvider):
     """
 
     def __init__(
-            self,
-            api_key: str,
-            model: str = DEFAULT_LLM_GOOGLE_MODEL,
-            default_max_tokens: int | None = None,
-            default_temperature: float | None = None,
-            v: Variables = None,
+        self,
+        api_key: str,
+        model: str = DEFAULT_LLM_GOOGLE_MODEL,
+        default_max_tokens: int | None = None,
+        default_temperature: float | None = None,
+        v: Variables = None,
     ):
         self.api_key = api_key
         self.model = model
@@ -40,20 +41,17 @@ class GoogleLLMProvider(LLMProvider):
         self.default_temperature = default_temperature
         self._client = None
         self.logger = get_logger(v, name=self.__class__.__name__)
-        self.logger.info(
-            "Initialized GoogleLLMProvider: model=%s", model
-        )
+        self.logger.info("Initialized GoogleLLMProvider: model=%s", model)
 
     def _get_client(self):
         """Lazy-load Google GenAI client."""
         if self._client is None:
             try:
                 from google import genai
+
                 self._client = genai.Client(api_key=self.api_key)
             except ImportError:
-                raise ImportError(
-                    "google-genai package not installed. Install with: pip install google-genai"
-                )
+                raise ImportError("google-genai package not installed. Install with: pip install google-genai")
         return self._client
 
     @staticmethod
@@ -81,8 +79,7 @@ class GoogleLLMProvider(LLMProvider):
         return system_text, messages
 
     @staticmethod
-    def _build_request(system_text, messages, request: LLMRequest,
-                       max_tokens: int | None = None, temperature: float | None = None):
+    def _build_request(system_text, messages, request: LLMRequest, max_tokens: int | None = None, temperature: float | None = None):
         """Build Google GenAI SDK types from extracted messages.
 
         Requires google-genai to be installed. Called only at API call time.
@@ -125,7 +122,11 @@ class GoogleLLMProvider(LLMProvider):
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)
         contents, config = self._build_request(
-            system_text, messages, request, max_tokens=max_tokens, temperature=temperature,
+            system_text,
+            messages,
+            request,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
         model = request.model or self.model
 
@@ -159,17 +160,18 @@ class GoogleLLMProvider(LLMProvider):
             finish_reason=finish_reason,
         )
 
-    async def complete_stream(
-            self,
-            request: LLMRequest
-    ) -> AsyncIterator[LLMStreamChunk]:
+    async def complete_stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
         """Generate streaming completion using Google GenAI API."""
         client = self._get_client()
 
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)
         contents, config = self._build_request(
-            system_text, messages, request, max_tokens=max_tokens, temperature=temperature,
+            system_text,
+            messages,
+            request,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
         model = request.model or self.model
 

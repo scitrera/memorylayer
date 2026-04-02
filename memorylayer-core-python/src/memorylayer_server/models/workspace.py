@@ -5,8 +5,9 @@ Defines multi-tenant workspace isolation, contexts, and scope boosts.
 
 Hierarchy: Tenant -> Workspace -> Context -> Session -> WorkingMemory
 """
-from datetime import datetime, timezone
-from typing import Any, Optional
+
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,16 +31,8 @@ class WorkspaceSettings(BaseModel):
 
     # Auto-remember
     auto_remember_enabled: bool = Field(False, description="Auto-capture significant interactions")
-    auto_remember_min_importance: float = Field(
-        0.6,
-        ge=0.0,
-        le=1.0,
-        description="Minimum importance for auto-capture"
-    )
-    auto_remember_exclude_patterns: list[str] = Field(
-        default_factory=list,
-        description="Patterns to exclude from auto-capture"
-    )
+    auto_remember_min_importance: float = Field(0.6, ge=0.0, le=1.0, description="Minimum importance for auto-capture")
+    auto_remember_exclude_patterns: list[str] = Field(default_factory=list, description="Patterns to exclude from auto-capture")
 
     # Embeddings
     embedding_model: str = Field("text-embedding-3-small", description="Embedding model to use")
@@ -68,14 +61,11 @@ class Workspace(BaseModel):
     name: str = Field(..., description="Human-readable workspace name")
 
     # Configuration
-    settings: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Workspace-level settings (retention, auto-remember, etc.)"
-    )
+    settings: dict[str, Any] = Field(default_factory=dict, description="Workspace-level settings (retention, auto-remember, etc.)")
 
     # Timestamps
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Creation timestamp")
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last update timestamp")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Last update timestamp")
 
     @field_validator("name")
     @classmethod
@@ -93,12 +83,12 @@ class ContextSettings(BaseModel):
     inherit_workspace_settings: bool = Field(True, description="Inherit workspace settings")
 
     # Overrides (only apply if inherit_workspace_settings=False)
-    auto_remember_enabled: Optional[bool] = None
-    decay_enabled: Optional[bool] = None
+    auto_remember_enabled: bool | None = None
+    decay_enabled: bool | None = None
 
     # Context-specific settings (v2)
-    default_importance: Optional[float] = Field(None, ge=0.0, le=1.0, description="Override default importance")
-    session_auto_commit: Optional[bool] = Field(None, description="Override session auto-commit")
+    default_importance: float | None = Field(None, ge=0.0, le=1.0, description="Override default importance")
+    session_auto_commit: bool | None = Field(None, description="Override session auto-commit")
 
 
 class Context(BaseModel):
@@ -114,16 +104,13 @@ class Context(BaseModel):
     id: str = Field(..., description="Unique context identifier")
     workspace_id: str = Field(..., description="Parent workspace ID")
     name: str = Field(..., description="Context name (unique within workspace)")
-    description: Optional[str] = Field(None, description="Context description")
+    description: str | None = Field(None, description="Context description")
 
     # Configuration
-    settings: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Context-level settings (overrides workspace defaults)"
-    )
+    settings: dict[str, Any] = Field(default_factory=dict, description="Context-level settings (overrides workspace defaults)")
 
     # Timestamps
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Creation timestamp")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
 
     @field_validator("name")
     @classmethod
@@ -132,5 +119,3 @@ class Context(BaseModel):
         if not v or not v.strip():
             raise ValueError("Context name cannot be empty")
         return v.strip()
-
-

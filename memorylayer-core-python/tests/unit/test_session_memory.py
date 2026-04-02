@@ -7,44 +7,49 @@ Tests:
 - Extraction trigger thresholds (init and growth)
 - SessionMemorySections model (sections, total_tokens, add_entry, budget enforcement)
 """
+
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone, timedelta
 
 from memorylayer_server.models.memory import (
-    SessionMemorySections,
-    SESSION_MEMORY_SECTION_NAMES,
     DEFAULT_SESSION_SECTION_TOKEN_BUDGET,
+    SESSION_MEMORY_SECTION_NAMES,
+    SessionMemorySections,
 )
 from memorylayer_server.services.session.persistent import PersistentSessionService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_session(session_id="sess-1", workspace_id="ws-1", metadata=None):
     """Build a minimal Session-like mock."""
     from memorylayer_server.models.session import Session
+
     return Session(
         id=session_id,
         workspace_id=workspace_id,
         tenant_id="tenant-1",
         context_id="_default",
         metadata=metadata or {},
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
 
 
 def _make_working_memory(key, value):
     """Build a minimal WorkingMemory-like mock."""
     from memorylayer_server.models.session import WorkingMemory
+
     return WorkingMemory(session_id="sess-1", key=key, value=value)
 
 
 # ---------------------------------------------------------------------------
 # Token estimation
 # ---------------------------------------------------------------------------
+
 
 class TestTokenEstimation:
     """Tests for PersistentSessionService._estimate_tokens()."""
@@ -71,20 +76,24 @@ class TestTokenEstimation:
 # touch_session token tracking
 # ---------------------------------------------------------------------------
 
+
 def _make_variables(token_trigger_init=10000, token_trigger_growth=5000):
     """Build a mock Variables that returns config values via environ()."""
     v = MagicMock()
+
     def _environ(key, default=None, type_fn=None):
         from memorylayer_server.config import (
-            MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT,
             MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH,
+            MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT,
         )
+
         mapping = {
             MEMORYLAYER_SESSION_TOKEN_TRIGGER_INIT: token_trigger_init,
             MEMORYLAYER_SESSION_TOKEN_TRIGGER_GROWTH: token_trigger_growth,
         }
         val = mapping.get(key, default)
         return type_fn(val) if type_fn and val is not None else val
+
     v.environ = _environ
     return v
 
@@ -120,9 +129,9 @@ class TestTouchSessionTokenTracking:
 
         # update_session should have been called with metadata containing cumulative_tokens
         call_kwargs = storage.update_session.call_args
-        metadata = call_kwargs.kwargs.get('metadata') or (call_kwargs.args[3] if len(call_kwargs.args) > 3 else None)
+        metadata = call_kwargs.kwargs.get("metadata") or (call_kwargs.args[3] if len(call_kwargs.args) > 3 else None)
         assert metadata is not None
-        assert metadata['cumulative_tokens'] == 100
+        assert metadata["cumulative_tokens"] == 100
 
     @pytest.mark.asyncio
     async def test_extraction_not_triggered_below_init_threshold(self):
@@ -162,19 +171,21 @@ class TestTouchSessionTokenTracking:
 
         task_service.schedule_task.assert_called_once()
         call_args = task_service.schedule_task.call_args
-        assert call_args.args[0] == 'session_extraction'
+        assert call_args.args[0] == "session_extraction"
         payload = call_args.args[1]
-        assert payload['workspace_id'] == 'ws-1'
-        assert payload['session_id'] == 'sess-1'
+        assert payload["workspace_id"] == "ws-1"
+        assert payload["session_id"] == "sess-1"
 
     @pytest.mark.asyncio
     async def test_extraction_triggered_on_growth_threshold(self):
         """Extraction is re-triggered after growth threshold exceeded."""
         # Session has already had one extraction at 1000 tokens
-        session = _make_session(metadata={
-            'cumulative_tokens': 1000,
-            'last_extraction_tokens': 1000,
-        })
+        session = _make_session(
+            metadata={
+                "cumulative_tokens": 1000,
+                "last_extraction_tokens": 1000,
+            }
+        )
         # New working memory totals 1600 tokens (600 more than last extraction)
         wm_entries = [_make_working_memory("key1", "a" * 6400)]  # 1600 tokens
 
@@ -191,15 +202,17 @@ class TestTouchSessionTokenTracking:
 
         task_service.schedule_task.assert_called_once()
         call_args = task_service.schedule_task.call_args
-        assert call_args.args[0] == 'session_extraction'
+        assert call_args.args[0] == "session_extraction"
 
     @pytest.mark.asyncio
     async def test_extraction_not_retriggered_below_growth_threshold(self):
         """No extraction if growth since last extraction is below growth threshold."""
-        session = _make_session(metadata={
-            'cumulative_tokens': 1000,
-            'last_extraction_tokens': 1000,
-        })
+        session = _make_session(
+            metadata={
+                "cumulative_tokens": 1000,
+                "last_extraction_tokens": 1000,
+            }
+        )
         # New total is only 1200 (200 more than last extraction, below 500 growth threshold)
         wm_entries = [_make_working_memory("key1", "a" * 4800)]  # 1200 tokens
 
@@ -250,14 +263,15 @@ class TestTouchSessionTokenTracking:
         await svc.touch_session("ws-1", "sess-1")
 
         call_kwargs = storage.update_session.call_args
-        metadata = call_kwargs.kwargs.get('metadata') or (call_kwargs.args[3] if len(call_kwargs.args) > 3 else None)
+        metadata = call_kwargs.kwargs.get("metadata") or (call_kwargs.args[3] if len(call_kwargs.args) > 3 else None)
         assert metadata is not None
-        assert metadata.get('last_extraction_tokens') == 1000
+        assert metadata.get("last_extraction_tokens") == 1000
 
 
 # ---------------------------------------------------------------------------
 # SessionMemorySections model
 # ---------------------------------------------------------------------------
+
 
 class TestSessionMemorySections:
     """Tests for the SessionMemorySections Pydantic model."""
@@ -273,14 +287,16 @@ class TestSessionMemorySections:
         assert sms.total_tokens == 0
 
     def test_total_tokens_computed_correctly(self):
-        sms = SessionMemorySections(sections={
-            "context": ["a" * 400],   # 100 tokens
-            "decisions": ["b" * 800], # 200 tokens
-            "learnings": [],
-            "errors": [],
-            "progress": [],
-            "open_items": [],
-        })
+        sms = SessionMemorySections(
+            sections={
+                "context": ["a" * 400],  # 100 tokens
+                "decisions": ["b" * 800],  # 200 tokens
+                "learnings": [],
+                "errors": [],
+                "progress": [],
+                "open_items": [],
+            }
+        )
         assert sms.total_tokens == 300
 
     def test_add_entry_to_valid_section(self):
@@ -332,14 +348,16 @@ class TestSessionMemorySections:
         assert sms.section_token_budget == 512
 
     def test_sections_can_be_provided_at_construction(self):
-        sms = SessionMemorySections(sections={
-            "context": ["Entry 1", "Entry 2"],
-            "decisions": [],
-            "learnings": [],
-            "errors": [],
-            "progress": [],
-            "open_items": [],
-        })
+        sms = SessionMemorySections(
+            sections={
+                "context": ["Entry 1", "Entry 2"],
+                "decisions": [],
+                "learnings": [],
+                "errors": [],
+                "progress": [],
+                "open_items": [],
+            }
+        )
         assert sms.sections["context"] == ["Entry 1", "Entry 2"]
 
     def test_total_tokens_updates_after_add_entry(self):

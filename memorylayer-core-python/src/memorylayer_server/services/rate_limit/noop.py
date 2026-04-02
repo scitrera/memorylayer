@@ -1,7 +1,7 @@
 """No-op rate limit service - always allows requests (OSS default)."""
+
 import time
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework.api import Variables
 
@@ -31,7 +31,8 @@ class NoopRateLimitService(RateLimitService):
 
 class NoopRateLimitServicePlugin(RateLimitServicePluginBase):
     """Plugin for no-op rate limit service."""
-    PROVIDER_NAME = 'noop'
 
-    def initialize(self, v: Variables, logger: Logger) -> Optional[RateLimitService]:
+    PROVIDER_NAME = "noop"
+
+    def initialize(self, v: Variables, logger: Logger) -> RateLimitService | None:
         return NoopRateLimitService()

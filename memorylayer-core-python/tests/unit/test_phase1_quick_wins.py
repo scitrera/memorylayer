@@ -4,33 +4,33 @@ Unit tests for Phase 1 quick wins:
   1b. Already-surfaced filtering (exclude_ids in _recall_rag)
   1c. Configurable scope/recency boosts (ScopeBoosts read from config)
 """
-import math
-import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock
 
+import math
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
+
+import pytest
 from scitrera_app_framework import Variables
 
-from memorylayer_server.models.memory import Memory, MemoryType, MemoryStatus, RecallInput
-from memorylayer_server.services.memory.default import MemoryService, ScopeBoosts
 from memorylayer_server.config import (
-    DEFAULT_MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS,
-    MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS,
-    MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT,
     DEFAULT_MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT,
-    MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
     DEFAULT_MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
     MEMORYLAYER_FACT_DECOMPOSITION_ENABLED,
     MEMORYLAYER_FACT_DECOMPOSITION_MIN_LENGTH,
+    MEMORYLAYER_FRESHNESS_HALF_LIFE_DAYS,
+    MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT,
+    MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
 )
+from memorylayer_server.models.memory import Memory, MemoryStatus, MemoryType, RecallInput
 from memorylayer_server.services.association.base import MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD
-from memorylayer_server.services.memory.base import MEMORYLAYER_MEMORY_RECALL_OVERFETCH
 from memorylayer_server.services.deduplication import DeduplicationAction, DeduplicationResult
-
+from memorylayer_server.services.memory.base import MEMORYLAYER_MEMORY_RECALL_OVERFETCH
+from memorylayer_server.services.memory.default import MemoryService, ScopeBoosts
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_v(**overrides) -> Variables:
     """Create a Variables instance with required defaults for MemoryService."""
@@ -54,10 +54,12 @@ def _make_service(v: Variables = None) -> MemoryService:
     embedding = AsyncMock()
     embedding.embed = AsyncMock(return_value=[0.1] * 384)
     dedup = AsyncMock()
-    dedup.check_duplicate = AsyncMock(return_value=DeduplicationResult(
-        action=DeduplicationAction.CREATE,
-        reason="New unique memory",
-    ))
+    dedup.check_duplicate = AsyncMock(
+        return_value=DeduplicationResult(
+            action=DeduplicationAction.CREATE,
+            reason="New unique memory",
+        )
+    )
 
     return MemoryService(
         storage=storage,
@@ -75,7 +77,7 @@ def _make_memory(
     last_accessed_at: datetime = None,
     boosted_score: float = 0.8,
 ) -> Memory:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Memory(
         id=memory_id,
         workspace_id=workspace_id,
@@ -96,6 +98,7 @@ def _make_memory(
 # 1a. Freshness annotation tests
 # ===========================================================================
 
+
 class TestAnnotateFreshness:
     """Tests for MemoryService._annotate_freshness()."""
 
@@ -107,7 +110,7 @@ class TestAnnotateFreshness:
     def test_fresh_memory_score_near_one(self):
         """A memory created moments ago should have freshness ~1.0."""
         service = _make_service()
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(minutes=5))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(minutes=5))
         result = service._annotate_freshness([memory])
         assert result[0].freshness_score is not None
         assert result[0].freshness_score > 0.99
@@ -117,21 +120,21 @@ class TestAnnotateFreshness:
     def test_1_day_old_staleness_mild(self):
         """A memory 2 days old should have 'mild' staleness warning."""
         service = _make_service()
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=2))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=2))
         result = service._annotate_freshness([memory])
         assert result[0].staleness_warning == "mild"
 
     def test_7_day_old_staleness_moderate(self):
         """A memory 10 days old should have 'moderate' staleness warning."""
         service = _make_service()
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=10))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=10))
         result = service._annotate_freshness([memory])
         assert result[0].staleness_warning == "moderate"
 
     def test_30_day_old_staleness_severe(self):
         """A memory 31 days old should have 'severe' staleness warning."""
         service = _make_service()
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=31))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=31))
         result = service._annotate_freshness([memory])
         assert result[0].staleness_warning == "severe"
 
@@ -140,7 +143,7 @@ class TestAnnotateFreshness:
         service = _make_service()
         # Use exactly 7 days age with 7 days half-life
         half_life = 7.0
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=7))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=7))
         result = service._annotate_freshness([memory], half_life_days=half_life)
         assert result[0].freshness_score == pytest.approx(0.5, abs=0.02)
 
@@ -149,7 +152,7 @@ class TestAnnotateFreshness:
         service = _make_service()
         half_life = 7.0
         age_days = 14.0  # Two half-lives
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=age_days))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=age_days))
         result = service._annotate_freshness([memory], half_life_days=half_life)
         expected = math.exp(-math.log(2) / half_life * age_days)  # ~0.25
         assert result[0].freshness_score == pytest.approx(expected, abs=0.02)
@@ -159,8 +162,8 @@ class TestAnnotateFreshness:
         service = _make_service()
         half_life = 7.0
         # Memory created 5 days ago, accessed 1 hour ago
-        created = datetime.now(timezone.utc) - timedelta(days=5)
-        last_accessed = datetime.now(timezone.utc) - timedelta(hours=1)
+        created = datetime.now(UTC) - timedelta(days=5)
+        last_accessed = datetime.now(UTC) - timedelta(hours=1)
         memory_with_access = _make_memory(created_at=created, last_accessed_at=last_accessed)
         memory_no_access = _make_memory(memory_id="mem_2", created_at=created)
 
@@ -175,8 +178,8 @@ class TestAnnotateFreshness:
         """Freshness bonus should not push score above 1.0."""
         service = _make_service()
         # Very fresh memory (score ~1.0) + access bonus should cap at 1.0
-        just_created = datetime.now(timezone.utc) - timedelta(seconds=10)
-        last_accessed = datetime.now(timezone.utc) - timedelta(hours=1)
+        just_created = datetime.now(UTC) - timedelta(seconds=10)
+        last_accessed = datetime.now(UTC) - timedelta(hours=1)
         memory = _make_memory(created_at=just_created, last_accessed_at=last_accessed)
         result = service._annotate_freshness([memory])
         assert result[0].freshness_score <= 1.0
@@ -184,21 +187,21 @@ class TestAnnotateFreshness:
     def test_old_access_no_bonus(self):
         """Memory accessed more than 24h ago should NOT get the access bonus."""
         service = _make_service()
-        created = datetime.now(timezone.utc) - timedelta(days=3)
-        last_accessed = datetime.now(timezone.utc) - timedelta(hours=25)  # >24h ago
+        created = datetime.now(UTC) - timedelta(days=3)
+        last_accessed = datetime.now(UTC) - timedelta(hours=25)  # >24h ago
         memory = _make_memory(created_at=created, last_accessed_at=last_accessed)
         result = service._annotate_freshness([memory])
 
         # Score should match plain formula (no bonus)
         half_life = service.freshness_half_life_days
-        age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400.0
+        age_days = (datetime.now(UTC) - created).total_seconds() / 86400.0
         expected = math.exp(-math.log(2) / half_life * age_days)
         assert result[0].freshness_score == pytest.approx(expected, abs=0.02)
 
     def test_age_days_populated(self):
         """age_days field should reflect the memory's age."""
         service = _make_service()
-        created = datetime.now(timezone.utc) - timedelta(days=5)
+        created = datetime.now(UTC) - timedelta(days=5)
         memory = _make_memory(created_at=created)
         result = service._annotate_freshness([memory])
         assert result[0].age_days == pytest.approx(5.0, abs=0.05)
@@ -211,7 +214,7 @@ class TestAnnotateFreshness:
         assert service.freshness_half_life_days == 14.0
 
         # At 7 days age with 14 day half-life, score should be ~0.707
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=7))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=7))
         result = service._annotate_freshness([memory])
         assert result[0].freshness_score == pytest.approx(0.707, abs=0.02)
 
@@ -219,9 +222,9 @@ class TestAnnotateFreshness:
         """All memories in the list should be annotated."""
         service = _make_service()
         memories = [
-            _make_memory("m1", created_at=datetime.now(timezone.utc) - timedelta(hours=1)),
-            _make_memory("m2", created_at=datetime.now(timezone.utc) - timedelta(days=5)),
-            _make_memory("m3", created_at=datetime.now(timezone.utc) - timedelta(days=35)),
+            _make_memory("m1", created_at=datetime.now(UTC) - timedelta(hours=1)),
+            _make_memory("m2", created_at=datetime.now(UTC) - timedelta(days=5)),
+            _make_memory("m3", created_at=datetime.now(UTC) - timedelta(days=35)),
         ]
         result = service._annotate_freshness(memories)
         assert all(m.freshness_score is not None for m in result)
@@ -233,21 +236,21 @@ class TestAnnotateFreshness:
     def test_staleness_boundary_exactly_1_day(self):
         """Memory exactly 1 day old should be 'mild' (boundary >= 1.0)."""
         service = _make_service()
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=1, seconds=1))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=1, seconds=1))
         result = service._annotate_freshness([memory])
         assert result[0].staleness_warning == "mild"
 
     def test_staleness_boundary_exactly_7_days(self):
         """Memory exactly 7 days old should be 'moderate' (boundary >= 7.0)."""
         service = _make_service()
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=7, seconds=1))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=7, seconds=1))
         result = service._annotate_freshness([memory])
         assert result[0].staleness_warning == "moderate"
 
     def test_staleness_boundary_exactly_30_days(self):
         """Memory exactly 30 days old should be 'severe' (boundary >= 30.0)."""
         service = _make_service()
-        memory = _make_memory(created_at=datetime.now(timezone.utc) - timedelta(days=30, seconds=1))
+        memory = _make_memory(created_at=datetime.now(UTC) - timedelta(days=30, seconds=1))
         result = service._annotate_freshness([memory])
         assert result[0].staleness_warning == "severe"
 
@@ -255,6 +258,7 @@ class TestAnnotateFreshness:
 # ===========================================================================
 # 1b. exclude_ids filtering tests
 # ===========================================================================
+
 
 class TestExcludeIds:
     """Tests for exclude_ids field on RecallInput and filtering in _recall_rag."""
@@ -274,15 +278,19 @@ class TestExcludeIds:
         """_recall_rag should filter out memories whose IDs are in exclude_ids."""
         service = _make_service()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mem_a = _make_memory("mem_a", created_at=now)
         mem_b = _make_memory("mem_b", created_at=now)
         mem_c = _make_memory("mem_c", created_at=now)
 
         # Storage returns all three memories
-        service.storage.search_memories = AsyncMock(return_value=[
-            (mem_a, 0.9), (mem_b, 0.85), (mem_c, 0.8),
-        ])
+        service.storage.search_memories = AsyncMock(
+            return_value=[
+                (mem_a, 0.9),
+                (mem_b, 0.85),
+                (mem_c, 0.8),
+            ]
+        )
 
         input = RecallInput(
             query="test query",
@@ -307,13 +315,16 @@ class TestExcludeIds:
         """_recall_rag should return all results when exclude_ids is empty."""
         service = _make_service()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mem_a = _make_memory("mem_a", created_at=now)
         mem_b = _make_memory("mem_b", created_at=now)
 
-        service.storage.search_memories = AsyncMock(return_value=[
-            (mem_a, 0.9), (mem_b, 0.85),
-        ])
+        service.storage.search_memories = AsyncMock(
+            return_value=[
+                (mem_a, 0.9),
+                (mem_b, 0.85),
+            ]
+        )
 
         input = RecallInput(
             query="test query",
@@ -337,7 +348,7 @@ class TestExcludeIds:
         """_recall_rag should filter out all IDs in exclude_ids."""
         service = _make_service()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memories = [(_make_memory(f"mem_{i}", created_at=now), 0.9 - i * 0.05) for i in range(5)]
         service.storage.search_memories = AsyncMock(return_value=memories)
 
@@ -366,10 +377,12 @@ class TestExcludeIds:
         """_recall_rag should return empty when all results are excluded."""
         service = _make_service()
 
-        now = datetime.now(timezone.utc)
-        service.storage.search_memories = AsyncMock(return_value=[
-            (_make_memory("mem_a", created_at=now), 0.9),
-        ])
+        now = datetime.now(UTC)
+        service.storage.search_memories = AsyncMock(
+            return_value=[
+                (_make_memory("mem_a", created_at=now), 0.9),
+            ]
+        )
 
         input = RecallInput(
             query="test",
@@ -390,6 +403,7 @@ class TestExcludeIds:
 # ===========================================================================
 # 1c. Configurable scope boosts tests
 # ===========================================================================
+
 
 class TestConfigurableScopeBoosts:
     """Tests for configurable scope boosts read from config in MemoryService.__init__."""
@@ -415,13 +429,15 @@ class TestConfigurableScopeBoosts:
 
     def test_apply_scope_boosts_uses_instance_defaults(self):
         """apply_scope_boosts(boosts=None) should use self.default_scope_boosts."""
-        v = _make_v(**{
-            MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT: 2.0,
-            MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE: 1.5,
-        })
+        v = _make_v(
+            **{
+                MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT: 2.0,
+                MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE: 1.5,
+            }
+        )
         service = _make_service(v)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memory = _make_memory("mem_1", workspace_id="ws_test", context_id="ctx_test", created_at=now)
         memories = [(memory, 0.8)]
 
@@ -441,7 +457,7 @@ class TestConfigurableScopeBoosts:
         v = _make_v(**{MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT: 2.0})
         service = _make_service(v)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memory = _make_memory("mem_1", workspace_id="ws_test", context_id="ctx_test", created_at=now)
         memories = [(memory, 0.8)]
 
@@ -458,13 +474,15 @@ class TestConfigurableScopeBoosts:
 
     def test_scope_boost_same_workspace(self):
         """Memory from same workspace but different context gets workspace boost."""
-        v = _make_v(**{
-            MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT: 1.5,
-            MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE: 1.3,
-        })
+        v = _make_v(
+            **{
+                MEMORYLAYER_SCOPE_BOOST_SAME_CONTEXT: 1.5,
+                MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE: 1.3,
+            }
+        )
         service = _make_service(v)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memory = _make_memory("mem_1", workspace_id="ws_test", context_id="ctx_other", created_at=now)
         memories = [(memory, 0.8)]
 
@@ -483,7 +501,7 @@ class TestConfigurableScopeBoosts:
         """Memory from different workspace and context gets no boost (factor 1.0)."""
         service = _make_service()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memory = _make_memory("mem_1", workspace_id="ws_other", context_id="ctx_other", created_at=now)
         memories = [(memory, 0.8)]
 
@@ -502,7 +520,7 @@ class TestConfigurableScopeBoosts:
         # Create service without going through __init__ (edge case for legacy code)
         service = object.__new__(MemoryService)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memory = _make_memory("mem_1", workspace_id="ws_test", context_id="ctx_test", created_at=now)
         memories = [(memory, 0.8)]
 

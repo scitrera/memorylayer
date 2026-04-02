@@ -6,18 +6,18 @@ Uses LLM to:
 - Generate category summaries
 - Answer complex queries requiring reasoning
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Optional, Any
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
+from ...models import DetailLevel, RecallInput, RecallMode, ReflectInput, ReflectResult
+from ..llm import EXT_LLM_SERVICE, LLMNotConfiguredError, LLMService
+from ..memory import EXT_MEMORY_SERVICE, MemoryService
+from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from .base import ReflectServicePluginBase
-from ..storage import StorageBackend, EXT_STORAGE_BACKEND
-from ..memory import MemoryService, EXT_MEMORY_SERVICE
-from ..llm import LLMService, EXT_LLM_SERVICE, LLMNotConfiguredError
-from ...models import ReflectInput, ReflectResult, RecallInput, RecallMode, DetailLevel
 
 # Token budget mapping for detail levels
 REFLECT_TOKEN_BUDGETS = {
@@ -30,13 +30,7 @@ REFLECT_TOKEN_BUDGETS = {
 class ReflectService:
     """Service for LLM-powered memory synthesis."""
 
-    def __init__(
-            self,
-            storage: StorageBackend,
-            memory_service: MemoryService,
-            llm_service: Optional[LLMService] = None,
-            v: Variables = None
-    ):
+    def __init__(self, storage: StorageBackend, memory_service: MemoryService, llm_service: LLMService | None = None, v: Variables = None):
         self.storage = storage
         self.memory_service = memory_service
         self.llm = llm_service
@@ -50,13 +44,13 @@ class ReflectService:
         self,
         query: str,
         *,
-        types: Optional[list] = None,
-        subtypes: Optional[list] = None,
-        tags: Optional[list] = None,
-        context_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        observer_id: Optional[str] = None,
-        subject_id: Optional[str] = None,
+        types: list | None = None,
+        subtypes: list | None = None,
+        tags: list | None = None,
+        context_id: str | None = None,
+        user_id: str | None = None,
+        observer_id: str | None = None,
+        subject_id: str | None = None,
         mode: RecallMode = RecallMode.LLM,
         limit: int = 20,
         min_relevance: float = 0.5,
@@ -81,9 +75,9 @@ class ReflectService:
         )
 
     async def reflect(
-            self,
-            workspace_id: str,
-            input: ReflectInput,
+        self,
+        workspace_id: str,
+        input: ReflectInput,
     ) -> ReflectResult:
         """
         Synthesize memories matching query into coherent reflection.
@@ -94,13 +88,9 @@ class ReflectService:
         3. Send to LLM with synthesis prompt
         4. Return reflection with source references
         """
-        self.logger.info(
-            "Generating reflection in workspace: %s, query: %s",
-            workspace_id,
-            input.query[:50]
-        )
+        self.logger.info("Generating reflection in workspace: %s, query: %s", workspace_id, input.query[:50])
 
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         # 1. Recall relevant memories
         recall_input = self._build_recall_input(
@@ -110,8 +100,8 @@ class ReflectService:
             tags=input.tags,
             context_id=input.context_id,
             user_id=input.user_id,
-            observer_id=getattr(input, 'observer_id', None),
-            subject_id=getattr(input, 'subject_id', None),
+            observer_id=getattr(input, "observer_id", None),
+            subject_id=getattr(input, "subject_id", None),
             mode=RecallMode.LLM,  # Use LLM mode for best semantic matching
             limit=20,  # Get more memories for synthesis
             min_relevance=0.5,
@@ -119,18 +109,12 @@ class ReflectService:
             traverse_depth=input.depth,
         )
 
-        recall_result = await self.memory_service.recall(
-            workspace_id=workspace_id,
-            input=recall_input
-        )
+        recall_result = await self.memory_service.recall(workspace_id=workspace_id, input=recall_input)
 
         if not recall_result.memories:
             self.logger.warning("No memories found for reflection query: %s", input.query)
             return ReflectResult(
-                reflection="No relevant memories found to reflect upon.",
-                source_memories=[],
-                confidence=0.0,
-                tokens_processed=0
+                reflection="No relevant memories found to reflect upon.", source_memories=[], confidence=0.0, tokens_processed=0
             )
 
         self.logger.debug("Found %s memories for reflection", len(recall_result.memories))
@@ -142,43 +126,29 @@ class ReflectService:
         max_tokens = REFLECT_TOKEN_BUDGETS.get(input.detail_level, 4096)
         if self.llm:
             reflection, tokens_used = await self._synthesize_with_llm(
-                memories=recall_result.memories,
-                query=input.query,
-                max_tokens=max_tokens
+                memories=recall_result.memories, query=input.query, max_tokens=max_tokens
             )
             confidence = self._calculate_confidence(recall_result.memories)
         else:
             # Fallback: Simple concatenation if no LLM available
             self.logger.warning("No LLM client available, using simple synthesis")
             reflection, tokens_used, confidence = self._simple_synthesis(
-                memories=recall_result.memories,
-                query=input.query,
-                max_tokens=max_tokens
+                memories=recall_result.memories, query=input.query, max_tokens=max_tokens
             )
 
-        latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-        self.logger.info(
-            "Generated reflection in %s ms, %s tokens, confidence: %.2f",
-            latency_ms,
-            tokens_used,
-            confidence
-        )
+        latency_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
+        self.logger.info("Generated reflection in %s ms, %s tokens, confidence: %.2f", latency_ms, tokens_used, confidence)
 
         result = ReflectResult(
             reflection=reflection,
             source_memories=source_memory_ids if input.include_sources else [],
             confidence=confidence,
-            tokens_processed=tokens_used
+            tokens_processed=tokens_used,
         )
 
         return result
 
-    async def _synthesize_with_llm(
-            self,
-            memories: list,
-            query: str,
-            max_tokens: int
-    ) -> tuple[str, int]:
+    async def _synthesize_with_llm(self, memories: list, query: str, max_tokens: int) -> tuple[str, int]:
         """
         Use LLM to synthesize memories into coherent reflection.
 
@@ -189,9 +159,7 @@ class ReflectService:
         # Build context from memories
         context_parts = []
         for i, memory in enumerate(memories, 1):
-            context_parts.append(
-                f"[{i}] {memory.type.value.upper()} - {memory.content}"
-            )
+            context_parts.append(f"[{i}] {memory.type.value.upper()} - {memory.content}")
 
         context = "\n\n".join(context_parts)
 
@@ -242,12 +210,7 @@ Reflection:"""
             self.logger.error("LLM call failed: %s", e)
             return f"LLM synthesis failed: {e}"
 
-    def _simple_synthesis(
-            self,
-            memories: list,
-            query: str,
-            max_tokens: int
-    ) -> tuple[str, int, float]:
+    def _simple_synthesis(self, memories: list, query: str, max_tokens: int) -> tuple[str, int, float]:
         """
         Simple synthesis without LLM.
 
@@ -312,10 +275,10 @@ Reflection:"""
         return min(1.0, confidence)
 
     async def answer_question(
-            self,
-            workspace_id: str,
-            question: str,
-            context_memories: Optional[list[str]] = None,
+        self,
+        workspace_id: str,
+        question: str,
+        context_memories: list[str] | None = None,
     ) -> ReflectResult:
         """
         Answer a question using memories as knowledge base.
@@ -348,16 +311,11 @@ Reflection:"""
                 reflection="I don't have enough information to answer this question.",
                 source_memories=[],
                 confidence=0.0,
-                tokens_processed=0
+                tokens_processed=0,
             )
 
         # Generate answer using reflection
-        reflect_input = ReflectInput(
-            query=question,
-            detail_level=DetailLevel.OVERVIEW,
-            include_sources=True,
-            depth=1
-        )
+        reflect_input = ReflectInput(query=question, detail_level=DetailLevel.OVERVIEW, include_sources=True, depth=1)
 
         result = await self.reflect(workspace_id, reflect_input)
         return result
@@ -365,7 +323,8 @@ Reflection:"""
 
 class DefaultReflectServicePlugin(ReflectServicePluginBase):
     """Default reflect service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def get_dependencies(self, v: Variables):
         return (EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE, EXT_LLM_SERVICE)
@@ -374,9 +333,4 @@ class DefaultReflectServicePlugin(ReflectServicePluginBase):
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
         memory: MemoryService = self.get_extension(EXT_MEMORY_SERVICE, v)
         llm_service: LLMService = self.get_extension(EXT_LLM_SERVICE, v)
-        return ReflectService(
-            storage=storage,
-            memory_service=memory,
-            llm_service=llm_service,
-            v=v
-        )
+        return ReflectService(storage=storage, memory_service=memory, llm_service=llm_service, v=v)

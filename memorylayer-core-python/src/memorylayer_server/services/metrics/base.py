@@ -1,10 +1,11 @@
 """Metrics Service - Pluggable metrics/observability interface."""
+
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
-from ...config import MEMORYLAYER_METRICS_SERVICE, DEFAULT_MEMORYLAYER_METRICS_SERVICE
+from ...config import DEFAULT_MEMORYLAYER_METRICS_SERVICE, MEMORYLAYER_METRICS_SERVICE
 from .._constants import EXT_METRICS_SERVICE
 from .._plugin_factory import make_service_plugin_base
 

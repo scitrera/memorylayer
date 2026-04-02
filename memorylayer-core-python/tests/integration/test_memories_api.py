@@ -331,15 +331,15 @@ class TestMemoryBatch:
                         "data": {
                             "content": "First batch memory",
                             "importance": 0.5,
-                        }
+                        },
                     },
                     {
                         "type": "create",
                         "data": {
                             "content": "Second batch memory",
                             "importance": 0.6,
-                        }
-                    }
+                        },
+                    },
                 ]
             },
             headers=workspace_headers,
@@ -372,7 +372,7 @@ class TestMemoryBatch:
                         "type": "create",
                         "data": {
                             "content": "New batch memory",
-                        }
+                        },
                     },
                     {
                         "type": "update",
@@ -380,15 +380,15 @@ class TestMemoryBatch:
                             "memory_id": memory_id,
                             "content": "Updated content",
                             "importance": 0.9,
-                        }
+                        },
                     },
                     {
                         "type": "delete",
                         "data": {
                             "memory_id": memory_id,
                             "hard": False,
-                        }
-                    }
+                        },
+                    },
                 ]
             },
             headers=workspace_headers,
@@ -404,9 +404,7 @@ class TestMemoryBatch:
         """Test batch with no operations."""
         response = test_client.post(
             "/v1/memories/batch",
-            json={
-                "operations": []
-            },
+            json={"operations": []},
             headers=workspace_headers,
         )
 
@@ -997,9 +995,7 @@ class TestAssociations:
         assert data["association"]["metadata"]["priority"] == "high"
         assert data["association"]["metadata"]["team"] == "backend"
 
-    def test_create_association_all_relationships(
-            self, test_client: TestClient, workspace_headers: dict[str, str]
-    ) -> None:
+    def test_create_association_all_relationships(self, test_client: TestClient, workspace_headers: dict[str, str]) -> None:
         """Test creating associations with all relationship types."""
         # Create base memory
         base_response = test_client.post(
@@ -1012,13 +1008,32 @@ class TestAssociations:
 
         # Test various relationship types
         relationships = [
-            "causes", "triggers", "leads_to", "prevents",
-            "solves", "addresses", "alternative_to", "improves",
-            "occurs_in", "applies_to", "works_with", "requires",
-            "builds_on", "contradicts", "confirms", "supersedes",
-            "similar_to", "variant_of", "related_to",
-            "follows", "depends_on", "enables", "blocks",
-            "effective_for", "preferred_over", "deprecated_by",
+            "causes",
+            "triggers",
+            "leads_to",
+            "prevents",
+            "solves",
+            "addresses",
+            "alternative_to",
+            "improves",
+            "occurs_in",
+            "applies_to",
+            "works_with",
+            "requires",
+            "builds_on",
+            "contradicts",
+            "confirms",
+            "supersedes",
+            "similar_to",
+            "variant_of",
+            "related_to",
+            "follows",
+            "depends_on",
+            "enables",
+            "blocks",
+            "effective_for",
+            "preferred_over",
+            "deprecated_by",
         ]
 
         for relationship in relationships:
@@ -1096,9 +1111,7 @@ class TestAssociations:
         assert data["total_count"] >= 2
         assert len(data["associations"]) >= 2
 
-    def test_list_associations_with_relationship_filter(
-            self, test_client: TestClient, workspace_headers: dict[str, str]
-    ) -> None:
+    def test_list_associations_with_relationship_filter(self, test_client: TestClient, workspace_headers: dict[str, str]) -> None:
         """Test listing associations filtered by relationship types."""
         # Create memories
         response1 = test_client.post(

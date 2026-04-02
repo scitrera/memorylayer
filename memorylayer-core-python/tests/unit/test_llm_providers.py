@@ -1,23 +1,28 @@
 """Unit tests for Anthropic and Google GenAI LLM providers."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from memorylayer_server.models.llm import (
-    LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk,
-)
+import pytest
 
+from memorylayer_server.models.llm import (
+    LLMMessage,
+    LLMRequest,
+    LLMResponse,
+    LLMRole,
+)
 
 # ============================================
 # Shared fixtures
 # ============================================
 
+
 def _make_request(
-        messages=None,
-        model=None,
-        max_tokens=512,
-        temperature=0.7,
-        stop=None,
-        stream=False,
+    messages=None,
+    model=None,
+    max_tokens=512,
+    temperature=0.7,
+    stop=None,
+    stream=False,
 ):
     if messages is None:
         messages = [
@@ -34,17 +39,20 @@ def _make_request(
 
 
 def _make_system_request():
-    return _make_request(messages=[
-        LLMMessage(role=LLMRole.SYSTEM, content="You are helpful."),
-        LLMMessage(role=LLMRole.USER, content="Hi"),
-        LLMMessage(role=LLMRole.ASSISTANT, content="Hello!"),
-        LLMMessage(role=LLMRole.USER, content="How are you?"),
-    ])
+    return _make_request(
+        messages=[
+            LLMMessage(role=LLMRole.SYSTEM, content="You are helpful."),
+            LLMMessage(role=LLMRole.USER, content="Hi"),
+            LLMMessage(role=LLMRole.ASSISTANT, content="Hello!"),
+            LLMMessage(role=LLMRole.USER, content="How are you?"),
+        ]
+    )
 
 
 # ============================================
 # Anthropic Provider Tests
 # ============================================
+
 
 class TestAnthropicLLMProvider:
     """Tests for AnthropicLLMProvider."""
@@ -52,6 +60,7 @@ class TestAnthropicLLMProvider:
     @pytest.fixture
     def provider(self):
         from memorylayer_server.services.llm.anthropic import AnthropicLLMProvider
+
         return AnthropicLLMProvider(
             api_key="test-key",
             model="claude-sonnet-4-20250514",
@@ -83,11 +92,13 @@ class TestAnthropicLLMProvider:
 
     def test_prepare_messages_multiple_system(self, provider):
         """Multiple system messages are concatenated."""
-        request = _make_request(messages=[
-            LLMMessage(role=LLMRole.SYSTEM, content="First system."),
-            LLMMessage(role=LLMRole.SYSTEM, content="Second system."),
-            LLMMessage(role=LLMRole.USER, content="Hi"),
-        ])
+        request = _make_request(
+            messages=[
+                LLMMessage(role=LLMRole.SYSTEM, content="First system."),
+                LLMMessage(role=LLMRole.SYSTEM, content="Second system."),
+                LLMMessage(role=LLMRole.USER, content="Hi"),
+            ]
+        )
         system_text, messages = provider._prepare_messages(request)
 
         assert system_text == "First system.\nSecond system."
@@ -257,7 +268,7 @@ class TestAnthropicLLMProvider:
         assert chunks[2].finish_reason == "stop"
 
     def test_lazy_client_import_error(self, provider):
-        with patch.dict('sys.modules', {'anthropic': None}):
+        with patch.dict("sys.modules", {"anthropic": None}):
             provider._client = None
             with pytest.raises(ImportError, match="anthropic package not installed"):
                 provider._get_client()
@@ -267,12 +278,14 @@ class TestAnthropicLLMProvider:
 # Google GenAI Provider Tests
 # ============================================
 
+
 class TestGoogleLLMProvider:
     """Tests for GoogleLLMProvider."""
 
     @pytest.fixture
     def provider(self):
         from memorylayer_server.services.llm.google import GoogleLLMProvider
+
         return GoogleLLMProvider(
             api_key="test-key",
             model="gemini-3-flash-preview",
@@ -306,11 +319,13 @@ class TestGoogleLLMProvider:
 
     def test_extract_messages_multiple_system(self, provider):
         """Multiple system messages are concatenated."""
-        request = _make_request(messages=[
-            LLMMessage(role=LLMRole.SYSTEM, content="First."),
-            LLMMessage(role=LLMRole.SYSTEM, content="Second."),
-            LLMMessage(role=LLMRole.USER, content="Hi"),
-        ])
+        request = _make_request(
+            messages=[
+                LLMMessage(role=LLMRole.SYSTEM, content="First."),
+                LLMMessage(role=LLMRole.SYSTEM, content="Second."),
+                LLMMessage(role=LLMRole.USER, content="Hi"),
+            ]
+        )
         system_text, messages = provider._extract_messages(request)
 
         assert system_text == "First.\nSecond."
@@ -330,7 +345,8 @@ class TestGoogleLLMProvider:
         mock_contents = MagicMock()
         mock_config = MagicMock()
         with patch.object(
-            provider.__class__, '_build_request',
+            provider.__class__,
+            "_build_request",
             return_value=(mock_contents, mock_config),
         ) as mock_build:
             mock_build.mock_contents = mock_contents
@@ -516,9 +532,7 @@ class TestGoogleLLMProvider:
         assert chunks[2].is_final is True
 
     def test_lazy_client_import_error(self, provider):
-        with patch.dict('sys.modules', {'google': None, 'google.genai': None}):
+        with patch.dict("sys.modules", {"google": None, "google.genai": None}):
             provider._client = None
             with pytest.raises(ImportError, match="google-genai package not installed"):
                 provider._get_client()
-
-

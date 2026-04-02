@@ -12,19 +12,18 @@ in embedding space to relevant documents than the original short query would be.
 """
 
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import Variables, get_extension
 
 from ....config import RerankerProviderType
 from ....utils import cosine_similarity
-from ..base import RerankerProvider, RerankerProviderPluginBase
-from ...llm import EXT_LLM_SERVICE, LLMService
 from ...embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
+from ...llm import EXT_LLM_SERVICE, LLMService
+from ..base import RerankerProvider, RerankerProviderPluginBase
 
 # Environment variable names
-MEMORYLAYER_RERANKER_HYDE_MAX_TOKENS = 'MEMORYLAYER_RERANKER_HYDE_MAX_TOKENS'
-MEMORYLAYER_RERANKER_HYDE_TEMPERATURE = 'MEMORYLAYER_RERANKER_HYDE_TEMPERATURE'
+MEMORYLAYER_RERANKER_HYDE_MAX_TOKENS = "MEMORYLAYER_RERANKER_HYDE_MAX_TOKENS"
+MEMORYLAYER_RERANKER_HYDE_TEMPERATURE = "MEMORYLAYER_RERANKER_HYDE_TEMPERATURE"
 
 # Defaults
 DEFAULT_HYDE_MAX_TOKENS = 2048
@@ -53,12 +52,12 @@ class HyDERerankerProvider(RerankerProvider):
     """
 
     def __init__(
-            self,
-            v: Variables,
-            llm_service: LLMService,
-            embedding_service: EmbeddingService,
-            max_tokens: int = DEFAULT_HYDE_MAX_TOKENS,
-            temperature: float = DEFAULT_HYDE_TEMPERATURE,
+        self,
+        v: Variables,
+        llm_service: LLMService,
+        embedding_service: EmbeddingService,
+        max_tokens: int = DEFAULT_HYDE_MAX_TOKENS,
+        temperature: float = DEFAULT_HYDE_TEMPERATURE,
     ):
         super().__init__(v)
         self.llm_service = llm_service
@@ -66,7 +65,7 @@ class HyDERerankerProvider(RerankerProvider):
         self.max_tokens = max_tokens
         self.temperature = temperature
 
-    async def _generate_hypothetical_answer(self, query: str, instruction: Optional[str] = None) -> str:
+    async def _generate_hypothetical_answer(self, query: str, instruction: str | None = None) -> str:
         """Generate a hypothetical answer to the query using the LLM."""
         full_query = query
         if instruction:
@@ -84,10 +83,10 @@ class HyDERerankerProvider(RerankerProvider):
         return hypothetical_answer
 
     async def rerank(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
     ) -> list[float]:
         """
         Score documents by HyDE similarity.

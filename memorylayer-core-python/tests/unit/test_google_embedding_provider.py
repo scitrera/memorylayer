@@ -1,6 +1,8 @@
 """Unit tests for Google GenAI embedding provider."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestGoogleEmbeddingProvider:
@@ -9,6 +11,7 @@ class TestGoogleEmbeddingProvider:
     @pytest.fixture
     def provider(self):
         from memorylayer_server.services.embedding.google import GoogleEmbeddingProvider
+
         return GoogleEmbeddingProvider(
             api_key="test-key",
             model="gemini-embedding-001",
@@ -39,7 +42,7 @@ class TestGoogleEmbeddingProvider:
         mock_client.aio.models = mock_aio_models
         provider._client = mock_client
 
-        with patch.object(provider, '_get_config', return_value=MagicMock()):
+        with patch.object(provider, "_get_config", return_value=MagicMock()):
             result = await provider.embed("test text")
 
         assert result == [0.1, 0.2, 0.3]
@@ -68,7 +71,7 @@ class TestGoogleEmbeddingProvider:
         provider._client = mock_client
 
         texts = ["first", "second", "third"]
-        with patch.object(provider, '_get_config', return_value=MagicMock()):
+        with patch.object(provider, "_get_config", return_value=MagicMock()):
             result = await provider.embed_batch(texts)
 
         assert len(result) == 3
@@ -95,13 +98,13 @@ class TestGoogleEmbeddingProvider:
         mock_client.aio.models = mock_aio_models
         provider._client = mock_client
 
-        with patch.object(provider, '_get_config', return_value=MagicMock()):
+        with patch.object(provider, "_get_config", return_value=MagicMock()):
             result = await provider.embed("test")
 
         assert isinstance(result, list)
 
     def test_lazy_client_import_error(self, provider):
-        with patch.dict('sys.modules', {'google': None, 'google.genai': None}):
+        with patch.dict("sys.modules", {"google": None, "google.genai": None}):
             provider._client = None
             with pytest.raises(ImportError, match="google-genai package not installed"):
                 provider._get_client()
@@ -111,12 +114,14 @@ class TestGoogleEmbeddingProviderPlugin:
     """Tests for GoogleEmbeddingProviderPlugin."""
 
     def test_plugin_provider_name(self):
-        from memorylayer_server.services.embedding.google import GoogleEmbeddingProviderPlugin
         from memorylayer_server.config import EmbeddingProviderType
+        from memorylayer_server.services.embedding.google import GoogleEmbeddingProviderPlugin
+
         plugin = GoogleEmbeddingProviderPlugin()
         assert plugin.PROVIDER_NAME == EmbeddingProviderType.GOOGLE
 
     def test_plugin_name(self):
         from memorylayer_server.services.embedding.google import GoogleEmbeddingProviderPlugin
+
         plugin = GoogleEmbeddingProviderPlugin()
-        assert 'GOOGLE' in plugin.name() or 'google' in plugin.name()
+        assert "GOOGLE" in plugin.name() or "google" in plugin.name()

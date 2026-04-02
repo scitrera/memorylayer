@@ -1,36 +1,37 @@
 """Contradiction Service - Base interface and plugin."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from ...config import MEMORYLAYER_CONTRADICTION_PROVIDER, DEFAULT_MEMORYLAYER_CONTRADICTION_PROVIDER
-from .._constants import EXT_STORAGE_BACKEND, EXT_CONTRADICTION_SERVICE
-from .._plugin_factory import make_service_plugin_base
+from ...config import DEFAULT_MEMORYLAYER_CONTRADICTION_PROVIDER, MEMORYLAYER_CONTRADICTION_PROVIDER
 from ...utils import generate_id
+from .._constants import EXT_CONTRADICTION_SERVICE, EXT_STORAGE_BACKEND
+from .._plugin_factory import make_service_plugin_base
 
 # Valid contradiction types
-CONTRADICTION_TYPE_NEGATION = 'negation'
-CONTRADICTION_TYPE_SEMANTIC_VALUE_CONFLICT = 'semantic_value_conflict'
-CONTRADICTION_TYPE_TEMPORAL_SUPERSESSION = 'temporal_supersession'
-CONTRADICTION_TYPE_SCOPE_CONFLICT = 'scope_conflict'
+CONTRADICTION_TYPE_NEGATION = "negation"
+CONTRADICTION_TYPE_SEMANTIC_VALUE_CONFLICT = "semantic_value_conflict"
+CONTRADICTION_TYPE_TEMPORAL_SUPERSESSION = "temporal_supersession"
+CONTRADICTION_TYPE_SCOPE_CONFLICT = "scope_conflict"
 
 
 @dataclass
 class ContradictionRecord:
     """A detected contradiction between two memories."""
+
     id: str = field(default_factory=lambda: generate_id("contra"))
-    workspace_id: str = ''
-    memory_a_id: str = ''
-    memory_b_id: str = ''
-    contradiction_type: Optional[str] = None  # e.g., "negation", "semantic_value_conflict", "temporal_supersession", "scope_conflict"
+    workspace_id: str = ""
+    memory_a_id: str = ""
+    memory_b_id: str = ""
+    contradiction_type: str | None = None  # e.g., "negation", "semantic_value_conflict", "temporal_supersession", "scope_conflict"
     confidence: float = 0.0  # 0.0-1.0
-    detection_method: str = ''  # e.g., "negation_pattern", "embedding_similarity", "entity_value_extraction"
-    detected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    resolved_at: Optional[datetime] = None
-    resolution: Optional[str] = None  # e.g., "keep_a", "keep_b", "keep_both", "merge"
-    merged_content: Optional[str] = None
-    newer_memory_id: Optional[str] = None  # Temporal ordering: which memory is more recent
+    detection_method: str = ""  # e.g., "negation_pattern", "embedding_similarity", "entity_value_extraction"
+    detected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    resolved_at: datetime | None = None
+    resolution: str | None = None  # e.g., "keep_a", "keep_b", "keep_both", "merge"
+    merged_content: str | None = None
+    newer_memory_id: str | None = None  # Temporal ordering: which memory is more recent
 
 
 class ContradictionService(ABC):
@@ -68,8 +69,8 @@ class ContradictionService(ABC):
         workspace_id: str,
         contradiction_id: str,
         resolution: str,
-        merged_content: Optional[str] = None,
-    ) -> Optional[ContradictionRecord]:
+        merged_content: str | None = None,
+    ) -> ContradictionRecord | None:
         """Resolve a contradiction.
 
         Args:
@@ -108,7 +109,7 @@ class ContradictionService(ABC):
         self,
         memory_a,
         memory_b,
-    ) -> Optional[ContradictionRecord]:
+    ) -> ContradictionRecord | None:
         """Check if two memories have a semantic value conflict.
 
         Uses entity-value extraction (regex patterns) and embedding similarity

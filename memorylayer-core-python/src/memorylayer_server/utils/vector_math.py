@@ -1,4 +1,5 @@
 """Vector math utilities for embedding operations."""
+
 import numpy as np
 
 

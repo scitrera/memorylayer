@@ -4,17 +4,16 @@ Default Ontology Service implementation.
 Provides relationship type definitions and validation.
 OSS version includes unified ontology with 65 relationship types across 11 categories.
 """
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
 from .base import (
-    OntologyService,
-    OntologyServicePluginBase,
-    FeatureRequiresUpgradeError,
     BASE_ONTOLOGY,
     RELATIONSHIP_CATEGORIES,
+    FeatureRequiresUpgradeError,
+    OntologyService,
+    OntologyServicePluginBase,
 )
 
 
@@ -37,11 +36,7 @@ class DefaultOntologyService(OntologyService):
             len(RELATIONSHIP_CATEGORIES),
         )
 
-    def get_merged_ontology(
-            self,
-            tenant_id: str,
-            workspace_id: Optional[str] = None
-    ) -> dict:
+    def get_merged_ontology(self, tenant_id: str, workspace_id: str | None = None) -> dict:
         """
         Get merged ontology (base + custom for enterprise).
 
@@ -57,12 +52,7 @@ class DefaultOntologyService(OntologyService):
         # OSS: Return base ontology only
         return self.base_ontology.copy()
 
-    def validate_relationship(
-            self,
-            relationship_type: str,
-            tenant_id: str,
-            workspace_id: Optional[str] = None
-    ) -> bool:
+    def validate_relationship(self, relationship_type: str, tenant_id: str, workspace_id: str | None = None) -> bool:
         """
         Validate that a relationship type exists in the ontology.
 
@@ -81,19 +71,11 @@ class DefaultOntologyService(OntologyService):
 
         if relationship_type not in ontology:
             valid_types = ", ".join(sorted(ontology.keys()))
-            raise ValueError(
-                f"Invalid relationship type: {relationship_type}. "
-                f"Valid types: {valid_types}"
-            )
+            raise ValueError(f"Invalid relationship type: {relationship_type}. Valid types: {valid_types}")
 
         return True
 
-    def get_relationship_info(
-            self,
-            relationship_type: str,
-            tenant_id: str,
-            workspace_id: Optional[str] = None
-    ) -> dict:
+    def get_relationship_info(self, relationship_type: str, tenant_id: str, workspace_id: str | None = None) -> dict:
         """
         Get metadata about a relationship type.
 
@@ -112,13 +94,7 @@ class DefaultOntologyService(OntologyService):
         ontology = self.get_merged_ontology(tenant_id, workspace_id)
         return ontology[relationship_type].copy()
 
-    def create_ontology(
-            self,
-            tenant_id: str,
-            name: str,
-            relationships: dict,
-            workspace_id: Optional[str] = None
-    ) -> dict:
+    def create_ontology(self, tenant_id: str, name: str, relationships: dict, workspace_id: str | None = None) -> dict:
         """
         Create a custom ontology.
 
@@ -135,11 +111,7 @@ class DefaultOntologyService(OntologyService):
         """
         raise FeatureRequiresUpgradeError("custom_ontologies")
 
-    def list_relationship_types(
-            self,
-            tenant_id: str,
-            workspace_id: Optional[str] = None
-    ) -> list[str]:
+    def list_relationship_types(self, tenant_id: str, workspace_id: str | None = None) -> list[str]:
         """
         List all available relationship types.
 
@@ -154,11 +126,11 @@ class DefaultOntologyService(OntologyService):
         return sorted(ontology.keys())
 
     async def classify_relationship(
-            self,
-            content_a: str,
-            content_b: str,
-            tenant_id: str = "_default",
-            workspace_id: Optional[str] = None,
+        self,
+        content_a: str,
+        content_b: str,
+        tenant_id: str = "_default",
+        workspace_id: str | None = None,
     ) -> str:
         """Use LLM to classify the relationship between two memory contents.
 
@@ -202,7 +174,7 @@ class DefaultOntologyService(OntologyService):
         )
 
         try:
-            from ...models.llm import LLMRequest, LLMMessage, LLMRole
+            from ...models.llm import LLMMessage, LLMRequest, LLMRole
 
             request = LLMRequest(
                 messages=[
@@ -213,7 +185,7 @@ class DefaultOntologyService(OntologyService):
             )
 
             response = await self.llm_service.complete(request, profile="ontology")
-            result = response.content.strip().lower().replace('"', '').replace("'", '').rstrip('.')
+            result = response.content.strip().lower().replace('"', "").replace("'", "").rstrip(".")
 
             # Validate the LLM response against the ontology
             if result in ontology:
@@ -228,7 +200,8 @@ class DefaultOntologyService(OntologyService):
                     matched = prefix_matches[0]
                     self.logger.debug(
                         "Prefix-matched truncated relationship '%s' to '%s'",
-                        result, matched,
+                        result,
+                        matched,
                     )
                     return matched
 
@@ -243,10 +216,10 @@ class DefaultOntologyService(OntologyService):
             return "related_to"
 
     def get_relationships_by_category(
-            self,
-            category: str,
-            tenant_id: str = "_default",
-            workspace_id: Optional[str] = None,
+        self,
+        category: str,
+        tenant_id: str = "_default",
+        workspace_id: str | None = None,
     ) -> list[str]:
         """Get all relationship types in a category.
 
@@ -262,22 +235,16 @@ class DefaultOntologyService(OntologyService):
             ValueError: If the category is not recognized.
         """
         if category not in RELATIONSHIP_CATEGORIES:
-            raise ValueError(
-                f"Invalid category: {category}. "
-                f"Valid categories: {', '.join(sorted(RELATIONSHIP_CATEGORIES))}"
-            )
+            raise ValueError(f"Invalid category: {category}. Valid categories: {', '.join(sorted(RELATIONSHIP_CATEGORIES))}")
 
         ontology = self.get_merged_ontology(tenant_id, workspace_id)
-        return sorted(
-            rel_type
-            for rel_type, info in ontology.items()
-            if info.get("category") == category
-        )
+        return sorted(rel_type for rel_type, info in ontology.items() if info.get("category") == category)
 
 
 class DefaultOntologyServicePlugin(OntologyServicePluginBase):
     """Default ontology service plugin."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def get_dependencies(self, v: Variables):
         return ()  # LLM is optional, don't require it
@@ -287,6 +254,7 @@ class DefaultOntologyServicePlugin(OntologyServicePluginBase):
         llm_service = None
         try:
             from ..llm import EXT_LLM_SERVICE
+
             llm_service = self.get_extension(EXT_LLM_SERVICE, v)
         except Exception:
             logger.debug("LLM service not available for ontology classification")

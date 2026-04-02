@@ -1,7 +1,6 @@
-from ...config import MEMORYLAYER_REFLECT_SERVICE, DEFAULT_MEMORYLAYER_REFLECT_SERVICE
-from .._constants import EXT_STORAGE_BACKEND, EXT_MEMORY_SERVICE, EXT_REFLECT_SERVICE
+from ...config import DEFAULT_MEMORYLAYER_REFLECT_SERVICE, MEMORYLAYER_REFLECT_SERVICE
+from .._constants import EXT_MEMORY_SERVICE, EXT_REFLECT_SERVICE, EXT_STORAGE_BACKEND
 from .._plugin_factory import make_service_plugin_base
-
 
 # noinspection PyAbstractClass
 ReflectServicePluginBase = make_service_plugin_base(

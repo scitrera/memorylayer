@@ -1,18 +1,21 @@
 import hashlib
 from logging import Logger
-
 from pathlib import Path
-from typing import Any, Optional, Union, Iterable
+from typing import Any
 
-from scitrera_app_framework import get_logger, Variables as Variables
+from scitrera_app_framework import Variables as Variables
+from scitrera_app_framework import get_logger
 
-from .base import (
-    EmbeddingProvider, MultimodalEmbeddingProvider,
-    EmbeddingInput, EmbeddingType,
-    EmbeddingServicePluginBase, EXT_EMBEDDING_PROVIDER,
-)
-from ..cache import EXT_CACHE_SERVICE
 from ...utils import cosine_similarity as _cosine_similarity
+from ..cache import EXT_CACHE_SERVICE
+from .base import (
+    EXT_EMBEDDING_PROVIDER,
+    EmbeddingInput,
+    EmbeddingProvider,
+    EmbeddingServicePluginBase,
+    EmbeddingType,
+    MultimodalEmbeddingProvider,
+)
 
 
 class EmbeddingService:
@@ -23,7 +26,7 @@ class EmbeddingService:
     when a multimodal provider is configured.
     """
 
-    def __init__(self, v: Variables = None, provider: EmbeddingProvider = None, cache: Optional[Any] = None):
+    def __init__(self, v: Variables = None, provider: EmbeddingProvider = None, cache: Any | None = None):
         self.provider = provider
         self.cache = cache
         self.logger = get_logger(v, name=self.__class__.__name__)
@@ -33,14 +36,13 @@ class EmbeddingService:
             "Initialized EmbeddingService with provider: %s, dimensions: %s, multimodal: %s",
             provider.__class__.__name__,
             provider.dimensions,
-            self._is_multimodal
+            self._is_multimodal,
         )
 
     @property
     def is_multimodal(self) -> bool:
         """Whether this service supports multimodal (text + image) embeddings."""
         return self._is_multimodal
-
 
     async def embed(self, text: str) -> list[float]:
         """Generate embedding with optional caching."""
@@ -65,7 +67,7 @@ class EmbeddingService:
 
         return embedding
 
-    async def embed_image(self, image: Union[str, bytes, Path]) -> list[float]:
+    async def embed_image(self, image: str | bytes | Path) -> list[float]:
         """
         Generate embedding for an image.
 
@@ -80,11 +82,7 @@ class EmbeddingService:
         provider: MultimodalEmbeddingProvider = self.provider
         return await provider.embed_image(image)
 
-    async def embed_multimodal(
-            self,
-            text: Optional[str] = None,
-            image: Optional[Union[str, bytes, Path]] = None
-    ) -> list[float]:
+    async def embed_multimodal(self, text: str | None = None, image: str | bytes | Path | None = None) -> list[float]:
         """
         Generate embedding for combined text and image.
 
@@ -92,9 +90,7 @@ class EmbeddingService:
         """
         if not self._is_multimodal:
             if image:
-                raise ValueError(
-                    f"Provider {self.provider.__class__.__name__} does not support image embeddings."
-                )
+                raise ValueError(f"Provider {self.provider.__class__.__name__} does not support image embeddings.")
             return await self.embed(text)
 
         provider: MultimodalEmbeddingProvider = self.provider
@@ -134,13 +130,10 @@ class EmbeddingService:
 
 class EmbeddingServicePlugin(EmbeddingServicePluginBase):
     """Default plugin for embedding service."""
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     def initialize(self, v: Variables, logger: Logger) -> object | None:
         cache_service = self.get_extension(EXT_CACHE_SERVICE, v)
         embedding_provider: EmbeddingProvider = self.get_extension(EXT_EMBEDDING_PROVIDER, v)
-        return EmbeddingService(
-            v=v,
-            provider=embedding_provider,
-            cache=cache_service
-        )
+        return EmbeddingService(v=v, provider=embedding_provider, cache=cache_service)

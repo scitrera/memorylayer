@@ -1,7 +1,7 @@
 """No-op audit service - silently discards all events (OSS default)."""
+
 from datetime import datetime
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework.api import Variables
 
@@ -20,9 +20,9 @@ class NoopAuditService(AuditService):
     async def query(
         self,
         tenant_id: str,
-        workspace_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        since: Optional[datetime] = None,
+        workspace_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditEvent]:
         return []
@@ -30,7 +30,8 @@ class NoopAuditService(AuditService):
 
 class NoopAuditServicePlugin(AuditServicePluginBase):
     """Plugin for no-op audit service."""
-    PROVIDER_NAME = 'noop'
 
-    def initialize(self, v: Variables, logger: Logger) -> Optional[NoopAuditService]:
+    PROVIDER_NAME = "noop"
+
+    def initialize(self, v: Variables, logger: Logger) -> NoopAuditService | None:
         return NoopAuditService()

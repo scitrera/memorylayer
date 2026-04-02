@@ -1,11 +1,12 @@
 """SQLite storage backend with sqlite-vec support."""
+
 import hashlib
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging import Logger
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -14,33 +15,56 @@ import aiosqlite
 sqlite3.register_adapter(datetime, lambda dt: dt.isoformat())
 sqlite3.register_converter("datetime", lambda b: datetime.fromisoformat(b.decode()))
 
-from scitrera_app_framework import Plugin, Variables as Variables
+from scitrera_app_framework import Variables as Variables
 
-from ...models.memory import Memory, MemoryStatus, RememberInput, MemoryType, MemorySubtype
-from ...models.association import Association, AssociateInput, GraphQueryResult, GraphPath
-from ...models.workspace import Workspace, Context
+from ...config import DEFAULT_CONTEXT_ID, DEFAULT_MEMORYLAYER_SQLITE_STORAGE_PATH, DEFAULT_TENANT_ID, MEMORYLAYER_SQLITE_STORAGE_PATH
+from ...models.association import AssociateInput, Association, GraphPath, GraphQueryResult
+from ...models.memory import Memory, MemoryStatus, MemorySubtype, MemoryType, RememberInput
 from ...models.session import Session, WorkingMemory
-from .base import StorageBackend, StoragePluginBase
-from ...config import MEMORYLAYER_SQLITE_STORAGE_PATH, DEFAULT_MEMORYLAYER_SQLITE_STORAGE_PATH
-from ...utils import generate_id, utc_now_iso, parse_datetime_utc, cosine_similarity
-from ...config import DEFAULT_TENANT_ID, DEFAULT_CONTEXT_ID
+from ...models.workspace import Context, Workspace
+from ...utils import cosine_similarity, generate_id, parse_datetime_utc, utc_now_iso
 from ..contradiction.base import ContradictionRecord
+from .base import StorageBackend, StoragePluginBase
 
+_UPDATABLE_MEMORY_COLUMNS = frozenset(
+    {
+        "content",
+        "content_hash",
+        "type",
+        "subtype",
+        "importance",
+        "tags",
+        "metadata",
+        "embedding",
+        "abstract",
+        "overview",
+        "pinned",
+        "category",
+        "decay_factor",
+        "status",
+        "archived_at",
+        "observer_id",
+        "subject_id",
+        "access_count",
+        "last_accessed_at",
+        "created_at",
+        "updated_at",
+        "source_memory_id",
+    }
+)
 
-_UPDATABLE_MEMORY_COLUMNS = frozenset({
-    "content", "content_hash", "type", "subtype", "importance",
-    "tags", "metadata", "embedding", "abstract", "overview",
-    "pinned", "category", "decay_factor", "status", "archived_at",
-    "observer_id", "subject_id",
-    "access_count", "last_accessed_at", "created_at", "updated_at",
-    "source_memory_id",
-})
-
-_UPDATABLE_THREAD_COLUMNS = frozenset({
-    "title", "metadata", "model", "system_prompt",
-    "max_messages", "ttl_seconds", "expires_at",
-    "last_decomposed_index",
-})
+_UPDATABLE_THREAD_COLUMNS = frozenset(
+    {
+        "title",
+        "metadata",
+        "model",
+        "system_prompt",
+        "max_messages",
+        "ttl_seconds",
+        "expires_at",
+        "last_decomposed_index",
+    }
+)
 
 
 class SQLiteStorageBackend(StorageBackend):
@@ -56,7 +80,7 @@ class SQLiteStorageBackend(StorageBackend):
         """
         super().__init__(v)
         self.db_path = db_path
-        self._connection: Optional[aiosqlite.Connection] = None
+        self._connection: aiosqlite.Connection | None = None
         self._has_vec_extension = False
 
     async def connect(self) -> None:
@@ -78,6 +102,7 @@ class SQLiteStorageBackend(StorageBackend):
         try:
             await self._connection.enable_load_extension(True)
             from sqlite_vec import loadable_path
+
             lp = loadable_path()
             self.logger.debug("sqlite-vec extension path: %s", lp)
             await self._connection.load_extension(lp)
@@ -192,9 +217,7 @@ class SQLiteStorageBackend(StorageBackend):
                                                    )
                                        )
                                        """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_contexts_workspace ON contexts(workspace_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_contexts_workspace ON contexts(workspace_id)")
 
         # Memories
         await self._connection.execute("""
@@ -371,15 +394,9 @@ class SQLiteStorageBackend(StorageBackend):
                                                    )
                                        )
                                        """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_associations_workspace ON memory_associations(workspace_id)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_associations_source ON memory_associations(source_id)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_associations_target ON memory_associations(target_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_associations_workspace ON memory_associations(workspace_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_associations_source ON memory_associations(source_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_associations_target ON memory_associations(target_id)")
 
         # Sessions table (for persistent session storage)
         await self._connection.execute("""
@@ -437,15 +454,9 @@ class SQLiteStorageBackend(StorageBackend):
                                                    )
                                        )
                                        """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_context ON sessions(context_id)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_context ON sessions(context_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)")
 
         # Working memory table (formerly session_contexts)
         await self._connection.execute("""
@@ -492,9 +503,7 @@ class SQLiteStorageBackend(StorageBackend):
                                                    ) ON DELETE CASCADE
                                        )
                                        """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_working_memory_session ON working_memory(session_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_working_memory_session ON working_memory(session_id)")
 
         # Contradictions table
         await self._connection.execute("""
@@ -515,9 +524,7 @@ class SQLiteStorageBackend(StorageBackend):
                                            FOREIGN KEY (memory_b_id) REFERENCES memories (id)
                                        )
                                        """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_contradictions_workspace ON contradictions(workspace_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_contradictions_workspace ON contradictions(workspace_id)")
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_contradictions_unresolved ON contradictions(workspace_id) WHERE resolved_at IS NULL"
         )
@@ -543,9 +550,7 @@ class SQLiteStorageBackend(StorageBackend):
                 FOREIGN KEY (workspace_id) REFERENCES workspaces (id)
             )
         """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chat_threads_workspace ON chat_threads(workspace_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_threads_workspace ON chat_threads(workspace_id)")
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_threads_user ON chat_threads(workspace_id, user_id) WHERE user_id IS NOT NULL"
         )
@@ -564,12 +569,8 @@ class SQLiteStorageBackend(StorageBackend):
                 FOREIGN KEY (thread_id) REFERENCES chat_threads (id) ON DELETE CASCADE
             )
         """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, message_index)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chat_messages_workspace ON chat_messages(workspace_id, thread_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, message_index)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_workspace ON chat_messages(workspace_id, thread_id)")
 
         await self._connection.commit()
 
@@ -580,20 +581,26 @@ class SQLiteStorageBackend(StorageBackend):
         now = utc_now_iso()
 
         # Create _default workspace (main default for auto-discovery)
-        await self._connection.execute("""
+        await self._connection.execute(
+            """
                                        INSERT
                                            OR IGNORE
                                        INTO workspaces (id, tenant_id, name, settings, created_at, updated_at)
                                        VALUES (?, ?, 'Default Workspace', '{}', ?, ?)
-                                       """, (DEFAULT_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now))
+                                       """,
+            (DEFAULT_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now),
+        )
 
         # Create _global workspace (cross-workspace shared storage)
-        await self._connection.execute("""
+        await self._connection.execute(
+            """
                                        INSERT
                                            OR IGNORE
                                        INTO workspaces (id, tenant_id, name, settings, created_at, updated_at)
                                        VALUES (?, ?, 'Global Workspace', '{}', ?, ?)
-                                       """, (GLOBAL_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now))
+                                       """,
+            (GLOBAL_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now),
+        )
 
         # Get all workspaces
         cursor = await self._connection.execute("SELECT id FROM workspaces")
@@ -602,12 +609,15 @@ class SQLiteStorageBackend(StorageBackend):
         # Create _default context for each workspace if not exists
         for workspace in workspaces:
             workspace_id = workspace["id"]
-            await self._connection.execute("""
+            await self._connection.execute(
+                """
                                            INSERT
                                                OR IGNORE
                                            INTO contexts (id, workspace_id, name, description, settings, created_at, updated_at)
                                            VALUES ('_default', ?, '_default', 'Default context', '{}', ?, ?)
-                                           """, (workspace_id, now, now))
+                                           """,
+                (workspace_id, now, now),
+            )
 
         await self._connection.commit()
         self.logger.info("Reserved entities initialized (_default workspace, _global workspace, _default contexts)")
@@ -637,30 +647,30 @@ class SQLiteStorageBackend(StorageBackend):
             """,
             (
                 memory_id,
-                getattr(input, 'tenant_id', None) or DEFAULT_TENANT_ID,
+                getattr(input, "tenant_id", None) or DEFAULT_TENANT_ID,
                 workspace_id,
-                getattr(input, 'context_id', None) or '_default',
-                getattr(input, 'session_id', None),
+                getattr(input, "context_id", None) or "_default",
+                getattr(input, "session_id", None),
                 input.user_id,
                 input.content,
                 content_hash,
                 input.type.value if input.type else MemoryType.SEMANTIC.value,
                 input.subtype.value if input.subtype else None,
-                getattr(input, 'category', None),
+                getattr(input, "category", None),
                 input.importance,
                 json.dumps(input.tags),
                 json.dumps(input.metadata),
-                getattr(input, 'abstract', None),
-                getattr(input, 'overview', None),
-                getattr(input, 'source_memory_id', None),
+                getattr(input, "abstract", None),
+                getattr(input, "overview", None),
+                getattr(input, "source_memory_id", None),
                 MemoryStatus.ACTIVE.value,
                 0,
-                getattr(input, 'observer_id', None),
-                getattr(input, 'subject_id', None),
-                getattr(input, 'source_document_id', None),
-                getattr(input, 'source_page_id', None),
-                getattr(input, 'source_dataset_id', None),
-                getattr(input, 'source_thread_id', None),
+                getattr(input, "observer_id", None),
+                getattr(input, "subject_id", None),
+                getattr(input, "source_document_id", None),
+                getattr(input, "source_page_id", None),
+                getattr(input, "source_dataset_id", None),
+                getattr(input, "source_thread_id", None),
                 now,
                 now,
             ),
@@ -676,7 +686,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         return await self.get_memory(workspace_id, memory_id, track_access=False)
 
-    async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+    async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Memory | None:
         """Get memory by ID within a workspace. Set track_access=False for internal reads that should not affect decay tracking."""
         cursor = await self._connection.execute(
             """
@@ -708,11 +718,11 @@ class SQLiteStorageBackend(StorageBackend):
             )
             await self._connection.commit()
             memory.access_count = (memory.access_count or 0) + 1
-            memory.last_accessed_at = datetime.now(timezone.utc)
+            memory.last_accessed_at = datetime.now(UTC)
 
         return memory
 
-    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Optional[Memory]:
+    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Memory | None:
         """Get memory by ID without workspace filter. Memory IDs are globally unique."""
         cursor = await self._connection.execute(
             """
@@ -743,11 +753,11 @@ class SQLiteStorageBackend(StorageBackend):
             await self._connection.commit()
             # Reflect the increment in the returned object
             memory.access_count = (memory.access_count or 0) + 1
-            memory.last_accessed_at = datetime.now(timezone.utc)
+            memory.last_accessed_at = datetime.now(UTC)
 
         return memory
 
-    async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Optional[Memory]:
+    async def update_memory(self, workspace_id: str, memory_id: str, **updates) -> Memory | None:
         """Update memory fields."""
         invalid_keys = set(updates.keys()) - _UPDATABLE_MEMORY_COLUMNS
         if invalid_keys:
@@ -775,7 +785,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         query = f"""
             UPDATE memories
-            SET {', '.join(set_parts)}
+            SET {", ".join(set_parts)}
             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
         """
 
@@ -815,10 +825,10 @@ class SQLiteStorageBackend(StorageBackend):
         return cursor.rowcount > 0
 
     async def get_memories_for_decay(
-            self,
-            workspace_id: str,
-            min_age_days: int = 7,
-            exclude_pinned: bool = True,
+        self,
+        workspace_id: str,
+        min_age_days: int = 7,
+        exclude_pinned: bool = True,
     ) -> list[Memory]:
         """Get memories eligible for importance decay."""
         where_parts = [
@@ -834,7 +844,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         query = f"""
             SELECT * FROM memories
-            WHERE {' AND '.join(where_parts)}
+            WHERE {" AND ".join(where_parts)}
             ORDER BY importance DESC
         """
         cursor = await self._connection.execute(query, params)
@@ -842,12 +852,12 @@ class SQLiteStorageBackend(StorageBackend):
         return [self._row_to_memory(row) for row in rows]
 
     async def get_archival_candidates(
-            self,
-            workspace_id: str,
-            max_importance: float = 0.3,
-            max_access_count: int = 5,
-            older_than_days: int = 90,
-            limit: int = 100,
+        self,
+        workspace_id: str,
+        max_importance: float = 0.3,
+        max_access_count: int = 5,
+        older_than_days: int = 90,
+        limit: int = 100,
     ) -> list[Memory]:
         """Get memories eligible for archival."""
         query = """
@@ -863,9 +873,7 @@ class SQLiteStorageBackend(StorageBackend):
                 ORDER BY importance ASC
                 LIMIT ?
                 """
-        cursor = await self._connection.execute(
-            query, (workspace_id, max_importance, max_access_count, older_than_days, limit)
-        )
+        cursor = await self._connection.execute(query, (workspace_id, max_importance, max_access_count, older_than_days, limit))
         rows = await cursor.fetchall()
         return [self._row_to_memory(row) for row in rows]
 
@@ -876,52 +884,74 @@ class SQLiteStorageBackend(StorageBackend):
         return [row["id"] for row in rows]
 
     async def search_memories(
-            self,
-            workspace_id: str,
-            query_embedding: list[float],
-            limit: int = 10,
-            offset: int = 0,
-            min_relevance: float = 0.5,
-            types: Optional[list[str]] = None,
-            subtypes: Optional[list[str]] = None,
-            tags: Optional[list[str]] = None,
-            include_archived: bool = False,
-            observer_id: Optional[str] = None,
-            subject_id: Optional[str] = None,
-            created_after: Optional[str] = None,
-            created_before: Optional[str] = None,
-            user_id: Optional[str] = None,
+        self,
+        workspace_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+        offset: int = 0,
+        min_relevance: float = 0.5,
+        types: list[str] | None = None,
+        subtypes: list[str] | None = None,
+        tags: list[str] | None = None,
+        include_archived: bool = False,
+        observer_id: str | None = None,
+        subject_id: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        user_id: str | None = None,
     ) -> list[tuple[Memory, float]]:
         """Vector similarity search using sqlite-vec or fallback."""
         if self._has_vec_extension:
             return await self._search_with_vec(
-                workspace_id, query_embedding, limit, offset, min_relevance, types, subtypes, tags,
-                include_archived=include_archived, observer_id=observer_id, subject_id=subject_id,
-                created_after=created_after, created_before=created_before, user_id=user_id,
+                workspace_id,
+                query_embedding,
+                limit,
+                offset,
+                min_relevance,
+                types,
+                subtypes,
+                tags,
+                include_archived=include_archived,
+                observer_id=observer_id,
+                subject_id=subject_id,
+                created_after=created_after,
+                created_before=created_before,
+                user_id=user_id,
             )
         else:
             return await self._search_with_fallback(
-                workspace_id, query_embedding, limit, offset, min_relevance, types, subtypes, tags,
-                include_archived=include_archived, observer_id=observer_id, subject_id=subject_id,
-                created_after=created_after, created_before=created_before, user_id=user_id,
+                workspace_id,
+                query_embedding,
+                limit,
+                offset,
+                min_relevance,
+                types,
+                subtypes,
+                tags,
+                include_archived=include_archived,
+                observer_id=observer_id,
+                subject_id=subject_id,
+                created_after=created_after,
+                created_before=created_before,
+                user_id=user_id,
             )
 
     async def _search_with_vec(
-            self,
-            workspace_id: str,
-            query_embedding: list[float],
-            limit: int,
-            offset: int,
-            min_relevance: float,
-            types: Optional[list[str]],
-            subtypes: Optional[list[str]],
-            tags: Optional[list[str]],
-            include_archived: bool = False,
-            observer_id: Optional[str] = None,
-            subject_id: Optional[str] = None,
-            created_after: Optional[str] = None,
-            created_before: Optional[str] = None,
-            user_id: Optional[str] = None,
+        self,
+        workspace_id: str,
+        query_embedding: list[float],
+        limit: int,
+        offset: int,
+        min_relevance: float,
+        types: list[str] | None,
+        subtypes: list[str] | None,
+        tags: list[str] | None,
+        include_archived: bool = False,
+        observer_id: str | None = None,
+        subject_id: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        user_id: str | None = None,
     ) -> list[tuple[Memory, float]]:
         """Search using sqlite-vec extension."""
         # Build WHERE clause
@@ -997,21 +1027,21 @@ class SQLiteStorageBackend(StorageBackend):
         return results
 
     async def _search_with_fallback(
-            self,
-            workspace_id: str,
-            query_embedding: list[float],
-            limit: int,
-            offset: int,
-            min_relevance: float,
-            types: Optional[list[str]],
-            subtypes: Optional[list[str]],
-            tags: Optional[list[str]],
-            include_archived: bool = False,
-            observer_id: Optional[str] = None,
-            subject_id: Optional[str] = None,
-            created_after: Optional[str] = None,
-            created_before: Optional[str] = None,
-            user_id: Optional[str] = None,
+        self,
+        workspace_id: str,
+        query_embedding: list[float],
+        limit: int,
+        offset: int,
+        min_relevance: float,
+        types: list[str] | None,
+        subtypes: list[str] | None,
+        tags: list[str] | None,
+        include_archived: bool = False,
+        observer_id: str | None = None,
+        subject_id: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        user_id: str | None = None,
     ) -> list[tuple[Memory, float]]:
         """Fallback: compute cosine similarity in Python."""
         # Build WHERE clause
@@ -1074,7 +1104,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         # Sort by relevance descending, apply offset and limit
         results.sort(key=lambda x: x[1], reverse=True)
-        return results[offset:offset + limit]
+        return results[offset : offset + limit]
 
     @staticmethod
     def _sanitize_fts5_query(query: str) -> str:
@@ -1083,11 +1113,11 @@ class SQLiteStorageBackend(StorageBackend):
         return f'"{escaped}"'
 
     async def full_text_search(
-            self,
-            workspace_id: str,
-            query: str,
-            limit: int = 10,
-            offset: int = 0,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[Memory]:
         """Full-text search using SQLite FTS5."""
         cursor = await self._connection.execute(
@@ -1106,7 +1136,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         return [self._row_to_memory(row) for row in rows]
 
-    async def get_memory_by_hash(self, workspace_id: str, content_hash: str) -> Optional[Memory]:
+    async def get_memory_by_hash(self, workspace_id: str, content_hash: str) -> Memory | None:
         """Get memory by content hash for deduplication."""
         cursor = await self._connection.execute(
             """
@@ -1123,12 +1153,12 @@ class SQLiteStorageBackend(StorageBackend):
         return self._row_to_memory(row) if row else None
 
     async def get_recent_memories(
-            self,
-            workspace_id: str,
-            created_after: datetime,
-            limit: int = 10,
-            detail_level: str = "abstract",
-            offset: int = 0,
+        self,
+        workspace_id: str,
+        created_after: datetime,
+        limit: int = 10,
+        detail_level: str = "abstract",
+        offset: int = 0,
     ) -> list:
         """Get recent memories ordered by creation time (newest first)."""
         cursor = await self._connection.execute(
@@ -1151,42 +1181,51 @@ class SQLiteStorageBackend(StorageBackend):
         for row in rows:
             if detail_level == "abstract":
                 # Return only id, abstract, type, subtype, importance, tags, created_at
-                results.append({
-                    "id": row["id"],
-                    "abstract": row["abstract"] if row["abstract"] else None,
-                    "type": row["type"],
-                    "subtype": row["subtype"] if row["subtype"] else None,
-                    "importance": row["importance"],
-                    "tags": json.loads(row["tags"]) if row["tags"] else [],
-                    "created_at": row["created_at"],
-                })
+                results.append(
+                    {
+                        "id": row["id"],
+                        "abstract": row["abstract"] if row["abstract"] else None,
+                        "type": row["type"],
+                        "subtype": row["subtype"] if row["subtype"] else None,
+                        "importance": row["importance"],
+                        "tags": json.loads(row["tags"]) if row["tags"] else [],
+                        "created_at": row["created_at"],
+                    }
+                )
             elif detail_level == "overview":
                 # Add overview field (and exclude abstract field)
-                results.append({
-                    "id": row["id"],
-                    # "abstract": row["abstract"] if row["abstract"] else None,
-                    "overview": row["overview"] if row["overview"] else None,
-                    "type": row["type"],
-                    "subtype": row["subtype"] if row["subtype"] else None,
-                    "importance": row["importance"],
-                    "tags": json.loads(row["tags"]) if row["tags"] else [],
-                    "created_at": row["created_at"],
-                })
+                results.append(
+                    {
+                        "id": row["id"],
+                        # "abstract": row["abstract"] if row["abstract"] else None,
+                        "overview": row["overview"] if row["overview"] else None,
+                        "type": row["type"],
+                        "subtype": row["subtype"] if row["subtype"] else None,
+                        "importance": row["importance"],
+                        "tags": json.loads(row["tags"]) if row["tags"] else [],
+                        "created_at": row["created_at"],
+                    }
+                )
             else:  # "full" -- full detail will return the content and doesn't need to return the abstract and overview fields
                 # Return everything as dict
                 memory = self._row_to_memory(row)
-                results.append({
-                    "id": memory.id,
-                    "content": memory.content,
-                    # "abstract": memory.abstract,
-                    # "overview": memory.overview,
-                    "type": memory.type.value if hasattr(memory.type, 'value') else str(memory.type),
-                    "subtype": memory.subtype.value if memory.subtype and hasattr(memory.subtype, 'value') else str(
-                        memory.subtype) if memory.subtype else None,
-                    "importance": memory.importance,
-                    "tags": memory.tags,
-                    "created_at": memory.created_at.isoformat() if memory.created_at else None,
-                })
+                results.append(
+                    {
+                        "id": memory.id,
+                        "content": memory.content,
+                        # "abstract": memory.abstract,
+                        # "overview": memory.overview,
+                        "type": memory.type.value if hasattr(memory.type, "value") else str(memory.type),
+                        "subtype": memory.subtype.value
+                        if memory.subtype and hasattr(memory.subtype, "value")
+                        else str(memory.subtype)
+                        if memory.subtype
+                        else None,
+                        "importance": memory.importance,
+                        "tags": memory.tags,
+                        "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                    }
+                )
 
         return results
 
@@ -1224,11 +1263,11 @@ class SQLiteStorageBackend(StorageBackend):
         return self._row_to_association(row)
 
     async def get_associations(
-            self,
-            workspace_id: str,
-            memory_id: str,
-            direction: str = "both",
-            relationships: Optional[list[str]] = None,
+        self,
+        workspace_id: str,
+        memory_id: str,
+        direction: str = "both",
+        relationships: list[str] | None = None,
     ) -> list[Association]:
         """Get associations for a memory."""
         # Build WHERE clause
@@ -1261,12 +1300,12 @@ class SQLiteStorageBackend(StorageBackend):
         return [self._row_to_association(row) for row in rows]
 
     async def traverse_graph(
-            self,
-            workspace_id: str,
-            start_id: str,
-            max_depth: int = 3,
-            relationships: Optional[list[str]] = None,
-            direction: str = "both",
+        self,
+        workspace_id: str,
+        start_id: str,
+        max_depth: int = 3,
+        relationships: list[str] | None = None,
+        direction: str = "both",
     ) -> GraphQueryResult:
         """Multi-hop graph traversal using recursive CTE."""
         # Build recursive CTE
@@ -1410,7 +1449,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         return workspace
 
-    async def get_workspace(self, workspace_id: str) -> Optional[Workspace]:
+    async def get_workspace(self, workspace_id: str) -> Workspace | None:
         """Get workspace by ID."""
         cursor = await self._connection.execute(
             "SELECT * FROM workspaces WHERE id = ?",
@@ -1453,7 +1492,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         return context
 
-    async def get_context(self, workspace_id: str, context_id: str) -> Optional[Context]:
+    async def get_context(self, workspace_id: str, context_id: str) -> Context | None:
         """Get context by ID."""
         cursor = await self._connection.execute(
             "SELECT * FROM contexts WHERE id = ? AND workspace_id = ?",
@@ -1518,7 +1557,7 @@ class SQLiteStorageBackend(StorageBackend):
             INTO workspaces (id, tenant_id, name, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (workspace_id, "default", workspace_id, now, now)
+            (workspace_id, "default", workspace_id, now, now),
         )
 
         await self._connection.execute(
@@ -1545,7 +1584,7 @@ class SQLiteStorageBackend(StorageBackend):
         self.logger.info("Created persistent session: %s in workspace: %s", session.id, workspace_id)
         return session
 
-    async def get_session(self, workspace_id: str, session_id: str) -> Optional[Session]:
+    async def get_session(self, workspace_id: str, session_id: str) -> Session | None:
         """Get session by ID (returns None if not found or expired)."""
         cursor = await self._connection.execute(
             "SELECT * FROM sessions WHERE id = ? AND workspace_id = ?",
@@ -1569,7 +1608,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         return session
 
-    async def get_session_by_id(self, session_id: str) -> Optional[Session]:
+    async def get_session_by_id(self, session_id: str) -> Session | None:
         """Get session by ID without workspace filter.
 
         This allows looking up a session when the workspace is not yet known,
@@ -1605,16 +1644,11 @@ class SQLiteStorageBackend(StorageBackend):
         return deleted
 
     async def set_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str,
-            key: str,
-            value: Any,
-            ttl_seconds: Optional[int] = None
+        self, workspace_id: str, session_id: str, key: str, value: Any, ttl_seconds: int | None = None
     ) -> WorkingMemory:
         """Set working memory key-value within session."""
         now_iso = utc_now_iso()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Use INSERT OR REPLACE for upsert behavior
         await self._connection.execute(
@@ -1645,12 +1679,7 @@ class SQLiteStorageBackend(StorageBackend):
             updated_at=now,
         )
 
-    async def get_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str,
-            key: str
-    ) -> Optional[WorkingMemory]:
+    async def get_working_memory(self, workspace_id: str, session_id: str, key: str) -> WorkingMemory | None:
         """Get specific working memory entry."""
         cursor = await self._connection.execute(
             "SELECT * FROM working_memory WHERE session_id = ? AND key = ?",
@@ -1663,11 +1692,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         return self._row_to_working_memory(row)
 
-    async def get_all_working_memory(
-            self,
-            workspace_id: str,
-            session_id: str
-    ) -> list[WorkingMemory]:
+    async def get_all_working_memory(self, workspace_id: str, session_id: str) -> list[WorkingMemory]:
         """Get all working memory entries for session."""
         cursor = await self._connection.execute(
             "SELECT * FROM working_memory WHERE session_id = ?",
@@ -1729,12 +1754,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         return [self._row_to_session(row) for row in rows]
 
-    async def update_session(
-            self,
-            workspace_id: str,
-            session_id: str,
-            **updates
-    ) -> Optional[Session]:
+    async def update_session(self, workspace_id: str, session_id: str, **updates) -> Session | None:
         """Update session fields.
 
         Args:
@@ -1752,11 +1772,11 @@ class SQLiteStorageBackend(StorageBackend):
         set_clauses = []
         values = []
         for field, value in updates.items():
-            if field in ('committed_at', 'expires_at') and isinstance(value, datetime):
+            if field in ("committed_at", "expires_at") and isinstance(value, datetime):
                 values.append(value.isoformat())
-            elif field == 'auto_commit':
+            elif field == "auto_commit":
                 values.append(1 if value else 0)
-            elif field == 'metadata':
+            elif field == "metadata":
                 values.append(json.dumps(value))
             else:
                 values.append(value)
@@ -1766,7 +1786,7 @@ class SQLiteStorageBackend(StorageBackend):
 
         query = f"""
             UPDATE sessions
-            SET {', '.join(set_clauses)}
+            SET {", ".join(set_clauses)}
             WHERE id = ? AND workspace_id = ?
         """
 
@@ -1779,10 +1799,10 @@ class SQLiteStorageBackend(StorageBackend):
         return await self.get_session(workspace_id, session_id)
 
     async def list_sessions(
-            self,
-            workspace_id: str,
-            context_id: str | None = None,
-            include_expired: bool = False,
+        self,
+        workspace_id: str,
+        context_id: str | None = None,
+        include_expired: bool = False,
     ) -> list[Session]:
         """List sessions for a workspace."""
         conditions = ["workspace_id = ?"]
@@ -1829,7 +1849,7 @@ class SQLiteStorageBackend(StorageBackend):
         self.logger.debug("Created contradiction record: %s", contradiction.id)
         return contradiction
 
-    async def get_contradiction(self, workspace_id: str, contradiction_id: str) -> Optional[ContradictionRecord]:
+    async def get_contradiction(self, workspace_id: str, contradiction_id: str) -> ContradictionRecord | None:
         """Get a specific contradiction."""
         cursor = await self._connection.execute(
             "SELECT * FROM contradictions WHERE id = ? AND workspace_id = ?",
@@ -1857,12 +1877,12 @@ class SQLiteStorageBackend(StorageBackend):
         return [self._row_to_contradiction(row) for row in rows]
 
     async def resolve_contradiction(
-            self,
-            workspace_id: str,
-            contradiction_id: str,
-            resolution: str,
-            merged_content: Optional[str] = None,
-    ) -> Optional[ContradictionRecord]:
+        self,
+        workspace_id: str,
+        contradiction_id: str,
+        resolution: str,
+        merged_content: str | None = None,
+    ) -> ContradictionRecord | None:
         """Resolve a contradiction."""
         now = utc_now_iso()
         cursor = await self._connection.execute(
@@ -1892,7 +1912,7 @@ class SQLiteStorageBackend(StorageBackend):
             memory_b_id=row["memory_b_id"],
             contradiction_type=row["contradiction_type"],
             confidence=row["confidence"] if row["confidence"] else 0.0,
-            detection_method=row["detection_method"] if row["detection_method"] else '',
+            detection_method=row["detection_method"] if row["detection_method"] else "",
             detected_at=parse_datetime_utc(row["detected_at"]),
             resolved_at=parse_datetime_utc(row["resolved_at"]) if row["resolved_at"] else None,
             resolution=row["resolution"],
@@ -2000,21 +2020,21 @@ class SQLiteStorageBackend(StorageBackend):
     def _serialize_embedding(self, embedding: list[float]) -> bytes:
         """Serialize embedding to binary format for storage."""
         import struct
-        return struct.pack(f'{len(embedding)}f', *embedding)
+
+        return struct.pack(f"{len(embedding)}f", *embedding)
 
     def _deserialize_embedding(self, blob: bytes) -> list[float]:
         """Deserialize embedding from binary format."""
         import struct
-        num_floats = len(blob) // 4
-        return list(struct.unpack(f'{num_floats}f', blob))
 
+        num_floats = len(blob) // 4
+        return list(struct.unpack(f"{num_floats}f", blob))
 
     # ============================================
     # Chat History Operations
     # ============================================
 
-    async def create_thread(self, thread: 'ChatThread') -> 'ChatThread':
-        from ...models.chat import ChatThread as ChatThreadModel
+    async def create_thread(self, thread: "ChatThread") -> "ChatThread":
         await self._connection.execute(
             """INSERT INTO chat_threads
                (id, workspace_id, tenant_id, user_id, context_id,
@@ -2023,9 +2043,14 @@ class SQLiteStorageBackend(StorageBackend):
                 expires_at, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                thread.id, thread.workspace_id, thread.tenant_id,
-                thread.user_id, thread.context_id,
-                thread.observer_id, thread.subject_id, thread.title,
+                thread.id,
+                thread.workspace_id,
+                thread.tenant_id,
+                thread.user_id,
+                thread.context_id,
+                thread.observer_id,
+                thread.subject_id,
+                thread.title,
                 json.dumps(thread.metadata),
                 thread.message_count,
                 thread.last_decomposed_at.isoformat() if thread.last_decomposed_at else None,
@@ -2038,8 +2063,7 @@ class SQLiteStorageBackend(StorageBackend):
         await self._connection.commit()
         return thread
 
-    async def get_thread(self, workspace_id: str, thread_id: str) -> 'Optional[ChatThread]':
-        from ...models.chat import ChatThread as ChatThreadModel
+    async def get_thread(self, workspace_id: str, thread_id: str) -> "ChatThread | None":
         cursor = await self._connection.execute(
             "SELECT * FROM chat_threads WHERE id = ? AND workspace_id = ?",
             (thread_id, workspace_id),
@@ -2052,7 +2076,7 @@ class SQLiteStorageBackend(StorageBackend):
     async def list_threads(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list:
@@ -2076,7 +2100,7 @@ class SQLiteStorageBackend(StorageBackend):
         rows = await cursor.fetchall()
         return [self._row_to_chat_thread(row) for row in rows]
 
-    async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> 'Optional[ChatThread]':
+    async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> "ChatThread | None":
         if not updates:
             return await self.get_thread(workspace_id, thread_id)
 
@@ -2117,7 +2141,7 @@ class SQLiteStorageBackend(StorageBackend):
         await self._connection.commit()
         return cursor.rowcount > 0
 
-    async def list_expired_threads(self, limit: int = 100) -> list['ChatThread']:
+    async def list_expired_threads(self, limit: int = 100) -> list["ChatThread"]:
         """List expired chat threads across all workspaces.
 
         Queries for threads where expires_at is set and in the past.
@@ -2178,20 +2202,27 @@ class SQLiteStorageBackend(StorageBackend):
                    (id, thread_id, workspace_id, message_index, role, content, metadata, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    msg_id, thread_id, workspace_id, msg_index,
-                    msg_input.role, content,
-                    json.dumps(msg_input.metadata or {}), now,
+                    msg_id,
+                    thread_id,
+                    workspace_id,
+                    msg_index,
+                    msg_input.role,
+                    content,
+                    json.dumps(msg_input.metadata or {}),
+                    now,
                 ),
             )
-            created_messages.append(ChatMessage(
-                id=msg_id,
-                thread_id=thread_id,
-                message_index=msg_index,
-                role=msg_input.role,
-                content=msg_input.content,
-                metadata=msg_input.metadata or {},
-                created_at=parse_datetime_utc(now),
-            ))
+            created_messages.append(
+                ChatMessage(
+                    id=msg_id,
+                    thread_id=thread_id,
+                    message_index=msg_index,
+                    role=msg_input.role,
+                    content=msg_input.content,
+                    metadata=msg_input.metadata or {},
+                    created_at=parse_datetime_utc(now),
+                )
+            )
 
         # Update thread message count and updated_at
         new_count = current_count + len(messages)
@@ -2208,7 +2239,7 @@ class SQLiteStorageBackend(StorageBackend):
         thread_id: str,
         limit: int = 100,
         offset: int = 0,
-        after_index: Optional[int] = None,
+        after_index: int | None = None,
         order: str = "asc",
     ) -> list:
         order_clause = "ASC" if order.lower() == "asc" else "DESC"
@@ -2239,8 +2270,9 @@ class SQLiteStorageBackend(StorageBackend):
         row = await cursor.fetchone()
         return row["message_count"] if row else 0
 
-    def _row_to_chat_thread(self, row: aiosqlite.Row) -> 'ChatThread':
+    def _row_to_chat_thread(self, row: aiosqlite.Row) -> "ChatThread":
         from ...models.chat import ChatThread
+
         return ChatThread(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -2259,8 +2291,9 @@ class SQLiteStorageBackend(StorageBackend):
             updated_at=parse_datetime_utc(row["updated_at"]),
         )
 
-    def _row_to_chat_message(self, row: aiosqlite.Row) -> 'ChatMessage':
+    def _row_to_chat_message(self, row: aiosqlite.Row) -> "ChatMessage":
         from ...models.chat import ChatMessage, ChatMessageContent
+
         raw_content = row["content"]
         # Try to parse as structured content (JSON array)
         try:
@@ -2284,10 +2317,9 @@ class SQLiteStorageBackend(StorageBackend):
 
 
 class SqliteStorageBackendPlugin(StoragePluginBase):
-    PROVIDER_NAME = 'sqlite'
+    PROVIDER_NAME = "sqlite"
 
     def initialize(self, v: Variables, logger: Logger) -> object | None:
         return SQLiteStorageBackend(
-            db_path=v.environ(MEMORYLAYER_SQLITE_STORAGE_PATH, default=DEFAULT_MEMORYLAYER_SQLITE_STORAGE_PATH),
-            v=v
+            db_path=v.environ(MEMORYLAYER_SQLITE_STORAGE_PATH, default=DEFAULT_MEMORYLAYER_SQLITE_STORAGE_PATH), v=v
         )

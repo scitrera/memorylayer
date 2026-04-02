@@ -8,21 +8,25 @@ Verifies:
 - _decompose_and_process_inline() decomposes and processes facts inline
 - FactDecompositionTaskHandler uses ingest_fact() for per-fact pipeline
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from scitrera_app_framework import Variables
 
 from memorylayer_server.models.memory import (
-    RememberInput, MemoryType, MemoryStatus, Memory,
+    Memory,
+    MemoryStatus,
+    MemoryType,
+    RememberInput,
 )
-from memorylayer_server.services.memory import MemoryService
 from memorylayer_server.services.deduplication import DeduplicationAction, DeduplicationResult
-
+from memorylayer_server.services.memory import MemoryService
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_v():
@@ -37,6 +41,7 @@ def mock_v():
     from memorylayer_server.services.memory.base import (
         MEMORYLAYER_MEMORY_RECALL_OVERFETCH,
     )
+
     v = Variables()
     v.set(MEMORYLAYER_FACT_DECOMPOSITION_ENABLED, True)
     v.set(MEMORYLAYER_FACT_DECOMPOSITION_MIN_LENGTH, 20)
@@ -69,10 +74,12 @@ def mock_embedding():
 def mock_dedup():
     """Mock deduplication service that always returns CREATE."""
     service = AsyncMock()
-    service.check_duplicate = AsyncMock(return_value=DeduplicationResult(
-        action=DeduplicationAction.CREATE,
-        reason="New unique memory",
-    ))
+    service.check_duplicate = AsyncMock(
+        return_value=DeduplicationResult(
+            action=DeduplicationAction.CREATE,
+            reason="New unique memory",
+        )
+    )
     return service
 
 
@@ -130,8 +137,14 @@ def _make_memory(memory_id="mem_test", content="test content", **kwargs):
 
 @pytest.fixture
 def memory_service_unit(
-    mock_v, mock_storage, mock_embedding, mock_dedup,
-    mock_task_service, mock_tier_gen, mock_contradiction, mock_association,
+    mock_v,
+    mock_storage,
+    mock_embedding,
+    mock_dedup,
+    mock_task_service,
+    mock_tier_gen,
+    mock_contradiction,
+    mock_association,
 ):
     """Construct a MemoryService with all mocked dependencies."""
     mem = _make_memory()
@@ -155,6 +168,7 @@ def memory_service_unit(
 # _post_store_pipeline tests
 # ---------------------------------------------------------------------------
 
+
 class TestPostStorePipeline:
     """Tests for _post_store_pipeline()."""
 
@@ -166,7 +180,7 @@ class TestPostStorePipeline:
 
         mock_task_service.schedule_task.assert_called_once()
         call_args = mock_task_service.schedule_task.call_args
-        assert call_args[0][0] == 'auto_enrich'
+        assert call_args[0][0] == "auto_enrich"
 
     @pytest.mark.asyncio
     async def test_runs_inline_association(self, memory_service_unit, mock_task_service, mock_storage):
@@ -179,7 +193,7 @@ class TestPostStorePipeline:
 
         # Should NOT schedule auto_enrich task
         for call in mock_task_service.schedule_task.call_args_list:
-            assert call[0][0] != 'auto_enrich'
+            assert call[0][0] != "auto_enrich"
 
     @pytest.mark.asyncio
     async def test_calls_tier_generation(self, memory_service_unit, mock_tier_gen):
@@ -218,7 +232,10 @@ class TestPostStorePipeline:
 
     @pytest.mark.asyncio
     async def test_handles_association_schedule_failure(
-        self, memory_service_unit, mock_task_service, mock_storage,
+        self,
+        memory_service_unit,
+        mock_task_service,
+        mock_storage,
     ):
         """If scheduling auto_enrich fails, should fall back to inline."""
         mock_task_service.schedule_task = AsyncMock(side_effect=RuntimeError("task service down"))
@@ -232,6 +249,7 @@ class TestPostStorePipeline:
 # ---------------------------------------------------------------------------
 # ingest_fact tests
 # ---------------------------------------------------------------------------
+
 
 class TestIngestFact:
     """Tests for ingest_fact()."""
@@ -253,11 +271,13 @@ class TestIngestFact:
     @pytest.mark.asyncio
     async def test_returns_none_on_skip(self, memory_service_unit, mock_dedup):
         """Should return None when dedup returns SKIP."""
-        mock_dedup.check_duplicate = AsyncMock(return_value=DeduplicationResult(
-            action=DeduplicationAction.SKIP,
-            existing_memory_id="mem_existing",
-            reason="Exact duplicate",
-        ))
+        mock_dedup.check_duplicate = AsyncMock(
+            return_value=DeduplicationResult(
+                action=DeduplicationAction.SKIP,
+                existing_memory_id="mem_existing",
+                reason="Exact duplicate",
+            )
+        )
 
         input_data = RememberInput(content="duplicate", type=MemoryType.SEMANTIC)
         result = await memory_service_unit.ingest_fact("ws_test", input_data)
@@ -268,12 +288,14 @@ class TestIngestFact:
     async def test_updates_on_dedup_update(self, memory_service_unit, mock_dedup, mock_storage):
         """Should update existing memory when dedup returns UPDATE."""
         updated_mem = _make_memory(memory_id="mem_existing", content="updated")
-        mock_dedup.check_duplicate = AsyncMock(return_value=DeduplicationResult(
-            action=DeduplicationAction.UPDATE,
-            existing_memory_id="mem_existing",
-            similarity_score=0.96,
-            reason="Semantic duplicate",
-        ))
+        mock_dedup.check_duplicate = AsyncMock(
+            return_value=DeduplicationResult(
+                action=DeduplicationAction.UPDATE,
+                existing_memory_id="mem_existing",
+                similarity_score=0.96,
+                reason="Semantic duplicate",
+            )
+        )
         mock_storage.update_memory = AsyncMock(return_value=updated_mem)
 
         input_data = RememberInput(content="updated content", type=MemoryType.SEMANTIC)
@@ -292,17 +314,23 @@ class TestIngestFact:
 
         input_data = RememberInput(content="decomposed fact", type=MemoryType.SEMANTIC)
         await memory_service_unit.ingest_fact(
-            "ws_test", input_data, source_memory_id="mem_parent",
+            "ws_test",
+            input_data,
+            source_memory_id="mem_parent",
         )
 
         # Should have an update_memory call with source_memory_id
         update_calls = mock_storage.update_memory.call_args_list
-        source_calls = [c for c in update_calls if c.kwargs.get('source_memory_id') == 'mem_parent']
+        source_calls = [c for c in update_calls if c.kwargs.get("source_memory_id") == "mem_parent"]
         assert len(source_calls) >= 1
 
     @pytest.mark.asyncio
     async def test_runs_post_store_pipeline(
-        self, memory_service_unit, mock_tier_gen, mock_contradiction, mock_storage,
+        self,
+        memory_service_unit,
+        mock_tier_gen,
+        mock_contradiction,
+        mock_storage,
     ):
         """Should run post-store pipeline after storing fact."""
         fact_mem = _make_memory(memory_id="mem_fact")
@@ -317,7 +345,10 @@ class TestIngestFact:
 
     @pytest.mark.asyncio
     async def test_generates_embedding_when_not_provided(
-        self, memory_service_unit, mock_embedding, mock_storage,
+        self,
+        memory_service_unit,
+        mock_embedding,
+        mock_storage,
     ):
         """Should generate embedding if not provided."""
         fact_mem = _make_memory(memory_id="mem_fact")
@@ -331,7 +362,10 @@ class TestIngestFact:
 
     @pytest.mark.asyncio
     async def test_uses_provided_embedding(
-        self, memory_service_unit, mock_embedding, mock_storage,
+        self,
+        memory_service_unit,
+        mock_embedding,
+        mock_storage,
     ):
         """Should use provided embedding without generating a new one."""
         fact_mem = _make_memory(memory_id="mem_fact")
@@ -349,12 +383,16 @@ class TestIngestFact:
 # remember() conditional pipeline tests
 # ---------------------------------------------------------------------------
 
+
 class TestRememberConditionalPipeline:
     """Tests verifying remember() routes correctly based on decomposition."""
 
     @pytest.mark.asyncio
     async def test_non_decomposable_runs_post_store(
-        self, memory_service_unit, mock_tier_gen, mock_contradiction,
+        self,
+        memory_service_unit,
+        mock_tier_gen,
+        mock_contradiction,
     ):
         """Non-decomposable memory should run post-store pipeline directly."""
         input_data = RememberInput(content="short", type=MemoryType.SEMANTIC)
@@ -366,7 +404,12 @@ class TestRememberConditionalPipeline:
 
     @pytest.mark.asyncio
     async def test_decomposable_schedules_decomposition(
-        self, memory_service_unit, mock_storage, mock_task_service, mock_tier_gen, mock_contradiction,
+        self,
+        memory_service_unit,
+        mock_storage,
+        mock_task_service,
+        mock_tier_gen,
+        mock_contradiction,
     ):
         """Decomposable memory should schedule decompose_facts, not run post-store."""
         # Content that qualifies for decomposition (multiple sentences, long enough)
@@ -381,10 +424,7 @@ class TestRememberConditionalPipeline:
         await memory_service_unit.remember("ws_test", input_data)
 
         # Should have scheduled decompose_facts
-        decompose_calls = [
-            c for c in mock_task_service.schedule_task.call_args_list
-            if c[0][0] == 'decompose_facts'
-        ]
+        decompose_calls = [c for c in mock_task_service.schedule_task.call_args_list if c[0][0] == "decompose_facts"]
         assert len(decompose_calls) == 1
 
         # Should NOT have run post-store pipeline on the composite
@@ -393,7 +433,10 @@ class TestRememberConditionalPipeline:
 
     @pytest.mark.asyncio
     async def test_decomposable_no_auto_association_on_composite(
-        self, memory_service_unit, mock_storage, mock_task_service,
+        self,
+        memory_service_unit,
+        mock_storage,
+        mock_task_service,
     ):
         """Decomposable memory should NOT schedule auto_enrich on the composite."""
         content = "First sentence here. Second sentence here. Third for good measure."
@@ -407,15 +450,16 @@ class TestRememberConditionalPipeline:
         await memory_service_unit.remember("ws_test", input_data)
 
         # auto_enrich should NOT be scheduled
-        auto_assoc_calls = [
-            c for c in mock_task_service.schedule_task.call_args_list
-            if c[0][0] == 'auto_enrich'
-        ]
+        auto_assoc_calls = [c for c in mock_task_service.schedule_task.call_args_list if c[0][0] == "auto_enrich"]
         assert len(auto_assoc_calls) == 0
 
     @pytest.mark.asyncio
     async def test_decompose_failure_falls_back_to_post_store(
-        self, memory_service_unit, mock_task_service, mock_tier_gen, mock_contradiction,
+        self,
+        memory_service_unit,
+        mock_task_service,
+        mock_tier_gen,
+        mock_contradiction,
     ):
         """If scheduling decomposition fails, should fall back to post-store pipeline."""
         content = "First sentence for decomp. Second sentence for decomp."
@@ -423,7 +467,7 @@ class TestRememberConditionalPipeline:
 
         # Make schedule_task fail for decompose_facts
         async def selective_fail(task_type, payload, **kwargs):
-            if task_type == 'decompose_facts':
+            if task_type == "decompose_facts":
                 raise RuntimeError("task service down")
             return "task_123"
 
@@ -444,7 +488,10 @@ class TestRememberConditionalPipeline:
 
     @pytest.mark.asyncio
     async def test_working_memory_not_decomposed(
-        self, memory_service_unit, mock_task_service, mock_tier_gen,
+        self,
+        memory_service_unit,
+        mock_task_service,
+        mock_tier_gen,
     ):
         """WORKING type memories should never be decomposed."""
         content = "Currently working on this task. Making good progress on it."
@@ -453,10 +500,7 @@ class TestRememberConditionalPipeline:
         await memory_service_unit.remember("ws_test", input_data)
 
         # Should NOT schedule decompose_facts
-        decompose_calls = [
-            c for c in mock_task_service.schedule_task.call_args_list
-            if c[0][0] == 'decompose_facts'
-        ]
+        decompose_calls = [c for c in mock_task_service.schedule_task.call_args_list if c[0][0] == "decompose_facts"]
         assert len(decompose_calls) == 0
 
         # Should have run post-store pipeline instead
@@ -466,6 +510,7 @@ class TestRememberConditionalPipeline:
 # ---------------------------------------------------------------------------
 # FactDecompositionTaskHandler integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestFactDecompositionHandlerIntegration:
     """Tests for FactDecompositionTaskHandler using ingest_fact()."""
@@ -492,10 +537,12 @@ class TestFactDecompositionHandlerIntegration:
         mock_storage.create_association = AsyncMock()
 
         mock_extraction = AsyncMock()
-        mock_extraction.decompose_to_facts = AsyncMock(return_value=[
-            {"content": "Drew likes Python"},
-            {"content": "Drew uses vim"},
-        ])
+        mock_extraction.decompose_to_facts = AsyncMock(
+            return_value=[
+                {"content": "Drew likes Python"},
+                {"content": "Drew uses vim"},
+            ]
+        )
 
         mock_memory_service = AsyncMock()
         fact1 = _make_memory(memory_id="mem_fact1", content="Drew likes Python")
@@ -503,9 +550,10 @@ class TestFactDecompositionHandlerIntegration:
         mock_memory_service.ingest_fact = AsyncMock(side_effect=[fact1, fact2])
 
         def get_ext(name, v):
-            from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
             from memorylayer_server.services.extraction.base import EXT_EXTRACTION_SERVICE
             from memorylayer_server.services.memory import EXT_MEMORY_SERVICE
+            from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
+
             if name == EXT_STORAGE_BACKEND:
                 return mock_storage
             elif name == EXT_EXTRACTION_SERVICE:
@@ -514,27 +562,32 @@ class TestFactDecompositionHandlerIntegration:
                 return mock_memory_service
             return MagicMock()
 
-        with patch.object(handler, 'get_extension', side_effect=get_ext):
-            await handler.handle(mock_v, {
-                'memory_id': 'mem_parent',
-                'workspace_id': 'ws_test',
-            })
+        with patch.object(handler, "get_extension", side_effect=get_ext):
+            await handler.handle(
+                mock_v,
+                {
+                    "memory_id": "mem_parent",
+                    "workspace_id": "ws_test",
+                },
+            )
 
         # ingest_fact should have been called twice (once per fact)
         assert mock_memory_service.ingest_fact.call_count == 2
 
         # First call
         first_call = mock_memory_service.ingest_fact.call_args_list[0]
-        assert first_call.kwargs['workspace_id'] == 'ws_test'
-        assert first_call.kwargs['source_memory_id'] == 'mem_parent'
-        assert first_call.kwargs['input'].content == 'Drew likes Python'
+        assert first_call.kwargs["workspace_id"] == "ws_test"
+        assert first_call.kwargs["source_memory_id"] == "mem_parent"
+        assert first_call.kwargs["input"].content == "Drew likes Python"
 
         # PART_OF associations should be created
         assert mock_storage.create_association.call_count == 2
 
         # Parent should be archived
         mock_storage.update_memory.assert_called_once_with(
-            'ws_test', 'mem_parent', status=MemoryStatus.ARCHIVED.value,
+            "ws_test",
+            "mem_parent",
+            status=MemoryStatus.ARCHIVED.value,
         )
 
     @pytest.mark.asyncio
@@ -553,16 +606,19 @@ class TestFactDecompositionHandlerIntegration:
         mock_storage.get_memory = AsyncMock(return_value=parent)
 
         mock_extraction = AsyncMock()
-        mock_extraction.decompose_to_facts = AsyncMock(return_value=[
-            {"content": "Single fact."},
-        ])
+        mock_extraction.decompose_to_facts = AsyncMock(
+            return_value=[
+                {"content": "Single fact."},
+            ]
+        )
 
         mock_memory_service = AsyncMock()
 
         def get_ext(name, v):
-            from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
             from memorylayer_server.services.extraction.base import EXT_EXTRACTION_SERVICE
             from memorylayer_server.services.memory import EXT_MEMORY_SERVICE
+            from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
+
             if name == EXT_STORAGE_BACKEND:
                 return mock_storage
             elif name == EXT_EXTRACTION_SERVICE:
@@ -571,11 +627,14 @@ class TestFactDecompositionHandlerIntegration:
                 return mock_memory_service
             return MagicMock()
 
-        with patch.object(handler, 'get_extension', side_effect=get_ext):
-            await handler.handle(mock_v, {
-                'memory_id': 'mem_atomic',
-                'workspace_id': 'ws_test',
-            })
+        with patch.object(handler, "get_extension", side_effect=get_ext):
+            await handler.handle(
+                mock_v,
+                {
+                    "memory_id": "mem_atomic",
+                    "workspace_id": "ws_test",
+                },
+            )
 
         # ingest_fact should NOT have been called
         mock_memory_service.ingest_fact.assert_not_called()
@@ -602,10 +661,12 @@ class TestFactDecompositionHandlerIntegration:
         mock_storage.create_association = AsyncMock()
 
         mock_extraction = AsyncMock()
-        mock_extraction.decompose_to_facts = AsyncMock(return_value=[
-            {"content": "Drew likes Python"},
-            {"content": "Drew likes Python"},  # Duplicate fact
-        ])
+        mock_extraction.decompose_to_facts = AsyncMock(
+            return_value=[
+                {"content": "Drew likes Python"},
+                {"content": "Drew likes Python"},  # Duplicate fact
+            ]
+        )
 
         mock_memory_service = AsyncMock()
         fact1 = _make_memory(memory_id="mem_f1", content="Drew likes Python")
@@ -613,9 +674,10 @@ class TestFactDecompositionHandlerIntegration:
         mock_memory_service.ingest_fact = AsyncMock(side_effect=[fact1, None])
 
         def get_ext(name, v):
-            from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
             from memorylayer_server.services.extraction.base import EXT_EXTRACTION_SERVICE
             from memorylayer_server.services.memory import EXT_MEMORY_SERVICE
+            from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
+
             if name == EXT_STORAGE_BACKEND:
                 return mock_storage
             elif name == EXT_EXTRACTION_SERVICE:
@@ -624,11 +686,14 @@ class TestFactDecompositionHandlerIntegration:
                 return mock_memory_service
             return MagicMock()
 
-        with patch.object(handler, 'get_extension', side_effect=get_ext):
-            await handler.handle(mock_v, {
-                'memory_id': 'mem_parent2',
-                'workspace_id': 'ws_test',
-            })
+        with patch.object(handler, "get_extension", side_effect=get_ext):
+            await handler.handle(
+                mock_v,
+                {
+                    "memory_id": "mem_parent2",
+                    "workspace_id": "ws_test",
+                },
+            )
 
         # Only 1 PART_OF association (the non-None fact)
         assert mock_storage.create_association.call_count == 1
@@ -641,44 +706,45 @@ class TestFactDecompositionHandlerIntegration:
 # classify_type flag tests
 # ---------------------------------------------------------------------------
 
+
 class TestClassifyTypeFlag:
     """Tests for classify_type flag in the auto-enrich pipeline."""
 
     @pytest.mark.asyncio
     async def test_classify_type_true_in_payload_when_type_auto(
-        self, memory_service_unit, mock_task_service,
+        self,
+        memory_service_unit,
+        mock_task_service,
     ):
         """When input.type is None, classify_type should be True in the task payload."""
         input_data = RememberInput(content="short", type=None)
         await memory_service_unit.remember("ws_test", input_data)
 
-        enrich_calls = [
-            c for c in mock_task_service.schedule_task.call_args_list
-            if c[0][0] == 'auto_enrich'
-        ]
+        enrich_calls = [c for c in mock_task_service.schedule_task.call_args_list if c[0][0] == "auto_enrich"]
         assert len(enrich_calls) == 1
         payload = enrich_calls[0][0][1]
-        assert payload['classify_type'] is True
+        assert payload["classify_type"] is True
 
     @pytest.mark.asyncio
     async def test_classify_type_false_in_payload_when_type_explicit(
-        self, memory_service_unit, mock_task_service,
+        self,
+        memory_service_unit,
+        mock_task_service,
     ):
         """When input.type is explicitly set, classify_type should be False."""
         input_data = RememberInput(content="short", type=MemoryType.EPISODIC)
         await memory_service_unit.remember("ws_test", input_data)
 
-        enrich_calls = [
-            c for c in mock_task_service.schedule_task.call_args_list
-            if c[0][0] == 'auto_enrich'
-        ]
+        enrich_calls = [c for c in mock_task_service.schedule_task.call_args_list if c[0][0] == "auto_enrich"]
         assert len(enrich_calls) == 1
         payload = enrich_calls[0][0][1]
-        assert payload['classify_type'] is False
+        assert payload["classify_type"] is False
 
     @pytest.mark.asyncio
     async def test_inline_classify_type_calls_extraction_service(
-        self, memory_service_unit, mock_storage,
+        self,
+        memory_service_unit,
+        mock_storage,
     ):
         """Inline auto-enrich with classify_type=True should call extraction_service.classify_content."""
         mock_extraction = AsyncMock()
@@ -692,14 +758,20 @@ class TestClassifyTypeFlag:
 
         mem = _make_memory(type=MemoryType.SEMANTIC)
         await memory_service_unit._post_store_pipeline(
-            "ws_test", mem, [0.1] * 384, inline=True, classify_type=True,
+            "ws_test",
+            mem,
+            [0.1] * 384,
+            inline=True,
+            classify_type=True,
         )
 
         mock_extraction.classify_content.assert_called_once_with(mem.content)
 
     @pytest.mark.asyncio
     async def test_inline_classify_type_false_skips_extraction(
-        self, memory_service_unit, mock_storage,
+        self,
+        memory_service_unit,
+        mock_storage,
     ):
         """Inline auto-enrich with classify_type=False should NOT call extraction service."""
         mock_extraction = AsyncMock()
@@ -711,14 +783,20 @@ class TestClassifyTypeFlag:
 
         mem = _make_memory()
         await memory_service_unit._post_store_pipeline(
-            "ws_test", mem, [0.1] * 384, inline=True, classify_type=False,
+            "ws_test",
+            mem,
+            [0.1] * 384,
+            inline=True,
+            classify_type=False,
         )
 
         mock_extraction.classify_content.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_inline_classify_type_updates_when_different(
-        self, memory_service_unit, mock_storage,
+        self,
+        memory_service_unit,
+        mock_storage,
     ):
         """When LLM classifies a different type, memory should be updated."""
         mock_extraction = AsyncMock()
@@ -733,20 +811,23 @@ class TestClassifyTypeFlag:
 
         mem = _make_memory(type=MemoryType.SEMANTIC)
         await memory_service_unit._post_store_pipeline(
-            "ws_test", mem, [0.1] * 384, inline=True, classify_type=True,
+            "ws_test",
+            mem,
+            [0.1] * 384,
+            inline=True,
+            classify_type=True,
         )
 
         # Should have called update_memory with the new type
         update_calls = mock_storage.update_memory.call_args_list
-        type_updates = [
-            c for c in update_calls
-            if c.kwargs.get('type') == MemoryType.PROCEDURAL.value
-        ]
+        type_updates = [c for c in update_calls if c.kwargs.get("type") == MemoryType.PROCEDURAL.value]
         assert len(type_updates) == 1
 
     @pytest.mark.asyncio
     async def test_inline_classify_type_graceful_without_extraction_service(
-        self, memory_service_unit, mock_storage,
+        self,
+        memory_service_unit,
+        mock_storage,
     ):
         """classify_type=True should not fail when extraction_service is None."""
         memory_service_unit.extraction_service = None
@@ -757,5 +838,9 @@ class TestClassifyTypeFlag:
         mem = _make_memory()
         # Should not raise
         await memory_service_unit._post_store_pipeline(
-            "ws_test", mem, [0.1] * 384, inline=True, classify_type=True,
+            "ws_test",
+            mem,
+            [0.1] * 384,
+            inline=True,
+            classify_type=True,
         )

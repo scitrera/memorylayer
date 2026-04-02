@@ -15,41 +15,135 @@ multiple facets of the query.
 
 import re
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import Variables, get_extension
 
 from ....config import RerankerProviderType
 from ....utils import cosine_similarity
-from ..base import RerankerProvider, RerankerProviderPluginBase
 from ...embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
+from ..base import RerankerProvider, RerankerProviderPluginBase
 
 # Environment variable names
-MEMORYLAYER_RERANKER_RRF_K = 'MEMORYLAYER_RERANKER_RRF_K'
-MEMORYLAYER_RERANKER_RRF_MIN_QUERIES = 'MEMORYLAYER_RERANKER_RRF_MIN_QUERIES'
+MEMORYLAYER_RERANKER_RRF_K = "MEMORYLAYER_RERANKER_RRF_K"
+MEMORYLAYER_RERANKER_RRF_MIN_QUERIES = "MEMORYLAYER_RERANKER_RRF_MIN_QUERIES"
 
 # Defaults
 DEFAULT_RRF_K = 60
 DEFAULT_RRF_MIN_QUERIES = 2
 
 # Common English stopwords for keyword extraction
-_STOPWORDS = frozenset({
-    'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-    'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
-    'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-    'could', 'should', 'may', 'might', 'shall', 'can', 'need', 'dare',
-    'it', 'its', 'this', 'that', 'these', 'those', 'i', 'me', 'my',
-    'we', 'our', 'you', 'your', 'he', 'him', 'his', 'she', 'her',
-    'they', 'them', 'their', 'what', 'which', 'who', 'whom', 'how',
-    'when', 'where', 'why', 'not', 'no', 'nor', 'so', 'if', 'then',
-    'than', 'too', 'very', 'just', 'about', 'above', 'after', 'again',
-    'all', 'also', 'am', 'any', 'because', 'before', 'between', 'both',
-    'each', 'few', 'more', 'most', 'other', 'over', 'own', 'same',
-    'some', 'such', 'up', 'down', 'out', 'off', 'only', 'into',
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "need",
+        "dare",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "me",
+        "my",
+        "we",
+        "our",
+        "you",
+        "your",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "they",
+        "them",
+        "their",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "how",
+        "when",
+        "where",
+        "why",
+        "not",
+        "no",
+        "nor",
+        "so",
+        "if",
+        "then",
+        "than",
+        "too",
+        "very",
+        "just",
+        "about",
+        "above",
+        "after",
+        "again",
+        "all",
+        "also",
+        "am",
+        "any",
+        "because",
+        "before",
+        "between",
+        "both",
+        "each",
+        "few",
+        "more",
+        "most",
+        "other",
+        "over",
+        "own",
+        "same",
+        "some",
+        "such",
+        "up",
+        "down",
+        "out",
+        "off",
+        "only",
+        "into",
+    }
+)
 
 # Sentence boundary pattern
-_SENTENCE_SPLIT = re.compile(r'[.?!;]\s+')
+_SENTENCE_SPLIT = re.compile(r"[.?!;]\s+")
 
 
 def _extract_keywords(text: str) -> str:
@@ -61,9 +155,9 @@ def _extract_keywords(text: str) -> str:
     Returns:
         Space-joined content words, or empty string if none remain.
     """
-    words = re.findall(r'\b\w+\b', text.lower())
+    words = re.findall(r"\b\w+\b", text.lower())
     keywords = [w for w in words if w not in _STOPWORDS and len(w) > 1]
-    return ' '.join(keywords)
+    return " ".join(keywords)
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -80,9 +174,9 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def decompose_query(
-        query: str,
-        instruction: Optional[str] = None,
-        min_queries: int = DEFAULT_RRF_MIN_QUERIES,
+    query: str,
+    instruction: str | None = None,
+    min_queries: int = DEFAULT_RRF_MIN_QUERIES,
 ) -> list[str]:
     """Decompose a query into multiple sub-queries for multi-query RRF.
 
@@ -134,9 +228,9 @@ def decompose_query(
 
 
 def compute_rrf_scores(
-        rankings: list[list[int]],
-        num_documents: int,
-        k: int = DEFAULT_RRF_K,
+    rankings: list[list[int]],
+    num_documents: int,
+    k: int = DEFAULT_RRF_K,
 ) -> list[float]:
     """Compute Reciprocal Rank Fusion scores from multiple rankings.
 
@@ -192,11 +286,11 @@ class RRFRerankerProvider(RerankerProvider):
     """
 
     def __init__(
-            self,
-            v: Variables,
-            embedding_service: EmbeddingService,
-            rrf_k: int = DEFAULT_RRF_K,
-            min_queries: int = DEFAULT_RRF_MIN_QUERIES,
+        self,
+        v: Variables,
+        embedding_service: EmbeddingService,
+        rrf_k: int = DEFAULT_RRF_K,
+        min_queries: int = DEFAULT_RRF_MIN_QUERIES,
     ):
         super().__init__(v)
         self.embedding_service = embedding_service
@@ -204,10 +298,10 @@ class RRFRerankerProvider(RerankerProvider):
         self.min_queries = min_queries
 
     async def rerank(
-            self,
-            query: str,
-            documents: list[str],
-            instruction: Optional[str] = None,
+        self,
+        query: str,
+        documents: list[str],
+        instruction: str | None = None,
     ) -> list[float]:
         """
         Score documents by multi-query RRF fusion.
@@ -235,7 +329,8 @@ class RRFRerankerProvider(RerankerProvider):
             # Step 1: Decompose query
             sub_queries = decompose_query(query, instruction, self.min_queries)
             self.logger.debug(
-                "Decomposed query into %d sub-queries", len(sub_queries),
+                "Decomposed query into %d sub-queries",
+                len(sub_queries),
             )
 
             # Step 2: Embed sub-queries
@@ -247,10 +342,7 @@ class RRFRerankerProvider(RerankerProvider):
             # Step 4: For each sub-query, rank documents by cosine similarity
             rankings = []
             for q_emb in query_embeddings:
-                similarities = [
-                    cosine_similarity(q_emb, d_emb)
-                    for d_emb in doc_embeddings
-                ]
+                similarities = [cosine_similarity(q_emb, d_emb) for d_emb in doc_embeddings]
                 # Sort document indices by similarity (descending)
                 ranking = sorted(
                     range(len(documents)),

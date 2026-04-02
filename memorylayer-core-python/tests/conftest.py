@@ -9,27 +9,29 @@ Usage in tests:
     async def test_something(memory_service):
         result = await memory_service.remember(...)
 """
+
+import asyncio
 import logging
+from datetime import UTC
+
 import pytest
 import pytest_asyncio
-import asyncio
-
 from scitrera_app_framework import Variables, get_extension
-from memorylayer_server.models.memory import RememberInput, MemoryType
+
 from memorylayer_server.config import (
-    MEMORYLAYER_EMBEDDING_PROVIDER,
-    MEMORYLAYER_STORAGE_BACKEND,
-    MEMORYLAYER_SQLITE_STORAGE_PATH,
     MEMORYLAYER_DATA_DIR,
+    MEMORYLAYER_EMBEDDING_PROVIDER,
     MEMORYLAYER_RERANKER_PROVIDER,
+    MEMORYLAYER_STORAGE_BACKEND,
 )
+from memorylayer_server.models.memory import MemoryType, RememberInput
 from memorylayer_server.services.llm.base import MEMORYLAYER_LLM_REGISTRY
 from memorylayer_server.services.tasks.asyncio_impl import MEMORYLAYER_TASKS_ENABLED
-
 
 # -----------------------------------------------------------------------------
 # Logging Configuration (initialized by test harness, not framework)
 # -----------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def test_logger() -> logging.Logger:
@@ -46,10 +48,7 @@ def test_logger() -> logging.Logger:
     if not logger.handlers:
         handler = logging.StreamHandler()
         handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(
-            '%(asctime)s %(levelname)s %(name)s %(funcName)s() > %(message)s',
-            datefmt='%Y/%m/%d %H:%M:%S'
-        )
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(funcName)s() > %(message)s", datefmt="%Y/%m/%d %H:%M:%S")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
@@ -59,6 +58,7 @@ def test_logger() -> logging.Logger:
 # -----------------------------------------------------------------------------
 # Framework Initialization with Test Isolation
 # -----------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture(scope="session")
 async def test_configuration():
@@ -88,8 +88,7 @@ async def test_framework(test_configuration, tmp_path_factory, test_logger):
     Yields:
         tuple: (v: Variables, services: module) for use in tests
     """
-    from scitrera_app_framework import Variables
-    from memorylayer_server.dependencies import preconfigure, initialize_services, shutdown_services
+    from memorylayer_server.dependencies import initialize_services, preconfigure, shutdown_services
 
     # Create session-scoped temp directory for database
     tmp_dir = tmp_path_factory.mktemp("memorylayer_test")
@@ -126,10 +125,11 @@ def v(test_framework):
 #     return services
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def fastapi_app(test_framework):
     """FastAPI app instance for tests."""
     from memorylayer_server.lifecycle.fastapi import fastapi_app_factory
+
     v, _ = test_framework
     app = fastapi_app_factory(v=v)
     return app
@@ -138,6 +138,7 @@ def fastapi_app(test_framework):
 # -----------------------------------------------------------------------------
 # Event Loop Configuration
 # -----------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -152,10 +153,12 @@ def event_loop():
 # These just call the DI system with the isolated Variables instance.
 # -----------------------------------------------------------------------------
 
+
 @pytest_asyncio.fixture
 async def memory_service(v):
     """Get the memory service."""
     from memorylayer_server.services.memory import EXT_MEMORY_SERVICE
+
     return get_extension(EXT_MEMORY_SERVICE, v)
 
 
@@ -163,6 +166,7 @@ async def memory_service(v):
 async def association_service(v):
     """Get the association service."""
     from memorylayer_server.services.association import EXT_ASSOCIATION_SERVICE
+
     return get_extension(EXT_ASSOCIATION_SERVICE, v)
 
 
@@ -170,6 +174,7 @@ async def association_service(v):
 async def storage_backend(v):
     """Get the storage backend."""
     from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
+
     return get_extension(EXT_STORAGE_BACKEND, v)
 
 
@@ -177,6 +182,7 @@ async def storage_backend(v):
 async def embedding_service(v):
     """Get the embedding service."""
     from memorylayer_server.services.embedding import EXT_EMBEDDING_SERVICE
+
     return get_extension(EXT_EMBEDDING_SERVICE, v)
 
 
@@ -184,12 +190,14 @@ async def embedding_service(v):
 async def deduplication_service(v):
     """Get the deduplication service."""
     from memorylayer_server.services.deduplication import EXT_DEDUPLICATION_SERVICE
+
     return get_extension(EXT_DEDUPLICATION_SERVICE, v)
 
 
 # -----------------------------------------------------------------------------
 # Test Data Factories
 # -----------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_remember_input() -> RememberInput:
@@ -199,15 +207,16 @@ def sample_remember_input() -> RememberInput:
         type=MemoryType.SEMANTIC,
         importance=0.8,
         tags=["preferences", "programming"],
-        metadata={"source": "conversation", "confidence": 0.95}
+        metadata={"source": "conversation", "confidence": 0.95},
     )
 
 
 @pytest_asyncio.fixture
 async def workspace_id(storage_backend) -> str:
     """Default test workspace ID with workspace and context created."""
+    from datetime import datetime
+
     from memorylayer_server.models.workspace import Workspace
-    from datetime import datetime, timezone
 
     workspace_id = "default"  # TODO: do these align with new defaults?!?!
 
@@ -218,8 +227,8 @@ async def workspace_id(storage_backend) -> str:
             id=workspace_id,
             tenant_id="default_tenant",
             name="Default Test Workspace",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         await storage_backend.create_workspace(workspace)
 
@@ -230,10 +239,12 @@ async def workspace_id(storage_backend) -> str:
 # Test Isolation Helpers
 # -----------------------------------------------------------------------------
 
+
 @pytest.fixture
 def unique_workspace_id() -> str:
     """Generate a unique workspace ID for test isolation (function-scoped)."""
     import uuid
+
     return f"test_{uuid.uuid4().hex[:8]}"
 
 
@@ -245,6 +256,7 @@ def class_workspace_id(request) -> str:
     Use this for test classes that need isolated data across all their test methods.
     """
     import uuid
+
     class_name = request.cls.__name__ if request.cls else "unknown"
     return f"test_{class_name}_{uuid.uuid4().hex[:8]}"
 

@@ -1,4 +1,5 @@
 """Persistence hooks for context environment state."""
+
 from abc import ABC
 
 
@@ -24,4 +25,5 @@ class ContextPersistenceHook(ABC):
 
 class NoOpPersistenceHook(ContextPersistenceHook):
     """Default no-op persistence hook."""
+
     pass

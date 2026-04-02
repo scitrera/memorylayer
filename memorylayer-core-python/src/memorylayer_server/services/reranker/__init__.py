@@ -6,17 +6,17 @@ Extension Points:
 - reranker-service: High-level service wrapping providers
 """
 
-from scitrera_app_framework import get_extension, Variables
+from scitrera_app_framework import Variables, get_extension
 
 from .base import (
     EXT_RERANKER_PROVIDER,
     EXT_RERANKER_SERVICE,
-    RerankerProvider,
     MultimodalRerankerProvider,
-    RerankerService,
-    RerankResult,
+    RerankerProvider,
     RerankerProviderPluginBase,
+    RerankerService,
     RerankerServicePluginBase,
+    RerankResult,
 )
 
 
@@ -32,17 +32,17 @@ def get_reranker_service(v: Variables) -> RerankerService:
 
 __all__ = [
     # Extension points
-    'EXT_RERANKER_PROVIDER',
-    'EXT_RERANKER_SERVICE',
+    "EXT_RERANKER_PROVIDER",
+    "EXT_RERANKER_SERVICE",
     # Base classes
-    'RerankerProvider',
-    'MultimodalRerankerProvider',
-    'RerankerService',
-    'RerankResult',
+    "RerankerProvider",
+    "MultimodalRerankerProvider",
+    "RerankerService",
+    "RerankResult",
     # Plugin bases
-    'RerankerProviderPluginBase',
-    'RerankerServicePluginBase',
+    "RerankerProviderPluginBase",
+    "RerankerServicePluginBase",
     # Getters
-    'get_reranker_provider',
-    'get_reranker_service',
+    "get_reranker_provider",
+    "get_reranker_service",
 ]

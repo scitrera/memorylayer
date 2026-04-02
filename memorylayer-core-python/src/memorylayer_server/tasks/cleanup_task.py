@@ -3,30 +3,31 @@
 Periodic background task that cleans up expired sessions,
 optionally auto-committing working memory before deletion.
 """
+
 from logging import Logger
 from typing import Optional
 
 from scitrera_app_framework import Variables, ext_parse_bool, get_logger
 
+from ..services.session import EXT_SESSION_SERVICE, SessionService
 from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
 from ..services.tasks import TaskHandlerPlugin, TaskSchedule
-from ..services.session import EXT_SESSION_SERVICE, SessionService
 
-MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_ENABLED = 'MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_ENABLED'
+MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_ENABLED = "MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_ENABLED"
 DEFAULT_CLEANUP_ENABLED = True
 
-MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_INTERVAL = 'MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_INTERVAL'
+MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_INTERVAL = "MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_INTERVAL"
 DEFAULT_CLEANUP_INTERVAL: float = 300
 
-MEMORYLAYER_BACKGROUND_SESSION_AUTO_COMMIT = 'MEMORYLAYER_BACKGROUND_SESSION_AUTO_COMMIT'
+MEMORYLAYER_BACKGROUND_SESSION_AUTO_COMMIT = "MEMORYLAYER_BACKGROUND_SESSION_AUTO_COMMIT"
 DEFAULT_AUTO_COMMIT_ENABLED = True
 
 
 async def periodic_session_cleanup_task(
-        storage: StorageBackend,
-        session_service: Optional['SessionService'],
-        auto_commit_enabled: bool,
-        logger: Logger,
+    storage: StorageBackend,
+    session_service: Optional["SessionService"],
+    auto_commit_enabled: bool,
+    logger: Logger,
 ) -> None:
     """
     Task to clean up expired sessions.
@@ -52,27 +53,14 @@ async def periodic_session_cleanup_task(
             for session in expired_sessions:
                 if session.auto_commit and session.committed_at is None:
                     try:
-                        logger.debug(
-                            "Auto-committing expired session %s before cleanup",
-                            session.id
-                        )
-                        await session_service.commit_session(
-                            session.workspace_id,
-                            session.id
-                        )
+                        logger.debug("Auto-committing expired session %s before cleanup", session.id)
+                        await session_service.commit_session(session.workspace_id, session.id)
                         committed_count += 1
                     except Exception as e:
-                        logger.warning(
-                            "Auto-commit failed for expired session %s: %s",
-                            session.id,
-                            e
-                        )
+                        logger.warning("Auto-commit failed for expired session %s: %s", session.id, e)
 
             if committed_count > 0:
-                logger.info(
-                    "Auto-committed %d expired sessions before cleanup",
-                    committed_count
-                )
+                logger.info("Auto-committed %d expired sessions before cleanup", committed_count)
 
         # Now delete all expired sessions
         count = await storage.cleanup_all_expired_sessions()
@@ -87,22 +75,19 @@ class SessionCleanupTaskHandlerPlugin(TaskHandlerPlugin):
     """Task handler for periodic session cleanup."""
 
     def get_task_type(self) -> str:
-        return 'session_cleanup'
+        return "session_cleanup"
 
-    def get_schedule(self, v: Variables) -> Optional['TaskSchedule']:
-        interval: int = v.environ(
-            MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_INTERVAL,
-            default=DEFAULT_CLEANUP_INTERVAL,
-            type_fn=int
-        )
+    def get_schedule(self, v: Variables) -> Optional["TaskSchedule"]:
+        interval: int = v.environ(MEMORYLAYER_BACKGROUND_SESSION_CLEANUP_INTERVAL, default=DEFAULT_CLEANUP_INTERVAL, type_fn=int)
         auto_commit_enabled: bool = v.environ(
-            MEMORYLAYER_BACKGROUND_SESSION_AUTO_COMMIT,
-            default=DEFAULT_AUTO_COMMIT_ENABLED,
-            type_fn=ext_parse_bool
+            MEMORYLAYER_BACKGROUND_SESSION_AUTO_COMMIT, default=DEFAULT_AUTO_COMMIT_ENABLED, type_fn=ext_parse_bool
         )
-        return TaskSchedule(interval_seconds=interval, default_payload={
-            'auto_commit_enabled': auto_commit_enabled,
-        })
+        return TaskSchedule(
+            interval_seconds=interval,
+            default_payload={
+                "auto_commit_enabled": auto_commit_enabled,
+            },
+        )
 
     async def handle(self, v: Variables, payload: dict):
         storage: StorageBackend = self.get_extension(EXT_STORAGE_BACKEND, v)
@@ -111,6 +96,6 @@ class SessionCleanupTaskHandlerPlugin(TaskHandlerPlugin):
         return await periodic_session_cleanup_task(
             storage=storage,
             session_service=session_service,
-            auto_commit_enabled=payload.get('auto_commit_enabled', DEFAULT_AUTO_COMMIT_ENABLED),
+            auto_commit_enabled=payload.get("auto_commit_enabled", DEFAULT_AUTO_COMMIT_ENABLED),
             logger=logger,
         )

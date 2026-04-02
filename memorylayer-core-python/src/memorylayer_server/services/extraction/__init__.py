@@ -1,16 +1,17 @@
 """Extraction service package."""
-from .base import (
-    ExtractionService,
-    ExtractionServicePluginBase,
-    EXT_EXTRACTION_SERVICE,
-    ExtractionCategory,
-    ExtractionOptions,
-    ExtractedMemory,
-    ExtractionResult,
-    CATEGORY_MAPPING,
-)
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    CATEGORY_MAPPING,
+    EXT_EXTRACTION_SERVICE,
+    ExtractedMemory,
+    ExtractionCategory,
+    ExtractionOptions,
+    ExtractionResult,
+    ExtractionService,
+    ExtractionServicePluginBase,
+)
 
 
 def get_extraction_service(v: Variables = None) -> ExtractionService:
@@ -19,13 +20,13 @@ def get_extraction_service(v: Variables = None) -> ExtractionService:
 
 
 __all__ = (
-    'ExtractionService',
-    'ExtractionServicePluginBase',
-    'get_extraction_service',
-    'EXT_EXTRACTION_SERVICE',
-    'ExtractionCategory',
-    'ExtractionOptions',
-    'ExtractedMemory',
-    'ExtractionResult',
-    'CATEGORY_MAPPING',
+    "ExtractionService",
+    "ExtractionServicePluginBase",
+    "get_extraction_service",
+    "EXT_EXTRACTION_SERVICE",
+    "ExtractionCategory",
+    "ExtractionOptions",
+    "ExtractedMemory",
+    "ExtractionResult",
+    "CATEGORY_MAPPING",
 )

@@ -3,6 +3,6 @@
 from .provider import HyDERerankerProvider, HyDERerankerProviderPlugin
 
 __all__ = [
-    'HyDERerankerProvider',
-    'HyDERerankerProviderPlugin',
+    "HyDERerankerProvider",
+    "HyDERerankerProviderPlugin",
 ]

@@ -1,11 +1,12 @@
 """Workspace service package."""
-from .base import (
-    WorkspaceServicePluginBase,
-    EXT_WORKSPACE_SERVICE,
-)
-from .default import WorkspaceService
 
 from scitrera_app_framework import Variables, get_extension
+
+from .base import (
+    EXT_WORKSPACE_SERVICE,
+    WorkspaceServicePluginBase,
+)
+from .default import WorkspaceService
 
 
 def get_workspace_service(v: Variables = None) -> WorkspaceService:
@@ -14,8 +15,8 @@ def get_workspace_service(v: Variables = None) -> WorkspaceService:
 
 
 __all__ = (
-    'WorkspaceService',
-    'WorkspaceServicePluginBase',
-    'get_workspace_service',
-    'EXT_WORKSPACE_SERVICE',
+    "WorkspaceService",
+    "WorkspaceServicePluginBase",
+    "get_workspace_service",
+    "EXT_WORKSPACE_SERVICE",
 )

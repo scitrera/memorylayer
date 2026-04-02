@@ -1,9 +1,10 @@
 """Unit tests for OntologyService relationship classification."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from memorylayer_server.services.ontology.default import DefaultOntologyService
-from memorylayer_server.services.ontology.base import BASE_ONTOLOGY
 
 
 class TestClassifyRelationshipPrefixMatching:

@@ -13,49 +13,52 @@ Does NOT support:
 - import, for/while loops, def/class, exec/eval
 - File I/O, any module access
 """
+
 import ast
 import io
-import sys
 import time
 from contextlib import redirect_stdout
 from typing import Any
 
-from .base import ExecutorProvider, ExecutionResult
-
+from .base import ExecutionResult, ExecutorProvider
 
 # Safe built-in functions available in the sandbox
 _SAFE_BUILTINS = {
-    'len': len,
-    'sorted': sorted,
-    'sum': sum,
-    'min': min,
-    'max': max,
-    'filter': filter,
-    'map': map,
-    'list': list,
-    'dict': dict,
-    'set': set,
-    'tuple': tuple,
-    'str': str,
-    'int': int,
-    'float': float,
-    'bool': bool,
-    'abs': abs,
-    'round': round,
-    'enumerate': enumerate,
-    'zip': zip,
-    'range': range,
-    'type': lambda *args: (_ for _ in ()).throw(TypeError("type() with multiple arguments is not allowed in restricted mode")) if len(args) != 1 else type(args[0]),
-    'isinstance': isinstance,
-    'any': any,
-    'all': all,
-    'reversed': reversed,
-    'hash': hash,
-    'repr': repr,
-    'print': print,
-    'None': None,
-    'True': True,
-    'False': False,
+    "len": len,
+    "sorted": sorted,
+    "sum": sum,
+    "min": min,
+    "max": max,
+    "filter": filter,
+    "map": map,
+    "list": list,
+    "dict": dict,
+    "set": set,
+    "tuple": tuple,
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "abs": abs,
+    "round": round,
+    "enumerate": enumerate,
+    "zip": zip,
+    "range": range,
+    "type": lambda *args: (
+        (_ for _ in ()).throw(TypeError("type() with multiple arguments is not allowed in restricted mode"))
+        if len(args) != 1
+        else type(args[0])
+    ),
+    "isinstance": isinstance,
+    "any": any,
+    "all": all,
+    "reversed": reversed,
+    "hash": hash,
+    "repr": repr,
+    "print": print,
+    "None": None,
+    "True": True,
+    "False": False,
 }
 
 # AST node types that are allowed
@@ -156,9 +159,7 @@ class _ASTValidator(ast.NodeVisitor):
             return
         if isinstance(node, _ALLOWED_EXPR_NODES):
             return
-        self.errors.append(
-            f"Disallowed syntax: {type(node).__name__} at line {getattr(node, 'lineno', '?')}"
-        )
+        self.errors.append(f"Disallowed syntax: {type(node).__name__} at line {getattr(node, 'lineno', '?')}")
 
     _DUNDER_ALLOWLIST = frozenset({"__name__", "__doc__", "__len__", "__getitem__", "__contains__"})
 
@@ -169,9 +170,7 @@ class _ASTValidator(ast.NodeVisitor):
         if isinstance(node, ast.Attribute):
             attr = node.attr
             if attr.startswith("__") and attr.endswith("__") and attr not in self._DUNDER_ALLOWLIST:
-                self.errors.append(
-                    f"Disallowed dunder attribute access: {attr} at line {getattr(node, 'lineno', '?')}"
-                )
+                self.errors.append(f"Disallowed dunder attribute access: {attr} at line {getattr(node, 'lineno', '?')}")
         super().generic_visit(node)
 
 
@@ -211,14 +210,14 @@ class RestrictedExecutor(ExecutorProvider):
         """
         code = code.strip()
         if not code:
-            return ExecutionResult(output='', result=None, error=None)
+            return ExecutionResult(output="", result=None, error=None)
 
         # Parse and validate AST
         try:
-            tree = ast.parse(code, mode='exec')
+            tree = ast.parse(code, mode="exec")
         except SyntaxError as e:
             return ExecutionResult(
-                output='',
+                output="",
                 result=None,
                 error=f"Syntax error: {e}",
             )
@@ -227,7 +226,7 @@ class RestrictedExecutor(ExecutorProvider):
         node_count = sum(1 for _ in ast.walk(tree))
         if node_count > max_operations:
             return ExecutionResult(
-                output='',
+                output="",
                 result=None,
                 error=f"Code complexity exceeds limit: {node_count} nodes > {max_operations} max",
                 operations_count=node_count,
@@ -237,14 +236,14 @@ class RestrictedExecutor(ExecutorProvider):
         errors = _validate_ast(tree)
         if errors:
             return ExecutionResult(
-                output='',
+                output="",
                 result=None,
-                error='; '.join(errors),
+                error="; ".join(errors),
                 operations_count=node_count,
             )
 
         # Build execution namespace with safe builtins and current state
-        namespace = {'__builtins__': _SAFE_BUILTINS.copy()}
+        namespace = {"__builtins__": _SAFE_BUILTINS.copy()}
         namespace.update(state)
 
         # Track which keys existed before execution
@@ -264,7 +263,7 @@ class RestrictedExecutor(ExecutorProvider):
                 # Execute all but last statement
                 module_head = ast.Module(body=stmts[:-1], type_ignores=[])
                 ast.fix_missing_locations(module_head)
-                compiled_head = compile(module_head, '<sandbox>', 'exec')
+                compiled_head = compile(module_head, "<sandbox>", "exec")
 
                 with redirect_stdout(stdout_capture):
                     exec(compiled_head, namespace)  # noqa: S102
@@ -282,7 +281,7 @@ class RestrictedExecutor(ExecutorProvider):
                 # Evaluate last expression for its value
                 expr_node = ast.Expression(body=stmts[-1].value)
                 ast.fix_missing_locations(expr_node)
-                compiled_expr = compile(expr_node, '<sandbox>', 'eval')
+                compiled_expr = compile(expr_node, "<sandbox>", "eval")
 
                 with redirect_stdout(stdout_capture):
                     last_expr_result = eval(compiled_expr, namespace)  # noqa: S307
@@ -291,14 +290,14 @@ class RestrictedExecutor(ExecutorProvider):
                 # Single expression - evaluate for result
                 expr_node = ast.Expression(body=stmts[0].value)
                 ast.fix_missing_locations(expr_node)
-                compiled_expr = compile(expr_node, '<sandbox>', 'eval')
+                compiled_expr = compile(expr_node, "<sandbox>", "eval")
 
                 with redirect_stdout(stdout_capture):
                     last_expr_result = eval(compiled_expr, namespace)  # noqa: S307
 
             else:
                 # All statements, no expression result
-                compiled = compile(tree, '<sandbox>', 'exec')
+                compiled = compile(tree, "<sandbox>", "exec")
                 with redirect_stdout(stdout_capture):
                     exec(compiled, namespace)  # noqa: S102
 
@@ -323,14 +322,14 @@ class RestrictedExecutor(ExecutorProvider):
         # Sync namespace changes back to state
         variables_changed: list[str] = []
         for key, value in namespace.items():
-            if key == '__builtins__':
+            if key == "__builtins__":
                 continue
             if key not in keys_before or state.get(key) is not value:
                 state[key] = value
                 variables_changed.append(key)
 
         # Track deletions
-        keys_after = {k for k in namespace if k != '__builtins__'}
+        keys_after = {k for k in namespace if k != "__builtins__"}
         for deleted_key in keys_before - keys_after:
             if deleted_key in state:
                 del state[deleted_key]

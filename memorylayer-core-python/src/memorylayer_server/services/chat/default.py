@@ -4,33 +4,33 @@ Default Chat Service implementation.
 Delegates persistence to StorageBackend and schedules decomposition tasks
 when the unprocessed message threshold is exceeded.
 """
+
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from scitrera_app_framework import get_logger, get_extension, Variables
+from scitrera_app_framework import Variables, get_extension, get_logger
 
-from .base import ChatService, ChatServicePluginBase
-from ..storage import StorageBackend
-from ..tasks import TaskService
-from .._constants import EXT_STORAGE_BACKEND, EXT_TASK_SERVICE
 from ...config import (
-    DEFAULT_TENANT_ID,
     DEFAULT_CONTEXT_ID,
-    MEMORYLAYER_CHAT_AUTO_DECOMPOSE_THRESHOLD,
-    DEFAULT_MEMORYLAYER_CHAT_AUTO_DECOMPOSE_THRESHOLD,
-    MEMORYLAYER_CHAT_AUTO_DECOMPOSE_INTERVAL,
     DEFAULT_MEMORYLAYER_CHAT_AUTO_DECOMPOSE_INTERVAL,
+    DEFAULT_MEMORYLAYER_CHAT_AUTO_DECOMPOSE_THRESHOLD,
+    DEFAULT_TENANT_ID,
+    MEMORYLAYER_CHAT_AUTO_DECOMPOSE_INTERVAL,
+    MEMORYLAYER_CHAT_AUTO_DECOMPOSE_THRESHOLD,
 )
 from ...models.chat import (
-    ChatThread,
+    AppendMessagesInput,
     ChatMessage,
+    ChatThread,
     ChatThreadWithMessages,
     CreateThreadInput,
-    AppendMessagesInput,
     DecompositionResult,
 )
-from ...utils import generate_id, utc_now_iso
+from ...utils import generate_id
+from .._constants import EXT_STORAGE_BACKEND, EXT_TASK_SERVICE
+from ..storage import StorageBackend
+from ..tasks import TaskService
+from .base import ChatService, ChatServicePluginBase
 
 CHAT_DECOMPOSITION_TASK = "chat_decomposition"
 
@@ -39,10 +39,10 @@ class DefaultChatService(ChatService):
     """Default chat service backed by StorageBackend."""
 
     def __init__(
-            self,
-            storage: StorageBackend,
-            task_service: TaskService,
-            v: Variables,
+        self,
+        storage: StorageBackend,
+        task_service: TaskService,
+        v: Variables,
     ):
         self.storage = storage
         self.task_service = task_service
@@ -64,13 +64,13 @@ class DefaultChatService(ChatService):
         )
 
     async def create_thread(
-            self,
-            workspace_id: str,
-            tenant_id: str,
-            input: CreateThreadInput,
+        self,
+        workspace_id: str,
+        tenant_id: str,
+        input: CreateThreadInput,
     ) -> ChatThread:
         thread_id = input.thread_id or generate_id()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         thread = ChatThread(
             id=thread_id,
@@ -95,10 +95,10 @@ class DefaultChatService(ChatService):
         return result
 
     async def get_thread(
-            self,
-            workspace_id: str,
-            thread_id: str,
-    ) -> Optional[ChatThread]:
+        self,
+        workspace_id: str,
+        thread_id: str,
+    ) -> ChatThread | None:
         thread = await self.storage.get_thread(workspace_id, thread_id)
         if thread and thread.is_expired:
             self.logger.debug("Thread %s is expired, returning None", thread_id)
@@ -106,11 +106,11 @@ class DefaultChatService(ChatService):
         return thread
 
     async def list_threads(
-            self,
-            workspace_id: str,
-            user_id: Optional[str] = None,
-            limit: int = 50,
-            offset: int = 0,
+        self,
+        workspace_id: str,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[ChatThread]:
         return await self.storage.list_threads(
             workspace_id=workspace_id,
@@ -120,11 +120,11 @@ class DefaultChatService(ChatService):
         )
 
     async def update_thread(
-            self,
-            workspace_id: str,
-            thread_id: str,
-            **updates,
-    ) -> Optional[ChatThread]:
+        self,
+        workspace_id: str,
+        thread_id: str,
+        **updates,
+    ) -> ChatThread | None:
         thread = await self.get_thread(workspace_id, thread_id)
         if not thread:
             return None
@@ -134,9 +134,9 @@ class DefaultChatService(ChatService):
         return result
 
     async def delete_thread(
-            self,
-            workspace_id: str,
-            thread_id: str,
+        self,
+        workspace_id: str,
+        thread_id: str,
     ) -> bool:
         result = await self.storage.delete_thread(workspace_id, thread_id)
         if result:
@@ -144,10 +144,10 @@ class DefaultChatService(ChatService):
         return result
 
     async def append_messages(
-            self,
-            workspace_id: str,
-            thread_id: str,
-            input: AppendMessagesInput,
+        self,
+        workspace_id: str,
+        thread_id: str,
+        input: AppendMessagesInput,
     ) -> list[ChatMessage]:
         # Verify thread exists and is not expired
         thread = await self.get_thread(workspace_id, thread_id)
@@ -158,7 +158,9 @@ class DefaultChatService(ChatService):
 
         self.logger.debug(
             "Appended %d messages to thread %s (new total: %d)",
-            len(result), thread_id, thread.message_count + len(result),
+            len(result),
+            thread_id,
+            thread.message_count + len(result),
         )
 
         # Check if we should schedule auto-decomposition
@@ -167,13 +169,13 @@ class DefaultChatService(ChatService):
         return result
 
     async def get_messages(
-            self,
-            workspace_id: str,
-            thread_id: str,
-            limit: int = 100,
-            offset: int = 0,
-            after_index: Optional[int] = None,
-            order: str = "asc",
+        self,
+        workspace_id: str,
+        thread_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        after_index: int | None = None,
+        order: str = "asc",
     ) -> list[ChatMessage]:
         return await self.storage.get_messages(
             workspace_id=workspace_id,
@@ -185,13 +187,13 @@ class DefaultChatService(ChatService):
         )
 
     async def get_thread_with_messages(
-            self,
-            workspace_id: str,
-            thread_id: str,
-            limit: int = 100,
-            offset: int = 0,
-            order: str = "asc",
-    ) -> Optional[ChatThreadWithMessages]:
+        self,
+        workspace_id: str,
+        thread_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "asc",
+    ) -> ChatThreadWithMessages | None:
         thread = await self.get_thread(workspace_id, thread_id)
         if not thread:
             return None
@@ -211,9 +213,9 @@ class DefaultChatService(ChatService):
         )
 
     async def trigger_decomposition(
-            self,
-            workspace_id: str,
-            thread_id: str,
+        self,
+        workspace_id: str,
+        thread_id: str,
     ) -> DecompositionResult:
         thread = await self.get_thread(workspace_id, thread_id)
         if not thread:
@@ -249,11 +251,11 @@ class DefaultChatService(ChatService):
         )
 
     async def _maybe_schedule_decomposition(
-            self,
-            workspace_id: str,
-            thread_id: str,
-            thread: ChatThread,
-            new_message_count: int,
+        self,
+        workspace_id: str,
+        thread_id: str,
+        thread: ChatThread,
+        new_message_count: int,
     ) -> None:
         """Schedule decomposition if threshold conditions are met."""
         new_total = thread.message_count + new_message_count
@@ -264,13 +266,14 @@ class DefaultChatService(ChatService):
 
         # Check time interval since last decomposition
         if thread.last_decomposed_at:
-            elapsed = (datetime.now(timezone.utc) - thread.last_decomposed_at).total_seconds()
+            elapsed = (datetime.now(UTC) - thread.last_decomposed_at).total_seconds()
             if elapsed < self._auto_decompose_interval:
                 return
 
         self.logger.info(
             "Auto-scheduling decomposition for thread %s (%d unprocessed messages)",
-            thread_id, unprocessed,
+            thread_id,
+            unprocessed,
         )
 
         try:

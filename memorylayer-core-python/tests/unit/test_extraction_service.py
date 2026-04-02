@@ -1,10 +1,12 @@
 """Unit tests for ExtractionService."""
+
 import pytest
+
 from memorylayer_server.services.extraction import ExtractionCategory
 from memorylayer_server.services.extraction.default import (
+    EXTRACTION_SYSTEM_PROMPT,
     DefaultExtractionService,
     ExtractionOptions,
-    EXTRACTION_SYSTEM_PROMPT,
 )
 
 
@@ -23,7 +25,7 @@ class TestExtractionParsing:
 
     def test_parse_valid_json_response(self, extraction_service):
         """Test parsing a valid JSON response."""
-        response = '''[
+        response = """[
             {
                 "content": "User is a Python developer at TechCorp",
                 "category": "profile",
@@ -36,7 +38,7 @@ class TestExtractionParsing:
                 "importance": 0.7,
                 "tags": ["testing", "preferences"]
             }
-        ]'''
+        ]"""
 
         categories = list(ExtractionCategory)
         result = extraction_service._parse_llm_response(response, categories)
@@ -53,7 +55,7 @@ class TestExtractionParsing:
 
     def test_parse_json_with_markdown_code_block(self, extraction_service):
         """Test parsing JSON wrapped in markdown code block."""
-        response = '''```json
+        response = """```json
 [
     {
         "content": "Project Aurora is a microservices migration",
@@ -62,7 +64,7 @@ class TestExtractionParsing:
         "tags": ["project"]
     }
 ]
-```'''
+```"""
 
         categories = list(ExtractionCategory)
         result = extraction_service._parse_llm_response(response, categories)
@@ -73,11 +75,11 @@ class TestExtractionParsing:
 
     def test_parse_filters_by_category(self, extraction_service):
         """Test that parsing filters by allowed categories."""
-        response = '''[
+        response = """[
             {"content": "Memory 1", "category": "profile", "importance": 0.8},
             {"content": "Memory 2", "category": "events", "importance": 0.7},
             {"content": "Memory 3", "category": "cases", "importance": 0.9}
-        ]'''
+        ]"""
 
         # Only allow profile and cases
         categories = [ExtractionCategory.PROFILE, ExtractionCategory.CASES]
@@ -89,9 +91,9 @@ class TestExtractionParsing:
 
     def test_parse_handles_missing_importance(self, extraction_service):
         """Test that missing importance defaults to 0.6."""
-        response = '''[
+        response = """[
             {"content": "Some memory", "category": "profile"}
-        ]'''
+        ]"""
 
         categories = list(ExtractionCategory)
         result = extraction_service._parse_llm_response(response, categories)
@@ -101,10 +103,10 @@ class TestExtractionParsing:
 
     def test_parse_clamps_importance(self, extraction_service):
         """Test that importance is clamped to [0, 1]."""
-        response = '''[
+        response = """[
             {"content": "Memory 1", "category": "profile", "importance": 1.5},
             {"content": "Memory 2", "category": "profile", "importance": -0.5}
-        ]'''
+        ]"""
 
         categories = list(ExtractionCategory)
         result = extraction_service._parse_llm_response(response, categories)
@@ -132,11 +134,11 @@ class TestExtractionParsing:
 
     def test_parse_skips_invalid_items(self, extraction_service):
         """Test that invalid items are skipped."""
-        response = '''[
+        response = """[
             {"content": "Valid", "category": "profile", "importance": 0.8},
             {"invalid": "Missing content and category"},
             {"content": "Also valid", "category": "events", "importance": 0.7}
-        ]'''
+        ]"""
 
         categories = list(ExtractionCategory)
         result = extraction_service._parse_llm_response(response, categories)
@@ -145,10 +147,10 @@ class TestExtractionParsing:
 
     def test_parse_handles_unknown_category(self, extraction_service):
         """Test that unknown categories are skipped."""
-        response = '''[
+        response = """[
             {"content": "Valid", "category": "profile", "importance": 0.8},
             {"content": "Unknown", "category": "unknown_category", "importance": 0.7}
-        ]'''
+        ]"""
 
         categories = list(ExtractionCategory)
         result = extraction_service._parse_llm_response(response, categories)
@@ -222,9 +224,7 @@ class TestExtractionContext:
         session_content = "User talked about Python."
         working_memory = {}
 
-        result = extraction_service._build_extraction_context(
-            session_content, working_memory
-        )
+        result = extraction_service._build_extraction_context(session_content, working_memory)
 
         assert result == "User talked about Python."
 
@@ -233,9 +233,7 @@ class TestExtractionContext:
         session_content = "User talked about Python."
         working_memory = {"current_task": "debugging", "framework": "FastAPI"}
 
-        result = extraction_service._build_extraction_context(
-            session_content, working_memory
-        )
+        result = extraction_service._build_extraction_context(session_content, working_memory)
 
         assert "User talked about Python." in result
         assert "Working Memory:" in result
@@ -289,10 +287,7 @@ class TestParsePartialJsonArray:
 
     def test_truncated_mid_string_value(self, extraction_service):
         """Unterminated string in last object should recover earlier objects."""
-        raw = (
-            '[{"content": "User prefers Python", "type": "semantic"}, '
-            '{"content": "User likes testing with pyt'
-        )
+        raw = '[{"content": "User prefers Python", "type": "semantic"}, {"content": "User likes testing with pyt'
         result = extraction_service._parse_partial_json_array(raw)
         assert len(result) == 1
         assert result[0]["content"] == "User prefers Python"

@@ -5,16 +5,20 @@ Endpoints:
 - GET /v1/workspaces/{workspace_id}/contradictions - List unresolved contradictions
 - POST /v1/contradictions/{contradiction_id}/resolve - Resolve a contradiction
 """
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from scitrera_app_framework import Plugin, Variables
 
-from .. import EXT_MULTI_API_ROUTERS
+from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
+
+from ...services.audit import AuditEvent, AuditService
 from ...services.authentication import AuthenticationError, AuthenticationService
 from ...services.authorization import AuthorizationService
 from ...services.contradiction import ContradictionService, get_contradiction_service
-from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
+from .. import EXT_MULTI_API_ROUTERS
+from .deps import get_audit_service, get_auth_service, get_authz_service
 from .schemas import (
     ContradictionListResponse,
     ContradictionResolveRequest,
@@ -23,10 +27,8 @@ from .schemas import (
     ContradictionScanResponse,
     ErrorResponse,
 )
-from .deps import get_auth_service, get_authz_service, get_audit_service
-from ...services.audit import AuditService, AuditEvent
 
-router = APIRouter(prefix='/v1', tags=["contradictions"])
+router = APIRouter(prefix="/v1", tags=["contradictions"])
 
 
 # Dependencies for services
@@ -45,22 +47,20 @@ async def get_contradiction_svc(v: Variables = Depends(get_variables_dep)) -> Co
     },
 )
 async def list_contradictions(
-        http_request: Request,
-        workspace_id: str,
-        limit: int = 10,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        contradiction_service: ContradictionService = Depends(get_contradiction_svc),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str,
+    limit: int = 10,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    contradiction_service: ContradictionService = Depends(get_contradiction_svc),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> ContradictionListResponse:
     """List unresolved contradictions for a workspace."""
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "contradictions", "read", workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "contradictions", "read", workspace_id=workspace_id)
     except AuthenticationError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     except HTTPException:
@@ -87,23 +87,22 @@ async def list_contradictions(
             for r in records
         ]
         try:
-            await audit_service.record(AuditEvent(
-                event_type="contradiction",
-                action="read",
-                tenant_id=ctx.tenant_id,
-                workspace_id=workspace_id,
-                user_id=ctx.user_id,
-                resource_type="contradiction",
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="contradiction",
+                    action="read",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="contradiction",
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for contradiction list")
         return ContradictionListResponse(contradictions=contradictions, count=len(contradictions))
     except Exception as e:
         logger.error("Failed to list contradictions: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list contradictions"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list contradictions")
 
 
 @router.post(
@@ -118,23 +117,21 @@ async def list_contradictions(
     },
 )
 async def resolve_contradiction(
-        http_request: Request,
-        contradiction_id: str,
-        request: ContradictionResolveRequest,
-        workspace_id: str | None = None,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        contradiction_service: ContradictionService = Depends(get_contradiction_svc),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    contradiction_id: str,
+    request: ContradictionResolveRequest,
+    workspace_id: str | None = None,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    contradiction_service: ContradictionService = Depends(get_contradiction_svc),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> ContradictionResponse:
     """Resolve a contradiction with a chosen strategy."""
     try:
         # Build request context and check authorization
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "contradictions", "write", workspace_id=workspace_id or ctx.workspace_id
-        )
+        await authz_service.require_authorization(ctx, "contradictions", "write", workspace_id=workspace_id or ctx.workspace_id)
     except AuthenticationError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     except HTTPException:
@@ -147,15 +144,11 @@ async def resolve_contradiction(
     valid_resolutions = {"keep_a", "keep_b", "keep_both", "merge"}
     if request.resolution not in valid_resolutions:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid resolution. Must be one of: {', '.join(sorted(valid_resolutions))}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid resolution. Must be one of: {', '.join(sorted(valid_resolutions))}"
         )
 
     if request.resolution == "merge" and not request.merged_content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="merged_content is required when resolution is 'merge'"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="merged_content is required when resolution is 'merge'")
 
     try:
         effective_workspace_id = workspace_id or ctx.workspace_id
@@ -167,21 +160,20 @@ async def resolve_contradiction(
         )
 
         if not record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Contradiction {contradiction_id} not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Contradiction {contradiction_id} not found")
 
         try:
-            await audit_service.record(AuditEvent(
-                event_type="contradiction",
-                action="resolve",
-                tenant_id=ctx.tenant_id,
-                workspace_id=effective_workspace_id,
-                user_id=ctx.user_id,
-                resource_type="contradiction",
-                resource_id=contradiction_id,
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="contradiction",
+                    action="resolve",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=effective_workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="contradiction",
+                    resource_id=contradiction_id,
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for contradiction resolve")
         return ContradictionResponse(
@@ -200,10 +192,7 @@ async def resolve_contradiction(
         raise
     except Exception as e:
         logger.error("Failed to resolve contradiction %s: %s", contradiction_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to resolve contradiction"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to resolve contradiction")
 
 
 @router.post(
@@ -216,21 +205,19 @@ async def resolve_contradiction(
     },
 )
 async def scan_workspace_contradictions(
-        http_request: Request,
-        workspace_id: str,
-        request: ContradictionScanRequest = None,
-        auth_service: AuthenticationService = Depends(get_auth_service),
-        authz_service: AuthorizationService = Depends(get_authz_service),
-        contradiction_service: ContradictionService = Depends(get_contradiction_svc),
-        audit_service: AuditService = Depends(get_audit_service),
-        logger: logging.Logger = Depends(get_logger),
+    http_request: Request,
+    workspace_id: str,
+    request: ContradictionScanRequest = None,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    contradiction_service: ContradictionService = Depends(get_contradiction_svc),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
 ) -> ContradictionScanResponse:
     """Scan all memories in a workspace for contradictions."""
     try:
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(
-            ctx, "contradictions", "write", workspace_id=workspace_id
-        )
+        await authz_service.require_authorization(ctx, "contradictions", "write", workspace_id=workspace_id)
     except AuthenticationError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     except HTTPException:
@@ -242,7 +229,7 @@ async def scan_workspace_contradictions(
     try:
         kwargs = {}
         if request and request.batch_size is not None:
-            kwargs['batch_size'] = request.batch_size
+            kwargs["batch_size"] = request.batch_size
 
         records = await contradiction_service.scan_workspace(workspace_id, **kwargs)
         contradictions = [
@@ -261,14 +248,16 @@ async def scan_workspace_contradictions(
             for r in records
         ]
         try:
-            await audit_service.record(AuditEvent(
-                event_type="contradiction",
-                action="scan",
-                tenant_id=ctx.tenant_id,
-                workspace_id=workspace_id,
-                user_id=ctx.user_id,
-                resource_type="contradiction",
-            ))
+            await audit_service.record(
+                AuditEvent(
+                    event_type="contradiction",
+                    action="scan",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="contradiction",
+                )
+            )
         except Exception:
             logger.debug("Audit record failed for contradiction scan")
         return ContradictionScanResponse(
@@ -278,10 +267,7 @@ async def scan_workspace_contradictions(
         )
     except Exception as e:
         logger.error("Failed to scan contradictions for workspace %s: %s", workspace_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to scan workspace contradictions"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to scan workspace contradictions")
 
 
 class ContradictionsAPIPlugin(Plugin):
