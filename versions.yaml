@@ -7,9 +7,10 @@ memorylayer-sdk-python: 0.0.6
 memorylayer-sdk-typescript: 0.0.6
 
 memorylayer-mcp-typescript: 0.0.6
-memorylayer-cc-plugin: 0.0.5
+memorylayer-cc-plugin: 0.0.6
+memorylayer-opencode-plugin: 0.0.6
 
-memorylayer-sdk-langchain-python: 0.0.5
-memorylayer-sdk-llamaindex-python: 0.0.5
+memorylayer-sdk-langchain-python: 0.0.6
+memorylayer-sdk-llamaindex-python: 0.0.6
 
-memorylayer-explorer: 0.0.5
+memorylayer-explorer: 0.0.6

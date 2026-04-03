@@ -95,6 +95,9 @@ PROJECT_RULES: dict[str, list[UpdateRule]] = {
     "memorylayer-explorer": [
         ("package", Path("memorylayer-explorer/package.json")),
     ],
+    "memorylayer-opencode-plugin": [
+        ("package", Path("memorylayer-opencode-plugin/package.json")),
+    ],
 }
 
 # ---------------------------------------------------------------------------

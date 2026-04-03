@@ -1,0 +1,52 @@
+{
+  "name": "@scitrera/memorylayer-opencode-plugin",
+  "version": "0.0.6",
+  "description": "OpenCode plugin for MemoryLayer.ai - persistent memory hooks and context injection",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "Scitrera LLC",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scitrera/memorylayer",
+    "directory": "oss/memorylayer-opencode-plugin"
+  },
+  "homepage": "https://memorylayer.ai",
+  "keywords": [
+    "opencode",
+    "memorylayer",
+    "memory",
+    "context",
+    "persistence",
+    "knowledge-graph",
+    "recall",
+    "agent",
+    "llm",
+    "ai",
+    "mcp"
+  ],
+  "dependencies": {
+    "@scitrera/memorylayer-mcp-server": "file:../memorylayer-mcp-typescript"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
