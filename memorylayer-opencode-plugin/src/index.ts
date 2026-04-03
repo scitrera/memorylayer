@@ -21,6 +21,9 @@ import { handleUserMessage, extractMessageText } from "./hooks/message.js";
 import { handleToolBefore, handleToolAfter } from "./hooks/tool.js";
 import { handleCompacting } from "./hooks/event.js";
 
+// Re-export types for downstream consumers (e.g., enterprise plugins)
+export type { MemoryLayerHooks, PluginInput, PluginOptions, Part, Model, HookState } from "./shared/types.js";
+
 /** Track whether session has been initialized */
 let sessionInitialized = false;
 
