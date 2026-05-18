@@ -51,8 +51,8 @@ if [ ! -f "$VERSIONS_FILE" ]; then
     exit 1
 fi
 
-# Extract version for 'sparkrun'
-VERSION=$(grep "^sparkrun:" "$VERSIONS_FILE" | cut -d: -f2 | xargs)
+# Extract version for 'memorylayer-core-python'
+VERSION=$(grep "^memorylayer-core-python:" "$VERSIONS_FILE" | cut -d: -f2 | xargs)
 TAG="v$VERSION"
 
 if [ -z "$VERSION" ]; then

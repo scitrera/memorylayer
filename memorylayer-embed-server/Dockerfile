@@ -1,31 +1,32 @@
-# MemoryLayer Embed Server — development image (GPU)
-# Build context: repo root (scitrera-memorylayer-ai-cc/)
-# docker build -f oss/memorylayer-embed-server/Dockerfile .
+# MemoryLayer Embed Server — GPU image
+# Build context: ``oss/`` (the OSS repo root, or the monorepo's ``oss/`` subdir).
 #
-# This image runs the embed server as a child of the Aether `proxy-sidecar`
+#   CI:    docker build -f memorylayer-embed-server/Dockerfile .       # from oss/
+#   Dev:   docker build -f oss/memorylayer-embed-server/Dockerfile oss/
+#
+# The image runs the embed server as a child of the Aether ``proxy-sidecar``
 # binary in supervisor mode. The sidecar is PID 1, owns the gateway
 # connection (sv::memorylayer-embed::*), terminates inbound ProxyHttpRequest
 # envelopes, and forwards to the local embed FastAPI on 127.0.0.1:61051.
 # The Python embed server itself is plain HTTP and has no Aether knowledge.
+#
+# Aether dependencies are pulled from upstream releases — no local Go build:
+#   * proxy-sidecar binary  → ghcr.io/scitrera/aether:${AETHER_VERSION}
+#   * scitrera-aether-client (Python) → PyPI, optional ${AETHER_CLIENT_VERSION} pin
 
-# ── Stage 0: build the Go proxy-sidecar binary ───────────────────────
-ARG AETHER_REPO_PATH=../scitrera-aether3-go
-FROM golang:1.25-bookworm AS sidecar-build
-
-WORKDIR /src
-
-# The build context is the memorylayer repo root; we expect the aether
-# repo to be staged into a known location ahead of `docker build`. The
-# dev-platform.sh wrapper already does this for ml-server; embed-server
-# uses the same staging point for consistency.
-COPY proprietary/.build-staging/aether-server /src/aether-server
-
-WORKDIR /src/aether-server/server
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
-        -o /out/proxy-sidecar ./cmd/proxy-sidecar
+# ── Stage 0: pull the prebuilt proxy-sidecar binary from upstream ────
+# AETHER_VERSION accepts any tag published by ghcr.io/scitrera/aether
+# (no leading "v"). Default ``latest`` pins to the most recent release;
+# CI builds may override via build-args to lock a known-good revision.
+ARG AETHER_VERSION=latest
+FROM ghcr.io/scitrera/aether:${AETHER_VERSION} AS aether-image
 
 # ── Stage 1: compile native Python extensions with full CUDA toolkit ─
 FROM nvidia/cuda:13.1.2-devel-ubuntu24.04 AS builder
+
+# Empty AETHER_CLIENT_VERSION installs the latest scitrera-aether-client
+# from PyPI; supply a concrete version (e.g. ``0.2.0``) to pin.
+ARG AETHER_CLIENT_VERSION=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -46,16 +47,23 @@ ENV PATH="/root/.local/bin:$PATH"
 # Create a venv that we'll copy to the runtime stage
 RUN python3 -m venv /opt/memorylayer-embed
 
-# Copy source packages (now all under oss/ — Phase 3 relocation)
-COPY oss/memorylayer-core-python /src/memorylayer-core-python
-COPY oss/memorylayer-embed-server /src/memorylayer-embed-server
-COPY proprietary/.build-staging/aether-python-client /src/aether-python-client
+# Copy source packages (relative to the oss/ build context).
+COPY memorylayer-core-python /src/memorylayer-core-python
+COPY memorylayer-embed-server /src/memorylayer-embed-server
 
-# Install everything into the venv with correct CUDA torch wheels
-RUN uv pip install --python /opt/memorylayer-embed/bin/python --torch-backend=auto \
-    /src/aether-python-client \
-    "/src/memorylayer-core-python[all]" \
-    "/src/memorylayer-embed-server[all]"
+# Install everything into the venv with correct CUDA torch wheels.
+# scitrera-aether-client comes from PyPI: empty AETHER_CLIENT_VERSION
+# → latest; otherwise pinned to the supplied version.
+RUN set -eu; \
+    if [ -n "${AETHER_CLIENT_VERSION}" ]; then \
+        AETHER_PKG="scitrera-aether-client==${AETHER_CLIENT_VERSION}"; \
+    else \
+        AETHER_PKG="scitrera-aether-client"; \
+    fi; \
+    uv pip install --python /opt/memorylayer-embed/bin/python --torch-backend=auto \
+        "${AETHER_PKG}" \
+        "/src/memorylayer-core-python[all]" \
+        "/src/memorylayer-embed-server[all]"
 
 # ── Stage 2: minimal CUDA runtime ────────────────────────────────────
 FROM nvidia/cuda:13.1.1-runtime-ubuntu24.04
@@ -80,15 +88,15 @@ COPY --from=builder /opt/memorylayer-embed /opt/memorylayer-embed
 ENV PATH="/opt/memorylayer-embed/bin:$PATH" \
     VIRTUAL_ENV="/opt/memorylayer-embed"
 
-# Copy the proxy-sidecar binary (Aether terminator)
-COPY --from=sidecar-build /out/proxy-sidecar /usr/local/bin/proxy-sidecar
+# Copy the prebuilt proxy-sidecar binary from the upstream Aether image
+COPY --from=aether-image /usr/local/bin/proxy-sidecar /usr/local/bin/proxy-sidecar
 
 # Default sidecar config + entrypoint wrapper. The entrypoint script
 # branches on EMBED_SERVER_RUN_SIDECAR: default ("true") runs the sidecar
 # as PID 1 in supervisor mode; "false" runs the embed server directly as
 # plain HTTP (used by docker-compose integration tests and dev shells).
-COPY --chown=memorylayer:memorylayer oss/memorylayer-embed-server/configs/proxy-sidecar.default.yaml /etc/aether-sidecar.yaml
-COPY --chown=memorylayer:memorylayer --chmod=0755 oss/memorylayer-embed-server/scripts/entrypoint.sh /usr/local/bin/embed-server-entrypoint.sh
+COPY --chown=memorylayer:memorylayer memorylayer-embed-server/configs/proxy-sidecar.default.yaml /etc/aether-sidecar.yaml
+COPY --chown=memorylayer:memorylayer --chmod=0755 memorylayer-embed-server/scripts/entrypoint.sh /usr/local/bin/embed-server-entrypoint.sh
 
 WORKDIR /app
 USER memorylayer

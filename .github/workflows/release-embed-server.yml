@@ -1,0 +1,213 @@
+# Release workflow for the MemoryLayer Embed Server GPU image.
+#
+# Builds ``oss/memorylayer-embed-server/Dockerfile`` and pushes to:
+#   * Docker Hub:  scitrera/memorylayer-embed-server
+#   * GHCR:        ghcr.io/${{ github.repository_owner }}/memorylayer-embed-server
+#
+# Multi-arch (linux/amd64 + linux/arm64) is produced by fanning out to
+# **native** GitHub Actions runners for each architecture (no QEMU). Each
+# arch builds + pushes by digest, then a merge job assembles a multi-arch
+# manifest list referencing the per-arch digests. Native arm64 runners
+# (``ubuntu-24.04-arm``) are free for public repos as of Jan 2025.
+#
+# The image bundles a Python venv with CUDA torch / vLLM / ColPali plus the
+# Aether ``proxy-sidecar`` binary (pulled from ghcr.io/scitrera/aether) and
+# the ``scitrera-aether-client`` Python package (pulled from PyPI) — no
+# local Aether Go build is required, and the heavy Python deps install
+# from pre-built wheels so per-arch build times stay reasonable.
+#
+# Trigger: push a tag matching ``v*`` (e.g. v0.1.22) — same convention as
+# the main server release. ``workflow_dispatch`` is also exposed so the
+# Aether versions can be overridden ad-hoc without a code change.
+
+name: Release Embed Server
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      aether_version:
+        description: "Aether image tag for proxy-sidecar (no 'v' prefix; default 'latest')"
+        required: false
+        default: "latest"
+      aether_client_version:
+        description: "scitrera-aether-client PyPI pin (empty = latest)"
+        required: false
+        default: ""
+
+# Cancel any in-progress build for the same ref so a rapid retag doesn't
+# pile up multi-hour CUDA builds.
+concurrency:
+  group: release-embed-server-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Single source of truth for both registry image names — referenced in
+  # both the build matrix outputs= line and the merge step's manifest
+  # composition. Adjust here if either image name ever changes.
+  DOCKERHUB_IMAGE: scitrera/memorylayer-embed-server
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/memorylayer-embed-server
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────
+  # Per-architecture build, native runner, push-by-digest (no tag yet).
+  # ────────────────────────────────────────────────────────────────────
+  build:
+    name: "Build ${{ matrix.platform }}"
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare platform pair (artifact-safe name)
+        run: |
+          platform="${{ matrix.platform }}"
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Extract Docker labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.DOCKERHUB_IMAGE }}
+            ${{ env.GHCR_IMAGE }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: memorylayer-embed-server/Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Push to both registries by digest only; the merge job below
+          # builds the multi-arch manifest list with the actual tags.
+          outputs: type=image,"name=${{ env.DOCKERHUB_IMAGE }},${{ env.GHCR_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
+          # Per-arch cache scope so amd64 and arm64 builds don't collide.
+          cache-from: type=gha,scope=embed-server-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=embed-server-${{ env.PLATFORM_PAIR }}
+          build-args: |
+            AETHER_VERSION=${{ github.event.inputs.aether_version || 'latest' }}
+            AETHER_CLIENT_VERSION=${{ github.event.inputs.aether_client_version || '' }}
+
+      - name: Export digest to disk
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-embed-server-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          retention-days: 1
+          if-no-files-found: error
+
+  # ────────────────────────────────────────────────────────────────────
+  # Assemble + push the multi-arch manifest list, one per registry,
+  # referencing the per-arch digests pushed above.
+  # ────────────────────────────────────────────────────────────────────
+  merge:
+    name: "Manifest: ${{ env.DOCKERHUB_IMAGE }} + GHCR"
+    runs-on: ubuntu-24.04
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-embed-server-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Extract Docker tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.DOCKERHUB_IMAGE }}
+            ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create + push manifest list per registry
+        working-directory: /tmp/digests
+        env:
+          META_JSON: ${{ steps.meta.outputs.json }}
+        run: |
+          # Iterate both registries; the per-arch digests are identical
+          # (content-addressed), so the same source list works for both.
+          for image in "$DOCKERHUB_IMAGE" "$GHCR_IMAGE"; do
+            # Pull the tags scoped to this image out of metadata-action's JSON.
+            mapfile -t image_tags < <(jq -r --arg img "$image" '.tags[] | select(startswith($img + ":"))' <<<"$META_JSON")
+            tag_flags=()
+            for t in "${image_tags[@]}"; do
+              tag_flags+=(-t "$t")
+            done
+
+            sources=()
+            for digest_file in *; do
+              sources+=("$image@sha256:$digest_file")
+            done
+
+            echo "Creating manifest for $image with ${#sources[@]} arch(es) and ${#tag_flags[@]} tag(s)"
+            docker buildx imagetools create "${tag_flags[@]}" "${sources[@]}"
+          done
+
+      - name: Inspect resulting manifests
+        env:
+          META_JSON: ${{ steps.meta.outputs.json }}
+        run: |
+          version=$(jq -r '.labels["org.opencontainers.image.version"]' <<<"$META_JSON")
+          docker buildx imagetools inspect "$DOCKERHUB_IMAGE:$version" || true
+          docker buildx imagetools inspect "$GHCR_IMAGE:$version" || true
