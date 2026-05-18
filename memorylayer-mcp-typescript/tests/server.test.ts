@@ -3,20 +3,38 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "node:url";
 import { MCPServer, createServer } from "../src/server.js";
 import { MemoryLayerClient } from "../src/client.js";
 import { TOOLS, SESSION_TOOLS, CONTEXT_ENVIRONMENT_TOOLS } from "../src/tools.js";
 
-// Mock the SDK client
+// Read the current package version dynamically so version bumps don't
+// regress this assertion. ``server.ts`` reads it the same way at runtime.
+const PKG_VERSION: string = JSON.parse(
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"),
+    "utf-8",
+  ),
+).version;
+
+// Mock the SDK client. Use a regular function (not an arrow) for
+// mockImplementation so it works when called with ``new`` — under
+// vitest's SSR loader, arrows are forwarded as-is and can't be
+// constructors, which surfaces as
+// ``TypeError: () => ({...}) is not a constructor``.
 vi.mock("../src/client.js", () => {
   return {
-    MemoryLayerClient: vi.fn().mockImplementation(() => ({
-      getWorkspaceId: vi.fn().mockReturnValue("test-workspace"),
-      remember: vi.fn().mockResolvedValue({ id: "mem-123", type: "semantic", importance: 0.5, tags: [] }),
-      recall: vi.fn().mockResolvedValue({ memories: [], total_count: 0, search_latency_ms: 10, mode_used: "semantic" }),
-      startSession: vi.fn().mockResolvedValue({ session_id: "server-session-123" }),
-      endSession: vi.fn().mockResolvedValue({ memories_extracted: 2 }),
-    })),
+    MemoryLayerClient: vi.fn().mockImplementation(function () {
+      return {
+        getWorkspaceId: vi.fn().mockReturnValue("test-workspace"),
+        remember: vi.fn().mockResolvedValue({ id: "mem-123", type: "semantic", importance: 0.5, tags: [] }),
+        recall: vi.fn().mockResolvedValue({ memories: [], total_count: 0, search_latency_ms: 10, mode_used: "semantic" }),
+        startSession: vi.fn().mockResolvedValue({ session_id: "server-session-123" }),
+        endSession: vi.fn().mockResolvedValue({ memories_extracted: 2 }),
+      };
+    }),
   };
 });
 
@@ -55,7 +73,7 @@ describe("MCPServer", () => {
       const manifest = server.getManifest();
 
       expect(manifest.name).toBe("memorylayer");
-      expect(manifest.version).toBe("0.1.0");
+      expect(manifest.version).toBe(PKG_VERSION);
       expect(manifest.description).toContain("MemoryLayer.ai");
       expect(manifest.capabilities).toBeDefined();
     });

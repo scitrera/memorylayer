@@ -13,6 +13,19 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 
+def pytest_collection_modifyitems(config, items):
+    """Auto-mark every test collected under ``tests/integration/`` with
+    ``@pytest.mark.integration`` so ``pytest -m "not integration"`` (CI
+    default + ci-local.sh) deselects the whole directory. Pytest's
+    ``-m`` filter only looks at the marker decorator, not the layout —
+    hooking here is the directory-level equivalent of putting
+    ``pytestmark = pytest.mark.integration`` at the top of every file.
+    """
+    for item in items:
+        if "tests/integration/" in str(item.fspath).replace("\\", "/"):
+            item.add_marker(pytest.mark.integration)
+
+
 @pytest.fixture(scope="session")
 def test_client(fastapi_app: FastAPI) -> Generator[TestClient, None, None]:
     """

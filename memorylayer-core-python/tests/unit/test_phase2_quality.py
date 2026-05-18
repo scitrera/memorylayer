@@ -441,9 +441,13 @@ class TestQueryRewriting:
         assert "value" in captured_prompt
         assert "user: hello" in captured_prompt["value"] or "hello" in captured_prompt["value"]
 
-    def test_llm_query_rewrite_default_enabled(self):
-        """The default value for LLM query rewrite should be True."""
-        assert DEFAULT_MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED is True
+    def test_llm_query_rewrite_default_disabled(self):
+        """LLM query rewrite is off by default — opt in via the env var.
+
+        Originally defaulted to ``True``; flipped to ``False`` so the feature
+        ships dark and operators consciously enable it.
+        """
+        assert DEFAULT_MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED is False
 
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,10 @@ dev = [
     "respx>=0.20.0",
     "ruff>=0.1.0",
     "mypy>=1.8.0",
+    # Pulled into dev so ``tests/test_transport_aether.py`` can import
+    # ``scitrera_aether_client.proxy``. Mirrors the optional ``aether`` extra
+    # so the test environment matches a real Aether-enabled install.
+    "scitrera-aether-client>=0.1.59",
 ]
 
 [project.urls]

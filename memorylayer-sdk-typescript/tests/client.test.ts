@@ -51,7 +51,8 @@ describe("MemoryLayerClient", () => {
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
-            "X-API-Key": "test-key",
+            "Authorization": "Bearer test-key",
+            "X-Workspace-ID": "ws-123",
             "Content-Type": "application/json",
           }),
         })
@@ -197,7 +198,7 @@ describe("MemoryLayerClient", () => {
         workspace_id: "ws-123",
         source_id: "mem-1",
         target_id: "mem-2",
-        relationship: RelationshipType.SOLVES,
+        relationship: "solution",
         strength: 0.8,
         metadata: {},
         created_at: "2024-01-01T00:00:00Z",
@@ -212,7 +213,7 @@ describe("MemoryLayerClient", () => {
       const result = await client.associate(
         "mem-1",
         "mem-2",
-        RelationshipType.SOLVES,
+        "solution",
         0.8
       );
 
@@ -459,7 +460,7 @@ describe("MemoryLayerClient", () => {
 
       expect(result).toEqual(mockResult);
       expect(global.fetch).toHaveBeenCalledWith(
-        "http://localhost:61001/v1/associations/traverse",
+        "http://localhost:61001/v1/memories/mem-1/traverse",
         expect.objectContaining({
           method: "POST",
         })

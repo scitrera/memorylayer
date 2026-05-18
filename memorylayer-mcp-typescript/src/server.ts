@@ -14,11 +14,23 @@ import {join, dirname} from "path";
 import {fileURLToPath} from "node:url";
 import {tmpdir} from "os";
 
-// ESM-compatible version reading (require() is not available in ESM)
+// ESM-compatible version reading (require() is not available in ESM).
+// Try the closer path first (``../package.json``) — this is the
+// source-layout case (src/server.ts) hit by vitest. The two-level path
+// (``../../package.json``) is the built layout (dist/src/server.js per
+// tsconfig rootDir=./). Degrade to "unknown" rather than crashing on
+// import if neither resolves (e.g. dist/ packed without package.json).
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_VERSION: string = JSON.parse(
-    readFileSync(join(__dirname, "..", "..", "package.json"), "utf-8")
-).version;
+const PACKAGE_VERSION: string = (() => {
+    for (const rel of ["../package.json", "../../package.json"]) {
+        try {
+            return JSON.parse(readFileSync(join(__dirname, rel), "utf-8")).version;
+        } catch {
+            // try next candidate
+        }
+    }
+    return "unknown";
+})();
 
 import {MemoryLayerClient} from "./client.js";
 import {MCPToolHandlers} from "./handlers.js";

@@ -52,6 +52,10 @@ from scitrera_aether_client.proxy_terminator import (
 
 from memorylayer_server.services.aether_service.asgi_bridge import asgi_dispatch
 
+# The ``integration`` marker is applied at the directory level via
+# ``tests/integration/conftest.py``'s ``pytest_collection_modifyitems``
+# hook, so this module is automatically deselected by ``-m "not integration"``.
+
 # ---------------------------------------------------------------------------
 # Minimal FastAPI app used as the backend across all tests
 # ---------------------------------------------------------------------------

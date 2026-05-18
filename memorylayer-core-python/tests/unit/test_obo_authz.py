@@ -36,6 +36,13 @@ from memorylayer_server.services.authorization.aether import (
 def _make_request(headers: dict) -> MagicMock:
     req = MagicMock()
     req.headers = headers
+    # ``build_context`` consults ``request.query_params.get("workspace_id")``
+    # before falling back to the ``X-Workspace-ID`` header. Without an
+    # explicit stub, MagicMock auto-generates a truthy MagicMock for that
+    # return value, which masks the header path and propagates a bogus
+    # workspace id into the OBO scope check. Force ``None`` so the header
+    # fallback fires as it would in a real request.
+    req.query_params.get = MagicMock(return_value=None)
     return req
 
 
