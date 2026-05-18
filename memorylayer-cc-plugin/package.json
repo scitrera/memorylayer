@@ -16,6 +16,11 @@
   "author": "scitrera.ai",
   "homepage": "https://memorylayer.ai",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scitrera/memorylayer",
+    "directory": "oss/memorylayer-cc-plugin"
+  },
   "dependencies": {
     "@scitrera/memorylayer-mcp-server": "file:../memorylayer-mcp-typescript"
   },
