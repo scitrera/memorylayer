@@ -63,6 +63,9 @@ jobs:
   publish-npm-sdk:
     name: "npm: @scitrera/memorylayer-sdk"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -92,6 +95,9 @@ jobs:
     name: "npm: @scitrera/memorylayer-mcp-server"
     needs: publish-npm-sdk
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -141,6 +147,9 @@ jobs:
     name: "npm: @scitrera/memorylayer-cc-plugin"
     needs: publish-npm-mcp
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -190,6 +199,9 @@ jobs:
     name: "npm: @scitrera/memorylayer-opencode-plugin"
     needs: publish-npm-mcp
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
