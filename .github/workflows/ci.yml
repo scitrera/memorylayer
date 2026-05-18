@@ -82,10 +82,17 @@ jobs:
         run: pytest tests/ -x
 
   # ──────────────────────────────────────────────────────────────────
-  # TypeScript packages
+  # TypeScript packages — three-tier dep chain:
+  #
+  #   memorylayer-sdk-typescript                   (root; no internal deps)
+  #     └── memorylayer-mcp-typescript             (file:../memorylayer-sdk-typescript)
+  #           └── memorylayer-opencode-plugin      (file:../memorylayer-mcp-typescript)
+  #
+  # Each tier installs, builds, and runs its own tests when present, then
+  # uploads its dist/ as an artifact for downstream consumers.
   # ──────────────────────────────────────────────────────────────────
-  build-typescript-sdk:
-    name: "TypeScript: memorylayer-sdk (build)"
+  test-typescript-sdk:
+    name: "TypeScript: memorylayer-sdk"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -93,6 +100,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: memorylayer-sdk-typescript/package-lock.json
 
       - name: Install dependencies
         working-directory: memorylayer-sdk-typescript
@@ -101,6 +110,10 @@ jobs:
       - name: Build
         working-directory: memorylayer-sdk-typescript
         run: npm run build
+
+      - name: Run tests
+        working-directory: memorylayer-sdk-typescript
+        run: npm test
 
       - name: Upload SDK build artifacts
         uses: actions/upload-artifact@v4
@@ -109,22 +122,18 @@ jobs:
           path: memorylayer-sdk-typescript/dist/
           retention-days: 1
 
-  test-typescript:
-    name: "TypeScript: ${{ matrix.package.name }}"
-    needs: build-typescript-sdk
+  test-typescript-mcp:
+    name: "TypeScript: memorylayer-mcp-server"
+    needs: test-typescript-sdk
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          - { dir: memorylayer-sdk-typescript, name: memorylayer-sdk }
-          - { dir: memorylayer-mcp-typescript, name: memorylayer-mcp-server }
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: memorylayer-mcp-typescript/package-lock.json
 
       - name: Download SDK build artifacts
         uses: actions/download-artifact@v4
@@ -133,9 +142,63 @@ jobs:
           path: memorylayer-sdk-typescript/dist/
 
       - name: Install dependencies
+        working-directory: memorylayer-mcp-typescript
+        run: npm ci
+
+      - name: Build
+        working-directory: memorylayer-mcp-typescript
+        run: npm run build
+
+      - name: Run tests
+        working-directory: memorylayer-mcp-typescript
+        run: npm test
+
+      - name: Upload MCP build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: memorylayer-mcp-dist
+          path: memorylayer-mcp-typescript/dist/
+          retention-days: 1
+
+  test-typescript-plugins:
+    name: "TypeScript: ${{ matrix.package.name }}"
+    needs: test-typescript-mcp
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - { dir: memorylayer-opencode-plugin, name: memorylayer-opencode-plugin }
+          - { dir: memorylayer-cc-plugin, name: memorylayer-cc-plugin }
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: ${{ matrix.package.dir }}/package-lock.json
+
+      - name: Download SDK build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: memorylayer-sdk-dist
+          path: memorylayer-sdk-typescript/dist/
+
+      - name: Download MCP build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: memorylayer-mcp-dist
+          path: memorylayer-mcp-typescript/dist/
+
+      - name: Install dependencies
         working-directory: ${{ matrix.package.dir }}
         run: npm ci
 
       - name: Build
         working-directory: ${{ matrix.package.dir }}
         run: npm run build
+
+      - name: Run tests (if present)
+        working-directory: ${{ matrix.package.dir }}
+        run: npm test --if-present
