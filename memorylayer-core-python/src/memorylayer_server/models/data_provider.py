@@ -4,9 +4,10 @@ Defines the DataProvider model and type enum. In OSS, the only provider
 type is LOCAL (direct upload / local filesystem). Enterprise extends
 this with external sources (S3, GCS, SharePoint, Confluence, web).
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -37,16 +38,14 @@ class DataProvider(BaseModel):
     name: str = Field(..., description="Provider name")
     # str (not enum) so enterprise can add its own types without modifying OSS
     provider_type: str = Field(..., description="Provider type (local, s3, gcs, ...)")
-    description: Optional[str] = Field(None, description="Provider description")
+    description: str | None = Field(None, description="Provider description")
     enabled: bool = Field(True, description="Whether the provider is active")
-    connection_args: dict[str, Any] = Field(
-        default_factory=dict, description="Non-sensitive connection arguments"
-    )
-    schedule: Optional[str] = Field(None, description="Cron schedule for auto-sync (enterprise)")
-    last_sync_at: Optional[datetime] = Field(None, description="Last successful sync time")
+    connection_args: dict[str, Any] = Field(default_factory=dict, description="Non-sensitive connection arguments")
+    schedule: str | None = Field(None, description="Cron schedule for auto-sync (enterprise)")
+    last_sync_at: datetime | None = Field(None, description="Last successful sync time")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("name")
     @classmethod

@@ -61,7 +61,7 @@ def create_mock_memory_response(memory_id: str, content: str, role: str, index: 
         "content": content,
         "type": "episodic",
         "importance": 0.5,
-        "tags": [f"session:sess_test", "chat_message", f"role:{role}"],
+        "tags": ["session:sess_test", "chat_message", f"role:{role}"],
         "metadata": {
             "session_id": "sess_test",
             "role": role,
@@ -120,14 +120,10 @@ class TestLCELIntegrationWithMockedLLM:
     """Integration tests for LCEL chains with MemoryLayerChatMessageHistory."""
 
     @respx.mock
-    def test_basic_chain_with_message_history(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_basic_chain_with_message_history(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test basic LCEL chain with RunnableWithMessageHistory."""
         # Setup mocks for MemoryLayer API
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
@@ -178,9 +174,7 @@ class TestLCELIntegrationWithMockedLLM:
         assert response.content == "Hello! How can I help you today?"
 
     @respx.mock
-    def test_chain_loads_existing_history(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_loads_existing_history(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that chain correctly loads existing conversation history."""
         # Mock existing conversation history
         existing_memories = [
@@ -252,9 +246,7 @@ class TestLCELIntegrationWithMockedLLM:
         assert messages[2].content == "Hi there! How can I help?"
 
     @respx.mock
-    def test_multi_turn_conversation(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_multi_turn_conversation(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test multi-turn conversation with history persistence."""
         # Track stored memories for simulating persistence
         stored_memories: list[dict] = []
@@ -350,9 +342,7 @@ class TestLCELIntegrationWithMockedLLM:
         assert len(stored_memories) >= 2  # At least first turn stored
 
     @respx.mock
-    def test_multiple_sessions_isolated(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_multiple_sessions_isolated(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that different sessions maintain isolated histories."""
         # Track memories by session
         memories_by_session: dict[str, list[dict]] = {}
@@ -452,13 +442,9 @@ class TestLCELIntegrationWithMockedLLM:
         assert "sess_2" in memories_by_session
 
     @respx.mock
-    def test_chain_with_system_prompt(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_with_system_prompt(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test LCEL chain with system prompt and message history."""
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
@@ -513,14 +499,10 @@ class TestLCELIntegrationWithMockedLLM:
         assert messages[0].content == "You are a Python programming expert. Always respond helpfully."
 
     @respx.mock
-    def test_chain_handles_api_errors_gracefully(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_handles_api_errors_gracefully(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that chain handles MemoryLayer API errors gracefully for reads."""
         # Simulate API returning empty on error (graceful degradation)
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(500, json={"detail": "Internal server error"})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -562,9 +544,7 @@ class TestChatMessageHistoryDirect:
     """Direct integration tests for MemoryLayerChatMessageHistory."""
 
     @respx.mock
-    def test_history_add_and_retrieve_messages(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_history_add_and_retrieve_messages(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test adding and retrieving messages through the history interface."""
         stored_messages: list[dict] = []
         msg_counter = [0]
@@ -615,9 +595,7 @@ class TestChatMessageHistoryDirect:
         assert messages[2].content == "How are you?"
 
     @respx.mock
-    def test_history_clear(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_history_clear(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test clearing message history."""
         existing_memories = [
             create_mock_memory_response("mem_1", "Hello", "human", 0),
@@ -641,20 +619,13 @@ class TestChatMessageHistoryDirect:
         history.clear()
 
         # Verify delete calls were made
-        delete_calls = [
-            call for call in respx.calls
-            if call.request.method == "DELETE"
-        ]
+        delete_calls = [call for call in respx.calls if call.request.method == "DELETE"]
         assert len(delete_calls) == 2
 
     @respx.mock
-    def test_history_with_custom_tags(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_history_with_custom_tags(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that custom tags are included in stored memories."""
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         request_bodies: list[dict] = []
 

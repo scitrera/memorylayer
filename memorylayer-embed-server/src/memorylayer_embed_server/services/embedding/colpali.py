@@ -10,40 +10,39 @@ from ``memorylayer_server.services.embedding._maxsim`` so the wire-side
 contract used by ``/v1/score`` and the late-interaction scoring helper
 have a single canonical definition.
 """
+
 import asyncio
 from logging import Logger
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
-from scitrera_app_framework import Variables, get_extension
-
 from memorylayer_server.config import MEMORYLAYER_EMBEDDING_MODEL
 from memorylayer_server.services.embedding._maxsim import MultiVectorEmbedding, maxsim_score
 from memorylayer_server.services.embedding.base import (
     EmbeddingProviderPluginBase,
     MultimodalEmbeddingProvider,
 )
+from scitrera_app_framework import Variables, get_extension
 
-MEMORYLAYER_EMBEDDING_COLPALI_MODEL = 'MEMORYLAYER_EMBEDDING_COLPALI_MODEL'
-MEMORYLAYER_EMBEDDING_DEVICE = 'MEMORYLAYER_EMBEDDING_DEVICE'
-MEMORYLAYER_EMBEDDING_REVISION = 'MEMORYLAYER_EMBEDDING_REVISION'
+MEMORYLAYER_EMBEDDING_COLPALI_MODEL = "MEMORYLAYER_EMBEDDING_COLPALI_MODEL"
+MEMORYLAYER_EMBEDDING_DEVICE = "MEMORYLAYER_EMBEDDING_DEVICE"
+MEMORYLAYER_EMBEDDING_REVISION = "MEMORYLAYER_EMBEDDING_REVISION"
 # Max concurrent ColPali GPU requests in flight. Excess requests wait
 # in an asyncio.Semaphore queue. Tune up on dedicated GPUs; ~4 is a
 # reasonable default for ColModernVBert on a 24GB GPU.
-MEMORYLAYER_EMBEDDING_COLPALI_MAX_CONCURRENT = 'MEMORYLAYER_EMBEDDING_COLPALI_MAX_CONCURRENT'
+MEMORYLAYER_EMBEDDING_COLPALI_MAX_CONCURRENT = "MEMORYLAYER_EMBEDDING_COLPALI_MAX_CONCURRENT"
 DEFAULT_COLPALI_MAX_CONCURRENT = 4
 # Max seconds a request may wait for a semaphore slot before being
 # rejected. 0 (default) means wait forever — relies on client timeouts
 # for upstream backpressure. Set to a positive number (e.g. 30) on
 # load-shedding deployments.
-MEMORYLAYER_EMBEDDING_COLPALI_QUEUE_TIMEOUT_SEC = 'MEMORYLAYER_EMBEDDING_COLPALI_QUEUE_TIMEOUT_SEC'
+MEMORYLAYER_EMBEDDING_COLPALI_QUEUE_TIMEOUT_SEC = "MEMORYLAYER_EMBEDDING_COLPALI_QUEUE_TIMEOUT_SEC"
 DEFAULT_COLPALI_QUEUE_TIMEOUT_SEC = 0.0
 
 # Default to ModernVBERT - MIT licensed, smaller, better performance
 DEFAULT_MEMORYLAYER_COLPALI_EMBEDDING_MODEL = "ModernVBERT/colmodernvbert"
 DEFAULT_EMBEDDING_DEVICE = None
-DEFAULT_EMBEDDING_REVISION = 'main'
+DEFAULT_EMBEDDING_REVISION = "main"
 
 
 class ColPaliQueueTimeoutError(Exception):
@@ -56,8 +55,7 @@ class ColPaliQueueTimeoutError(Exception):
         self.wait_seconds = wait_seconds
         self.max_concurrent = max_concurrent
         super().__init__(
-            f"ColPali GPU queue saturated: waited {wait_seconds:.2f}s for "
-            f"a slot (max_concurrent={max_concurrent}); rejecting request."
+            f"ColPali GPU queue saturated: waited {wait_seconds:.2f}s for a slot (max_concurrent={max_concurrent}); rejecting request."
         )
 
 
@@ -85,14 +83,14 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
     """
 
     def __init__(
-            self,
-            v: Variables = None,
-            model_name: str = DEFAULT_MEMORYLAYER_COLPALI_EMBEDDING_MODEL,
-            device: Optional[str] = None,
-            revision: str = DEFAULT_EMBEDDING_REVISION,
-            output_dimensions: int = 128,
-            max_concurrent: int = DEFAULT_COLPALI_MAX_CONCURRENT,
-            queue_timeout_sec: float = DEFAULT_COLPALI_QUEUE_TIMEOUT_SEC,
+        self,
+        v: Variables = None,
+        model_name: str = DEFAULT_MEMORYLAYER_COLPALI_EMBEDDING_MODEL,
+        device: str | None = None,
+        revision: str = DEFAULT_EMBEDDING_REVISION,
+        output_dimensions: int = 128,
+        max_concurrent: int = DEFAULT_COLPALI_MAX_CONCURRENT,
+        queue_timeout_sec: float = DEFAULT_COLPALI_QUEUE_TIMEOUT_SEC,
     ):
         super().__init__(v, output_dimensions)  # Default dimension per vector
         self.model_name = model_name
@@ -105,14 +103,15 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         self._processor = None
         # Constructed lazily so the Semaphore binds to the running event
         # loop rather than whichever loop happens to exist at import time.
-        self._gpu_semaphore: Optional[asyncio.Semaphore] = None
+        self._gpu_semaphore: asyncio.Semaphore | None = None
         # In-flight gauge — exposed via /health/load on the embed-server
         # so an LB can route to the least-utilised replica.
         self._in_flight: int = 0
         self.logger.info(
-            "Initialized ColPaliEmbeddingProvider: model=%s (revision=%s), "
-            "max_concurrent=%d, queue_timeout_sec=%s",
-            model_name, revision, self.max_concurrent,
+            "Initialized ColPaliEmbeddingProvider: model=%s (revision=%s), max_concurrent=%d, queue_timeout_sec=%s",
+            model_name,
+            revision,
+            self.max_concurrent,
             "off" if self.queue_timeout_sec == 0 else f"{self.queue_timeout_sec:.1f}s",
         )
 
@@ -125,6 +124,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         """Resolve the active metrics service. Returns ``None`` if unavailable."""
         try:
             from memorylayer_server.services._constants import EXT_METRICS_SERVICE
+
             return get_extension(EXT_METRICS_SERVICE, self._v)
         except Exception:  # noqa: BLE001 - metrics are best-effort
             return None
@@ -168,7 +168,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
                     if timeout > 0:
                         try:
                             await asyncio.wait_for(sem.acquire(), timeout=timeout)
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             waited = _time.monotonic() - start
                             if metrics is not None:
                                 metrics.counter(
@@ -211,14 +211,17 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
                     )
                 if waited > 0.1:
                     provider.logger.warning(
-                        "ColPali GPU slot acquired after %.3fs wait "
-                        "(in_flight=%d/%d); consider scaling out.",
-                        waited, provider._in_flight, provider.max_concurrent,
+                        "ColPali GPU slot acquired after %.3fs wait (in_flight=%d/%d); consider scaling out.",
+                        waited,
+                        provider._in_flight,
+                        provider.max_concurrent,
                     )
                 else:
                     provider.logger.debug(
                         "ColPali GPU slot acquired in %.4fs (in_flight=%d/%d)",
-                        waited, provider._in_flight, provider.max_concurrent,
+                        waited,
+                        provider._in_flight,
+                        provider.max_concurrent,
                     )
                 return None
 
@@ -259,26 +262,22 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
             model_name_lower = self.model_name.lower()
 
             try:
-                if 'qwen2.5' in model_name_lower:
+                if "qwen2.5" in model_name_lower:
                     self._load_colqwen2_5(torch, use_flash_attn)
-                elif 'qwen2' in model_name_lower:
+                elif "qwen2" in model_name_lower:
                     self._load_colqwen2(torch, use_flash_attn)
-                elif 'modernvbert' in model_name_lower:
+                elif "modernvbert" in model_name_lower:
                     self._load_colmodernvbert(torch, use_flash_attn)
-                elif 'colpali' in model_name_lower:
+                elif "colpali" in model_name_lower:
                     self._load_colpali(torch)
                 else:
                     # Default to ModernVBERT loading pattern for unknown models
-                    self.logger.warning(
-                        "Unknown model pattern '%s', attempting ModernVBERT loading",
-                        self.model_name
-                    )
+                    self.logger.warning("Unknown model pattern '%s', attempting ModernVBERT loading", self.model_name)
                     self._load_colmodernvbert(torch, use_flash_attn)
 
             except ImportError as e:
                 self.logger.warning(
-                    "colpali_engine not installed or missing dependencies. "
-                    "Install with: pip install colpali-engine. Error: %s", e
+                    "colpali_engine not installed or missing dependencies. Install with: pip install colpali-engine. Error: %s", e
                 )
                 raise
 
@@ -318,7 +317,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
 
         self.logger.info("Loading ColModernVBert model with float32")
         # ModernVBERT requires high precision for float32 matmul
-        torch.set_float32_matmul_precision('high')
+        torch.set_float32_matmul_precision("high")
 
         self._model = ColModernVBert.from_pretrained(
             self.model_name,
@@ -360,9 +359,9 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         return [np.mean(mv.vectors, axis=0).tolist() for mv in multi_vecs]
 
     async def embed_batch_multivector(
-            self,
-            texts: list[str],
-            batch_size: int = 8,
+        self,
+        texts: list[str],
+        batch_size: int = 8,
     ) -> list[MultiVectorEmbedding]:
         """
         Generate multi-vector embeddings for multiple texts efficiently.
@@ -394,7 +393,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
                 with torch.no_grad():
                     batch_inputs = {k: v.to(self.device) for k, v in batch_inputs.items()}
                     embeddings = model(**batch_inputs)
-                    return list(torch.unbind(embeddings.to('cpu')))
+                    return list(torch.unbind(embeddings.to("cpu")))
 
             all_results = []
             for batch_inputs in dataloader:
@@ -405,9 +404,9 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         return all_results
 
     async def embed_images_batch_multivector(
-            self,
-            images: list[Union[str, bytes, Path]],
-            batch_size: int = 4,
+        self,
+        images: list[str | bytes | Path],
+        batch_size: int = 4,
     ) -> list[MultiVectorEmbedding]:
         """
         Generate multi-vector embeddings for multiple images efficiently.
@@ -421,10 +420,11 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         Returns:
             List of MultiVectorEmbedding, one per input image
         """
-        import torch
-        from torch.utils.data import DataLoader
-        from PIL import Image
         import io
+
+        import torch
+        from PIL import Image
+        from torch.utils.data import DataLoader
 
         self.logger.debug("Batch embedding %d images with batch_size=%d", len(images), batch_size)
         # Image decode happens before we grab the GPU slot — keeps the
@@ -448,7 +448,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
                 with torch.no_grad():
                     batch_inputs = {k: v.to(self.device) for k, v in batch_inputs.items()}
                     embeddings = model(**batch_inputs)
-                    return list(torch.unbind(embeddings.to('cpu')))
+                    return list(torch.unbind(embeddings.to("cpu")))
 
             all_results = []
             for batch_inputs in dataloader:
@@ -458,16 +458,12 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
                     all_results.append(MultiVectorEmbedding(vectors=vectors))
         return all_results
 
-    async def embed_image(self, image: Union[str, bytes, Path]) -> list[float]:
+    async def embed_image(self, image: str | bytes | Path) -> list[float]:
         """Generate single-vector embedding for image (averaged)."""
         multi_vec = await self.embed_image_multivector(image)
         return np.mean(multi_vec.vectors, axis=0).tolist()
 
-    async def embed_multimodal(
-            self,
-            text: Optional[str] = None,
-            image: Optional[Union[str, bytes, Path]] = None
-    ) -> list[float]:
+    async def embed_multimodal(self, text: str | None = None, image: str | bytes | Path | None = None) -> list[float]:
         """Generate single-vector embedding for multimodal content."""
         if image:
             return await self.embed_image(image)
@@ -488,15 +484,12 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
             vectors = embeddings[0].cpu().numpy().tolist()
         return MultiVectorEmbedding(vectors=vectors)
 
-    async def embed_image_multivector(
-            self,
-            image: Union[str, bytes, Path]
-    ) -> MultiVectorEmbedding:
+    async def embed_image_multivector(self, image: str | bytes | Path) -> MultiVectorEmbedding:
         """Generate multi-vector embedding for image (native ColPali format)."""
         self.logger.debug("Generating multi-vector for image")
-        import torch
-        from PIL import Image
         import io
+
+        from PIL import Image
 
         # Image decode (CPU) before grabbing the GPU slot.
         image_bytes = self.load_image_bytes(image)
@@ -518,8 +511,8 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
 
     @staticmethod
     def maxsim_score(
-            query_vectors: MultiVectorEmbedding,
-            doc_vectors: MultiVectorEmbedding,
+        query_vectors: MultiVectorEmbedding,
+        doc_vectors: MultiVectorEmbedding,
     ) -> float:
         """Calculate MaxSim score (delegates to canonical numpy helper)."""
         return maxsim_score(query_vectors, doc_vectors)
@@ -531,6 +524,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
 
 class ColPaliEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
     """ColPali embedding provider plugin supporting multiple model families."""
+
     PROVIDER_NAME: str = "colpali"
 
     def initialize(self, v: Variables, logger: Logger) -> MultimodalEmbeddingProvider:

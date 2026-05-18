@@ -305,6 +305,4 @@ class TestMcpServerStubs:
             headers=workspace_headers,
         )
         # Memory service is not wired in the test deployment; must not return 200 empty
-        assert resp.status_code in (501, 503), (
-            f"Expected 501 or 503 when memory service unavailable, got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code in (501, 503), f"Expected 501 or 503 when memory service unavailable, got {resp.status_code}: {resp.text}"

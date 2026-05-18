@@ -1,4 +1,5 @@
 """Unit tests for MCP server JSON parsing and rendering."""
+
 import json
 
 import pytest
@@ -63,14 +64,16 @@ class TestParseMcpJson:
         assert inputs == []
 
     def test_var_placeholder_preserved(self):
-        text = json.dumps({
-            "mcpServers": {
-                "my-server": {
-                    "command": "npx",
-                    "env": {"API_KEY": "${MY_API_KEY}"},
+        text = json.dumps(
+            {
+                "mcpServers": {
+                    "my-server": {
+                        "command": "npx",
+                        "env": {"API_KEY": "${MY_API_KEY}"},
+                    }
                 }
             }
-        })
+        )
         inputs = parse_mcp_json(text)
         assert inputs[0].env["API_KEY"] == "${MY_API_KEY}"
 
@@ -90,7 +93,8 @@ def _make_server(name: str, transport: str, **kwargs) -> McpServer:
 class TestRenderMcpJson:
     def test_render_stdio_server(self):
         server = _make_server(
-            "postgres", "stdio",
+            "postgres",
+            "stdio",
             command="npx",
             args=["-y", "@modelcontextprotocol/server-postgres"],
             env={"DB_URL": "postgresql://localhost/mydb"},
@@ -117,14 +121,23 @@ class TestRenderMcpJson:
         server = _make_server("postgres", "stdio", command="npx")
         result = render_mcp_json([server])
         entry = result["mcpServers"]["postgres"]
-        for field in ("id", "tenant_id", "workspace_id", "user_id", "source_mode",
-                      "manifest_hash", "enabled", "created_at", "updated_at", "metadata"):
+        for field in (
+            "id",
+            "tenant_id",
+            "workspace_id",
+            "user_id",
+            "source_mode",
+            "manifest_hash",
+            "enabled",
+            "created_at",
+            "updated_at",
+            "metadata",
+        ):
             assert field not in entry
 
     def test_render_multiple_servers(self):
         servers = [
-            _make_server("postgres", "stdio", command="npx",
-                         args=["-y", "@modelcontextprotocol/server-postgres"]),
+            _make_server("postgres", "stdio", command="npx", args=["-y", "@modelcontextprotocol/server-postgres"]),
             _make_server("my-api0", "http", url="https://example.com/mcp"),
             _make_server("my-sse00", "sse", url="https://example.com/sse"),
         ]
@@ -132,17 +145,20 @@ class TestRenderMcpJson:
         assert set(result["mcpServers"].keys()) == {"postgres", "my-api0", "my-sse00"}
 
     def test_round_trip_preserves_var_placeholders(self):
-        text = json.dumps({
-            "mcpServers": {
-                "my-server": {
-                    "command": "npx",
-                    "env": {"API_KEY": "${MY_API_KEY}"},
+        text = json.dumps(
+            {
+                "mcpServers": {
+                    "my-server": {
+                        "command": "npx",
+                        "env": {"API_KEY": "${MY_API_KEY}"},
+                    }
                 }
             }
-        })
+        )
         inputs = parse_mcp_json(text)
         server = _make_server(
-            inputs[0].name, inputs[0].transport,
+            inputs[0].name,
+            inputs[0].transport,
             command=inputs[0].command,
             env=inputs[0].env,
         )

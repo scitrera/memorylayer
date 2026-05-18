@@ -8,13 +8,14 @@ Gated on ``MEMORYLAYER_METRICS_SERVICE=prometheus`` — when the active
 backend is the no-op service (default), this plugin is not registered
 and the route never appears.
 """
+
 import logging
 
 from fastapi import APIRouter
 from fastapi.responses import Response
+from memorylayer_server.config import MEMORYLAYER_METRICS_SERVICE
 from scitrera_app_framework.api import Plugin, Variables
 
-from memorylayer_server.config import MEMORYLAYER_METRICS_SERVICE
 from .. import EXT_MULTI_API_ROUTERS
 
 router = APIRouter(tags=["metrics"])
@@ -36,8 +37,7 @@ async def prometheus_metrics() -> Response:
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
     except ImportError as exc:
         raise RuntimeError(
-            "prometheus_client is required to serve /metrics. "
-            "Install with: pip install memorylayer-embed-server[observability]"
+            "prometheus_client is required to serve /metrics. Install with: pip install memorylayer-embed-server[observability]"
         ) from exc
 
     data = generate_latest()

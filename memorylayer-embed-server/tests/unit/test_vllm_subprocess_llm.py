@@ -4,10 +4,11 @@ We stub the subprocess via ``_skip_subprocess = True`` and inject a fake
 ``httpx.AsyncClient`` so we can exercise the proxy paths (non-streaming
 JSON and streaming SSE) without launching a real vLLM child.
 """
+
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -135,6 +136,7 @@ async def test_ensure_started_lazy_and_idempotent(monkeypatch):
 
     # Patch httpx.AsyncClient that the provider lazily imports.
     import httpx
+
     monkeypatch.setattr(httpx, "AsyncClient", _Captor)
 
     await asyncio.gather(p._ensure_started(), p._ensure_started())
@@ -175,7 +177,7 @@ async def test_chat_completions_non_streaming_forwards_payload():
 async def test_chat_completions_streaming_yields_chunks():
     p = _provider()
     stub = _StubHttp()
-    stub.stream_chunks = [b'data: {"a":1}\n\n', b'data: [DONE]\n\n']
+    stub.stream_chunks = [b'data: {"a":1}\n\n', b"data: [DONE]\n\n"]
     p._http = stub
     p._ready = True
 
@@ -183,7 +185,7 @@ async def test_chat_completions_streaming_yields_chunks():
     received: list[bytes] = []
     async for chunk in aiter_result:
         received.append(chunk)
-    assert received == [b'data: {"a":1}\n\n', b'data: [DONE]\n\n']
+    assert received == [b'data: {"a":1}\n\n', b"data: [DONE]\n\n"]
     method, args = stub.calls[0]
     assert method == "post-stream"
     # stream=True should have been merged into the upstream payload.

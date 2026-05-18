@@ -1,14 +1,16 @@
 """McpServerService: CRUD business logic for MCP server records."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any
 
-from ...models.memory import MemoryType, RememberInput
 from ...models.mcp_server import McpServer, McpServerCreateInput, McpServerUpdateInput
+from ...models.memory import MemoryType, RememberInput
 from ...utils import generate_id
 from ..storage import StorageBackend
 from .encryption import decrypt_secrets, encrypt_secrets
@@ -65,8 +67,8 @@ class McpServerService:
     def __init__(
         self,
         storage: StorageBackend,
-        memory_service: "Optional[MemoryService]" = None,
-        memory_indexer: Optional[Callable[[McpServer], Any]] = None,
+        memory_service: MemoryService | None = None,
+        memory_indexer: Callable[[McpServer], Any] | None = None,
     ) -> None:
         self._storage = storage
         self._memory_service = memory_service
@@ -81,7 +83,7 @@ class McpServerService:
         input: McpServerCreateInput,
         workspace_id: str,
         tenant_id: str = "_default",
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> McpServer:
         """Create a new MCP server record, computing manifest hash."""
         now = datetime.now(UTC)
@@ -110,16 +112,20 @@ class McpServerService:
         )
         server = server.model_copy(update={"manifest_hash": _compute_manifest_hash(server)})
         # Encrypt secrets before persisting
-        server = server.model_copy(update={
-            "env": encrypt_secrets(server.env),
-            "headers": encrypt_secrets(server.headers),
-        })
+        server = server.model_copy(
+            update={
+                "env": encrypt_secrets(server.env),
+                "headers": encrypt_secrets(server.headers),
+            }
+        )
         result = await self._storage.create_mcp_server(server)
         # Decrypt secrets before returning to caller
-        result = result.model_copy(update={
-            "env": decrypt_secrets(result.env),
-            "headers": decrypt_secrets(result.headers),
-        })
+        result = result.model_copy(
+            update={
+                "env": decrypt_secrets(result.env),
+                "headers": decrypt_secrets(result.headers),
+            }
+        )
         await self._maybe_index(result)
         await self._upsert_mirror_memory(result)
         return result
@@ -128,7 +134,7 @@ class McpServerService:
         self,
         workspace_id: str,
         server_id: str,
-    ) -> Optional[McpServer]:
+    ) -> McpServer | None:
         """Get an MCP server by ID."""
         return await self._storage.get_mcp_server(workspace_id, server_id)
 
@@ -136,18 +142,18 @@ class McpServerService:
         self,
         workspace_id: str,
         name: str,
-        user_id: Optional[str] = None,
-    ) -> Optional[McpServer]:
+        user_id: str | None = None,
+    ) -> McpServer | None:
         """Get an MCP server by name within a workspace, optionally filtering by user scope."""
         return await self._storage.get_mcp_server_by_name(workspace_id, name, user_id)
 
     async def list_mcp_servers(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
-        name: Optional[str] = None,
-        transport: Optional[str] = None,
-        enabled: Optional[bool] = None,
+        user_id: str | None = None,
+        name: str | None = None,
+        transport: str | None = None,
+        enabled: bool | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[McpServer]:
@@ -167,11 +173,9 @@ class McpServerService:
         workspace_id: str,
         server_id: str,
         input: McpServerUpdateInput,
-    ) -> Optional[McpServer]:
+    ) -> McpServer | None:
         """Apply partial updates to an MCP server, recomputing manifest_hash if config changed."""
-        updates: dict[str, Any] = {
-            k: v for k, v in input.model_dump(exclude_none=True).items()
-        }
+        updates: dict[str, Any] = {k: v for k, v in input.model_dump(exclude_none=True).items()}
         updates["updated_at"] = datetime.now(UTC)
         # Encrypt secrets before persisting
         if "env" in updates:
@@ -185,15 +189,15 @@ class McpServerService:
 
         new_hash = _compute_manifest_hash(result)
         if new_hash != result.manifest_hash:
-            result = await self._storage.update_mcp_server(
-                workspace_id, server_id, {"manifest_hash": new_hash}
-            )
+            result = await self._storage.update_mcp_server(workspace_id, server_id, {"manifest_hash": new_hash})
 
         # Decrypt secrets before returning to caller
-        result = result.model_copy(update={
-            "env": decrypt_secrets(result.env),
-            "headers": decrypt_secrets(result.headers),
-        })
+        result = result.model_copy(
+            update={
+                "env": decrypt_secrets(result.env),
+                "headers": decrypt_secrets(result.headers),
+            }
+        )
         await self._maybe_index(result)
         await self._upsert_mirror_memory(result)
         return result
@@ -209,7 +213,7 @@ class McpServerService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _maybe_index(self, server: Optional[McpServer]) -> None:
+    async def _maybe_index(self, server: McpServer | None) -> None:
         """Call the memory_indexer hook after create/update if configured."""
         if not server or not self._memory_indexer:
             return
@@ -220,7 +224,7 @@ class McpServerService:
         except Exception:
             pass  # indexer errors must not break server operations
 
-    async def _upsert_mirror_memory(self, server: Optional[McpServer]) -> None:
+    async def _upsert_mirror_memory(self, server: McpServer | None) -> None:
         """Create or replace the procedural memory mirror for an MCP server."""
         if not server or not self._memory_service:
             return
@@ -228,12 +232,7 @@ class McpServerService:
             await self._delete_mirror_memory(server.workspace_id, server.id)
 
             capabilities = _parse_capabilities(server)
-            content = (
-                f"{server.name}\n"
-                f"{server.description or ''}\n"
-                f"Transport: {server.transport}\n"
-                f"Capabilities: {capabilities}"
-            )
+            content = f"{server.name}\n{server.description or ''}\nTransport: {server.transport}\nCapabilities: {capabilities}"
             tags = [
                 "mcp_server",
                 f"mcp_server:{server.name}",

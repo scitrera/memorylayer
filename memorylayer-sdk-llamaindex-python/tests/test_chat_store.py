@@ -16,7 +16,6 @@ from memorylayer_llamaindex import (
     string_to_message_role,
 )
 
-
 # ========== Test Fixtures ==========
 
 
@@ -234,27 +233,21 @@ class TestChatMessageToMemoryPayload:
     def test_custom_importance(self) -> None:
         """Test custom importance setting."""
         message = ChatMessage.from_str("Important!", role=MessageRole.SYSTEM)
-        payload = chat_message_to_memory_payload(
-            message, key="key", index=0, importance=0.9
-        )
+        payload = chat_message_to_memory_payload(message, key="key", index=0, importance=0.9)
 
         assert payload["importance"] == 0.9
 
     def test_custom_memory_type(self) -> None:
         """Test custom memory type setting."""
         message = ChatMessage.from_str("Fact", role=MessageRole.USER)
-        payload = chat_message_to_memory_payload(
-            message, key="key", index=0, memory_type="semantic"
-        )
+        payload = chat_message_to_memory_payload(message, key="key", index=0, memory_type="semantic")
 
         assert payload["type"] == "semantic"
 
     def test_additional_tags(self) -> None:
         """Test adding additional tags."""
         message = ChatMessage.from_str("Tagged", role=MessageRole.USER)
-        payload = chat_message_to_memory_payload(
-            message, key="key", index=0, additional_tags=["important", "urgent"]
-        )
+        payload = chat_message_to_memory_payload(message, key="key", index=0, additional_tags=["important", "urgent"])
 
         assert "important" in payload["tags"]
         assert "urgent" in payload["tags"]
@@ -263,18 +256,14 @@ class TestChatMessageToMemoryPayload:
     def test_additional_metadata(self) -> None:
         """Test adding additional metadata."""
         message = ChatMessage.from_str("Meta", role=MessageRole.USER)
-        payload = chat_message_to_memory_payload(
-            message, key="key", index=0, additional_metadata={"custom_field": "value"}
-        )
+        payload = chat_message_to_memory_payload(message, key="key", index=0, additional_metadata={"custom_field": "value"})
 
         assert payload["metadata"]["custom_field"] == "value"
 
     def test_custom_tag_prefix(self) -> None:
         """Test custom tag prefix."""
         message = ChatMessage.from_str("Custom", role=MessageRole.USER)
-        payload = chat_message_to_memory_payload(
-            message, key="key", index=0, tag_prefix="custom_prefix:"
-        )
+        payload = chat_message_to_memory_payload(message, key="key", index=0, tag_prefix="custom_prefix:")
 
         assert "custom_prefix:key" in payload["tags"]
 
@@ -405,51 +394,35 @@ class TestSyncSetMessages:
     """Tests for sync set_messages method."""
 
     @respx.mock
-    def test_set_messages_empty_list(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_set_messages_empty_list(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test setting empty message list."""
         # Mock recall (for delete check) - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         chat_store.set_messages("user_123", [])
 
     @respx.mock
-    def test_set_messages_single_message(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_set_messages_single_message(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test setting a single message."""
         # Mock recall (for delete) - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        respx.post(f"{base_url}/v1/memories").mock(
-            return_value=Response(200, json=create_memory_response())
-        )
+        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
 
         # Test
         message = ChatMessage.from_str("Hello!", role=MessageRole.USER)
         chat_store.set_messages("user_123", [message])
 
     @respx.mock
-    def test_set_messages_multiple_messages(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_set_messages_multiple_messages(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test setting multiple messages."""
         # Mock recall - returns empty (no existing messages)
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        respx.post(f"{base_url}/v1/memories").mock(
-            return_value=Response(200, json=create_memory_response())
-        )
+        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
 
         # Test
         messages = [
@@ -464,14 +437,10 @@ class TestSyncGetMessages:
     """Tests for sync get_messages method."""
 
     @respx.mock
-    def test_get_messages_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_get_messages_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test getting messages when none exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         messages = chat_store.get_messages("user_123")
@@ -480,9 +449,7 @@ class TestSyncGetMessages:
         assert messages == []
 
     @respx.mock
-    def test_get_messages_returns_sorted(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_get_messages_returns_sorted(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test that messages are returned sorted by index."""
         # Mock recall - returns messages in reverse order
         mock_memories = [
@@ -491,11 +458,7 @@ class TestSyncGetMessages:
             create_chat_memory("mem_1", "Message 1", 1, "assistant", "user_123"),
         ]
 
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 3}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 3}))
 
         # Test
         messages = chat_store.get_messages("user_123")
@@ -511,19 +474,13 @@ class TestSyncAddMessage:
     """Tests for sync add_message method."""
 
     @respx.mock
-    def test_add_message_to_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_add_message_to_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test adding message when no messages exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        create_route = respx.post(f"{base_url}/v1/memories").mock(
-            return_value=Response(200, json=create_memory_response())
-        )
+        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
 
         # Test
         message = ChatMessage.from_str("Hello!", role=MessageRole.USER)
@@ -533,25 +490,17 @@ class TestSyncAddMessage:
         assert create_route.called
 
     @respx.mock
-    def test_add_message_to_existing(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_add_message_to_existing(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test adding message when messages already exist."""
         # Mock recall - returns one existing message
         mock_memories = [
             create_chat_memory("mem_0", "First message", 0, "user", "user_123"),
         ]
 
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 1}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 1}))
 
         # Mock memory creation
-        create_route = respx.post(f"{base_url}/v1/memories").mock(
-            return_value=Response(200, json=create_memory_response())
-        )
+        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
 
         # Test
         message = ChatMessage.from_str("Second message", role=MessageRole.ASSISTANT)
@@ -565,14 +514,10 @@ class TestSyncDeleteMessages:
     """Tests for sync delete_messages method."""
 
     @respx.mock
-    def test_delete_messages_none_exist(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_delete_messages_none_exist(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test deleting when no messages exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         result = chat_store.delete_messages("user_123")
@@ -581,9 +526,7 @@ class TestSyncDeleteMessages:
         assert result is None
 
     @respx.mock
-    def test_delete_messages_returns_deleted(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_delete_messages_returns_deleted(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test deleting messages returns the deleted messages."""
         mock_memories = [
             {
@@ -594,16 +537,10 @@ class TestSyncDeleteMessages:
         ]
 
         # Mock recall - returns messages
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 1}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 1}))
 
         # Mock delete
-        respx.delete(f"{base_url}/v1/memories/mem_0").mock(
-            return_value=Response(204)
-        )
+        respx.delete(f"{base_url}/v1/memories/mem_0").mock(return_value=Response(204))
 
         # Test
         result = chat_store.delete_messages("user_123")
@@ -617,14 +554,10 @@ class TestSyncDeleteMessage:
     """Tests for sync delete_message method."""
 
     @respx.mock
-    def test_delete_message_not_found(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_delete_message_not_found(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test deleting message that doesn't exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         result = chat_store.delete_message("user_123", 0)
@@ -633,9 +566,7 @@ class TestSyncDeleteMessage:
         assert result is None
 
     @respx.mock
-    def test_delete_message_by_index(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_delete_message_by_index(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test deleting a specific message by index."""
         mock_memories = [
             {
@@ -651,16 +582,10 @@ class TestSyncDeleteMessage:
         ]
 
         # Mock recall
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 2}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 2}))
 
         # Mock delete
-        delete_route = respx.delete(f"{base_url}/v1/memories/mem_1").mock(
-            return_value=Response(204)
-        )
+        delete_route = respx.delete(f"{base_url}/v1/memories/mem_1").mock(return_value=Response(204))
 
         # Test
         result = chat_store.delete_message("user_123", 1)
@@ -675,14 +600,10 @@ class TestSyncDeleteLastMessage:
     """Tests for sync delete_last_message method."""
 
     @respx.mock
-    def test_delete_last_message_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_delete_last_message_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test deleting last message when none exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         result = chat_store.delete_last_message("user_123")
@@ -691,9 +612,7 @@ class TestSyncDeleteLastMessage:
         assert result is None
 
     @respx.mock
-    def test_delete_last_message_success(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_delete_last_message_success(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test deleting the last message."""
         mock_memories = [
             {
@@ -709,16 +628,10 @@ class TestSyncDeleteLastMessage:
         ]
 
         # Mock recall (called twice - once for get_messages, once for delete_message)
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 2}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 2}))
 
         # Mock delete
-        respx.delete(f"{base_url}/v1/memories/mem_1").mock(
-            return_value=Response(204)
-        )
+        respx.delete(f"{base_url}/v1/memories/mem_1").mock(return_value=Response(204))
 
         # Test
         result = chat_store.delete_last_message("user_123")
@@ -732,14 +645,10 @@ class TestSyncGetKeys:
     """Tests for sync get_keys method."""
 
     @respx.mock
-    def test_get_keys_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_get_keys_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test getting keys when none exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         keys = chat_store.get_keys()
@@ -748,9 +657,7 @@ class TestSyncGetKeys:
         assert keys == []
 
     @respx.mock
-    def test_get_keys_returns_unique(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_get_keys_returns_unique(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test getting unique keys."""
         mock_memories = [
             create_chat_memory("mem_0", "content", 0, "user", "user_1"),
@@ -758,11 +665,7 @@ class TestSyncGetKeys:
             create_chat_memory("mem_2", "content", 0, "user", "user_1"),  # Duplicate
         ]
 
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 3}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 3}))
 
         # Test
         keys = chat_store.get_keys()
@@ -780,33 +683,23 @@ class TestAsyncSetMessages:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_aset_messages_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_aset_messages_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async setting empty message list."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         await chat_store.aset_messages("user_123", [])
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_aset_messages_with_messages(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_aset_messages_with_messages(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async setting messages."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        respx.post(f"{base_url}/v1/memories").mock(
-            return_value=Response(200, json=create_memory_response())
-        )
+        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
 
         # Test
         messages = [
@@ -821,14 +714,10 @@ class TestAsyncGetMessages:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_aget_messages_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_aget_messages_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async getting messages when none exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         messages = await chat_store.aget_messages("user_123")
@@ -838,9 +727,7 @@ class TestAsyncGetMessages:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_aget_messages_returns_sorted(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_aget_messages_returns_sorted(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async messages are returned sorted by index."""
         mock_memories = [
             {
@@ -855,11 +742,7 @@ class TestAsyncGetMessages:
             },
         ]
 
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 2}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 2}))
 
         # Test
         messages = await chat_store.aget_messages("user_123")
@@ -875,19 +758,13 @@ class TestAsyncAddMessage:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_async_add_message(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_async_add_message(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async adding a message."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        create_route = respx.post(f"{base_url}/v1/memories").mock(
-            return_value=Response(200, json=create_memory_response())
-        )
+        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
 
         # Test
         message = ChatMessage.from_str("Hello!", role=MessageRole.USER)
@@ -902,14 +779,10 @@ class TestAsyncDeleteMessages:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_adelete_messages_none_exist(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_adelete_messages_none_exist(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async deleting when no messages exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         result = await chat_store.adelete_messages("user_123")
@@ -919,9 +792,7 @@ class TestAsyncDeleteMessages:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_adelete_messages_success(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_adelete_messages_success(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async deleting messages."""
         mock_memories = [
             {
@@ -932,16 +803,10 @@ class TestAsyncDeleteMessages:
         ]
 
         # Mock recall
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 1}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 1}))
 
         # Mock delete
-        respx.delete(f"{base_url}/v1/memories/mem_0").mock(
-            return_value=Response(204)
-        )
+        respx.delete(f"{base_url}/v1/memories/mem_0").mock(return_value=Response(204))
 
         # Test
         result = await chat_store.adelete_messages("user_123")
@@ -956,14 +821,10 @@ class TestAsyncDeleteMessage:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_adelete_message_not_found(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_adelete_message_not_found(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async deleting message that doesn't exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         result = await chat_store.adelete_message("user_123", 0)
@@ -973,9 +834,7 @@ class TestAsyncDeleteMessage:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_adelete_message_success(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_adelete_message_success(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async deleting a specific message."""
         mock_memories = [
             {
@@ -986,16 +845,10 @@ class TestAsyncDeleteMessage:
         ]
 
         # Mock recall
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 1}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 1}))
 
         # Mock delete
-        respx.delete(f"{base_url}/v1/memories/mem_0").mock(
-            return_value=Response(204)
-        )
+        respx.delete(f"{base_url}/v1/memories/mem_0").mock(return_value=Response(204))
 
         # Test
         result = await chat_store.adelete_message("user_123", 0)
@@ -1010,14 +863,10 @@ class TestAsyncDeleteLastMessage:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_adelete_last_message_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_adelete_last_message_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async deleting last message when none exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         result = await chat_store.adelete_last_message("user_123")
@@ -1027,9 +876,7 @@ class TestAsyncDeleteLastMessage:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_adelete_last_message_success(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_adelete_last_message_success(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async deleting the last message."""
         mock_memories = [
             {
@@ -1045,16 +892,10 @@ class TestAsyncDeleteLastMessage:
         ]
 
         # Mock recall
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 2}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 2}))
 
         # Mock delete
-        respx.delete(f"{base_url}/v1/memories/mem_1").mock(
-            return_value=Response(204)
-        )
+        respx.delete(f"{base_url}/v1/memories/mem_1").mock(return_value=Response(204))
 
         # Test
         result = await chat_store.adelete_last_message("user_123")
@@ -1069,14 +910,10 @@ class TestAsyncGetKeys:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_aget_keys_empty(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_aget_keys_empty(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async getting keys when none exist."""
         # Mock recall - returns empty
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Test
         keys = await chat_store.aget_keys()
@@ -1086,9 +923,7 @@ class TestAsyncGetKeys:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_aget_keys_returns_unique(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_aget_keys_returns_unique(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async getting unique keys."""
         mock_memories = [
             create_chat_memory("mem_0", "content", 0, "user", "key_a"),
@@ -1096,11 +931,7 @@ class TestAsyncGetKeys:
             create_chat_memory("mem_2", "content", 0, "user", "key_a"),  # Duplicate
         ]
 
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(
-                200, json={"memories": mock_memories, "total_count": 3}
-            )
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 3}))
 
         # Test
         keys = await chat_store.aget_keys()
@@ -1117,14 +948,10 @@ class TestErrorHandling:
     """Tests for error handling."""
 
     @respx.mock
-    def test_api_error_handling(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_api_error_handling(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test handling of API errors."""
         # Mock error response
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(500, json={"detail": "Internal server error"})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
         # Test
         with pytest.raises(RuntimeError) as exc_info:
@@ -1134,14 +961,10 @@ class TestErrorHandling:
         assert "Internal server error" in str(exc_info.value)
 
     @respx.mock
-    def test_unauthorized_error(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    def test_unauthorized_error(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test handling of unauthorized errors."""
         # Mock 401 response
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(401, json={"detail": "Invalid API key"})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(401, json={"detail": "Invalid API key"}))
 
         # Test
         with pytest.raises(RuntimeError) as exc_info:
@@ -1152,14 +975,10 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_async_api_error_handling(
-        self, chat_store: MemoryLayerChatStore, base_url: str
-    ) -> None:
+    async def test_async_api_error_handling(self, chat_store: MemoryLayerChatStore, base_url: str) -> None:
         """Test async handling of API errors."""
         # Mock error response
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(400, json={"detail": "Bad request"})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(400, json={"detail": "Bad request"}))
 
         # Test
         with pytest.raises(RuntimeError) as exc_info:

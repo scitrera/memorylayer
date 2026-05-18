@@ -92,6 +92,7 @@ class OTelInitPlugin(Plugin):
         # SQLAlchemy async (used by Enterprise PostgreSQL backend via asyncpg)
         try:
             from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
             SQLAlchemyInstrumentor().instrument()
             logger.debug("SQLAlchemyInstrumentor registered")
         except ImportError:
@@ -100,6 +101,7 @@ class OTelInitPlugin(Plugin):
         # Redis / Valkey async client (used by Enterprise cache layer)
         try:
             from opentelemetry.instrumentation.redis import RedisInstrumentor
+
             RedisInstrumentor().instrument()
             logger.debug("RedisInstrumentor registered")
         except ImportError:
@@ -108,6 +110,7 @@ class OTelInitPlugin(Plugin):
         # httpx outbound client (used by OSS for various HTTP calls)
         try:
             from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
             HTTPXClientInstrumentor().instrument()
             logger.debug("HTTPXClientInstrumentor registered")
         except ImportError:

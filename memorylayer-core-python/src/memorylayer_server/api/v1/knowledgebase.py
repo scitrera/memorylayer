@@ -28,10 +28,10 @@ from .. import EXT_MULTI_API_ROUTERS
 from .deps import get_auth_service, get_authz_service
 from .schemas import ErrorResponse
 
-
 # ------------------------------------------------------------------ #
 # Request / response schemas
 # ------------------------------------------------------------------ #
+
 
 class KBGenerateRequest(BaseModel):
     """Request body for KB generation."""
@@ -65,6 +65,7 @@ router = APIRouter(prefix="/v1/knowledgebase", tags=["knowledgebase"])
 # Dependencies
 # ------------------------------------------------------------------ #
 
+
 def get_knowledgebase_service(v: Variables = Depends(get_variables_dep)):
     """FastAPI dependency for knowledgebase service."""
     return get_extension(EXT_KNOWLEDGEBASE_SERVICE, v)
@@ -78,6 +79,7 @@ def get_graph_analysis_service(v: Variables = Depends(get_variables_dep)):
 # ------------------------------------------------------------------ #
 # Endpoints
 # ------------------------------------------------------------------ #
+
 
 @router.post(
     "/generate",
@@ -433,6 +435,7 @@ async def get_community(
 # ------------------------------------------------------------------ #
 # Plugin registration
 # ------------------------------------------------------------------ #
+
 
 class KnowledgebaseAPIPlugin(Plugin):
     """Plugin to register knowledgebase API routes."""

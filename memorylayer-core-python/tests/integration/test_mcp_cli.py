@@ -228,6 +228,7 @@ class _MockResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             import httpx
+
             raise httpx.HTTPStatusError(
                 f"HTTP {self.status_code}",
                 request=None,  # type: ignore[arg-type]
@@ -246,42 +247,50 @@ class TestSyncHashLogic:
 
     def test_equal_hashes_in_sync(self):
         from memorylayer_server.services.mcp_servers.sync import compare_hashes
+
         action, _ = compare_hashes("abc123", "abc123")
         assert action == "in_sync"
 
     def test_empty_local_pull(self):
         from memorylayer_server.services.mcp_servers.sync import compare_hashes
+
         action, _ = compare_hashes("", "server_hash")
         assert action == "pull"
 
     def test_empty_server_push(self):
         from memorylayer_server.services.mcp_servers.sync import compare_hashes
+
         action, _ = compare_hashes("local_hash", "")
         assert action == "push"
 
     def test_both_different_conflict(self):
         from memorylayer_server.services.mcp_servers.sync import compare_hashes
+
         action, reason = compare_hashes("hash_a", "hash_b")
         assert action == "conflict"
 
     def test_resolve_conflict_prefer_local_becomes_push(self):
         from memorylayer_server.services.mcp_servers.sync import resolve_conflict
+
         action, reason = resolve_conflict("conflict", "prefer-local")
         assert action == "push"
         assert "prefer-local" in reason
 
     def test_resolve_conflict_prefer_remote_becomes_pull(self):
         from memorylayer_server.services.mcp_servers.sync import resolve_conflict
+
         action, _ = resolve_conflict("conflict", "prefer-remote")
         assert action == "pull"
 
     def test_resolve_conflict_abort_stays_conflict(self):
         from memorylayer_server.services.mcp_servers.sync import resolve_conflict
+
         action, _ = resolve_conflict("conflict", "abort")
         assert action == "conflict"
 
     def test_non_conflict_action_unchanged(self):
         from memorylayer_server.services.mcp_servers.sync import resolve_conflict
+
         action, _ = resolve_conflict("push", "prefer-local")
         assert action == "push"
 

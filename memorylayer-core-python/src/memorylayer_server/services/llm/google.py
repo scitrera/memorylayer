@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ...models.llm import LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
+from ...models.llm import LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
 from .base import LLMProvider
 
 DEFAULT_LLM_GOOGLE_MODEL = "gemini-3-flash-preview"
@@ -190,14 +190,16 @@ class GoogleLLMProvider(LLMProvider):
                     args_dict = dict(args)
                 except (TypeError, ValueError):
                     args_dict = {}
-                out.append({
-                    "id": getattr(fc, "id", None) or f"call_{len(out)}",
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": _json.dumps(args_dict),
-                    },
-                })
+                out.append(
+                    {
+                        "id": getattr(fc, "id", None) or f"call_{len(out)}",
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": _json.dumps(args_dict),
+                        },
+                    }
+                )
         return out or None
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -206,11 +208,7 @@ class GoogleLLMProvider(LLMProvider):
 
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)
-        effective_max = (
-            request.max_completion_tokens
-            if request.max_completion_tokens is not None
-            else max_tokens
-        )
+        effective_max = request.max_completion_tokens if request.max_completion_tokens is not None else max_tokens
         contents, config = self._build_request(
             system_text,
             messages,
@@ -266,11 +264,7 @@ class GoogleLLMProvider(LLMProvider):
 
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)
-        effective_max = (
-            request.max_completion_tokens
-            if request.max_completion_tokens is not None
-            else max_tokens
-        )
+        effective_max = request.max_completion_tokens if request.max_completion_tokens is not None else max_tokens
         contents, config = self._build_request(
             system_text,
             messages,

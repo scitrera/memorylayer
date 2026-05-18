@@ -11,8 +11,7 @@ import respx
 from httpx import Response
 from langchain_core.messages import AIMessage, HumanMessage
 
-from memorylayer_langchain import MemoryLayerMemory, MemoryLayerConversationSummaryMemory
-
+from memorylayer_langchain import MemoryLayerConversationSummaryMemory, MemoryLayerMemory
 
 # ============================================================================
 # Test Fixtures
@@ -114,10 +113,7 @@ class MockLegacyChain:
         # Format history for prompt
         if isinstance(history, list):
             # If return_messages=True, format messages
-            history_str = "\n".join(
-                f"{'Human' if isinstance(m, HumanMessage) else 'AI'}: {m.content}"
-                for m in history
-            )
+            history_str = "\n".join(f"{'Human' if isinstance(m, HumanMessage) else 'AI'}: {m.content}" for m in history)
         else:
             history_str = history
 
@@ -150,14 +146,10 @@ class TestLegacyChainWithMemoryLayerMemory:
     """Integration tests for legacy chains with MemoryLayerMemory."""
 
     @respx.mock
-    def test_basic_chain_conversation(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_basic_chain_conversation(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test basic legacy chain with MemoryLayerMemory."""
         # Setup mocks
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
@@ -187,9 +179,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         assert len(llm.received_prompts) == 1
 
     @respx.mock
-    def test_chain_loads_existing_history(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_loads_existing_history(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that chain correctly loads existing conversation history."""
         # Mock existing conversation history for initial message count
         existing_memories = [
@@ -233,9 +223,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         assert "Hi there! How can I help?" in prompt
 
     @respx.mock
-    def test_multi_turn_conversation(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_multi_turn_conversation(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test multi-turn conversation with history persistence."""
         # Track stored memories for simulating persistence
         stored_memories: list[dict] = []
@@ -307,9 +295,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         assert len(stored_memories) >= 2  # At least first turn stored
 
     @respx.mock
-    def test_multiple_sessions_isolated(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_multiple_sessions_isolated(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that different sessions maintain isolated histories."""
         # Track memories by session
         memories_by_session: dict[str, list[dict]] = {}
@@ -393,9 +379,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         assert any("session 2" in m["content"] for m in memories_by_session["sess_2"])
 
     @respx.mock
-    def test_chain_with_return_messages(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_with_return_messages(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test legacy chain with return_messages=True."""
         # Mock existing conversation history
         existing_memories = [
@@ -431,9 +415,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         assert isinstance(messages[1], AIMessage)
 
     @respx.mock
-    def test_chain_with_custom_prefixes(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_with_custom_prefixes(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test legacy chain with custom human/ai prefixes."""
         existing_memories = [
             create_mock_memory_response("mem_1", "Hello!", "human", 0),
@@ -477,9 +459,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         assert "Assistant: Hi there!" in prompt
 
     @respx.mock
-    def test_chain_handles_api_errors_gracefully(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_handles_api_errors_gracefully(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that chain handles MemoryLayer API errors gracefully for reads."""
         # First call for initial count succeeds, second fails
         call_count = [0]
@@ -508,13 +488,9 @@ class TestLegacyChainWithMemoryLayerMemory:
         assert result == {"history": ""}
 
     @respx.mock
-    def test_chain_with_custom_memory_key(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_with_custom_memory_key(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test legacy chain with custom memory key."""
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
@@ -557,14 +533,10 @@ class TestLegacyChainWithSummaryMemory:
     """Integration tests for legacy chains with MemoryLayerConversationSummaryMemory."""
 
     @respx.mock
-    def test_basic_chain_with_summary(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_basic_chain_with_summary(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test basic legacy chain with summary memory."""
         # Setup mocks
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         respx.post(f"{base_url}/v1/memories/reflect").mock(
             return_value=Response(200, json={"reflection": "No previous conversation.", "confidence": 0.9})
         )
@@ -594,19 +566,13 @@ class TestLegacyChainWithSummaryMemory:
         assert response == "Hello! I'll remember this conversation."
 
     @respx.mock
-    def test_chain_with_existing_summary(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_chain_with_existing_summary(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that chain receives summary of existing conversation."""
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         respx.post(f"{base_url}/v1/memories/reflect").mock(
             return_value=Response(
                 200,
-                json={
-                    "reflection": "The user introduced themselves as Bob and discussed Python programming."
-                },
+                json={"reflection": "The user introduced themselves as Bob and discussed Python programming."},
             )
         )
         respx.post(f"{base_url}/v1/memories").mock(
@@ -637,9 +603,7 @@ class TestLegacyChainWithSummaryMemory:
         assert "Python" in prompt
 
     @respx.mock
-    def test_multi_turn_conversation_with_summary(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_multi_turn_conversation_with_summary(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test multi-turn conversation with summary memory."""
         stored_memories: list[dict] = []
         memory_counter = [0]
@@ -715,13 +679,9 @@ class TestLegacyChainWithSummaryMemory:
         assert summary_call_count[0] >= 1
 
     @respx.mock
-    def test_summary_with_custom_prompt(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_summary_with_custom_prompt(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test summary memory with custom summarization prompt."""
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Capture the reflect request to verify custom prompt
         reflect_requests: list[Any] = []
@@ -759,19 +719,13 @@ class TestLegacyChainWithSummaryMemory:
         assert "technical details" in reflect_requests[0]["query"]
 
     @respx.mock
-    def test_summary_return_messages(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_summary_return_messages(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test summary memory with return_messages=True returns SystemMessage."""
         from langchain_core.messages import SystemMessage
 
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         respx.post(f"{base_url}/v1/memories/reflect").mock(
-            return_value=Response(
-                200, json={"reflection": "User discussed weather and Python.", "confidence": 0.9}
-            )
+            return_value=Response(200, json={"reflection": "User discussed weather and Python.", "confidence": 0.9})
         )
 
         # Create summary memory with return_messages=True
@@ -794,17 +748,11 @@ class TestLegacyChainWithSummaryMemory:
         assert "Python" in messages[0].content
 
     @respx.mock
-    def test_summary_handles_api_errors_gracefully(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_summary_handles_api_errors_gracefully(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test that summary memory handles API errors gracefully."""
         # First call succeeds (initialization), reflect fails
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
-        respx.post(f"{base_url}/v1/memories/reflect").mock(
-            return_value=Response(500, json={"detail": "Internal server error"})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
+        respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
         # Create summary memory
         memory = MemoryLayerConversationSummaryMemory(
@@ -828,9 +776,7 @@ class TestLegacyChainMemoryClear:
     """Integration tests for clearing memory in legacy chains."""
 
     @respx.mock
-    def test_clear_memory_between_conversations(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_clear_memory_between_conversations(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test clearing memory between conversations."""
         stored_memories: list[dict] = []
         memory_counter = [0]
@@ -899,9 +845,7 @@ class TestLegacyChainMemoryClear:
         assert len(stored_memories) == 2  # new human + AI message
 
     @respx.mock
-    def test_clear_summary_memory(
-        self, base_url: str, api_key: str, workspace_id: str
-    ) -> None:
+    def test_clear_summary_memory(self, base_url: str, api_key: str, workspace_id: str) -> None:
         """Test clearing summary memory."""
         existing_memories = [
             create_mock_memory_response("mem_1", "Hello", "human", 0),

@@ -33,7 +33,7 @@ from ..contradiction.base import ContradictionRecord
 from .base import StorageBackend, StoragePluginBase
 
 if TYPE_CHECKING:
-    import turso
+    pass
 
 _UPDATABLE_MEMORY_COLUMNS = frozenset(
     {
@@ -424,9 +424,7 @@ class TursoStorageBackend(StorageBackend):
         )
         # Migrate: add scope column to existing Turso databases (idempotent).
         try:
-            await self._connection.execute(
-                "ALTER TABLE chat_threads ADD COLUMN scope TEXT"
-            )
+            await self._connection.execute("ALTER TABLE chat_threads ADD COLUMN scope TEXT")
             await self._connection.commit()
         except Exception:
             pass  # Column already exists — expected on databases created after the schema update

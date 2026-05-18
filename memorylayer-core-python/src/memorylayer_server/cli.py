@@ -316,7 +316,6 @@ def push(skill_dir, workspace, scope, mode, server_url, api_key):
     from pathlib import Path
 
     import httpx
-
     from memorylayer.skills import parse_skill_folder
 
     try:
@@ -329,10 +328,7 @@ def push(skill_dir, workspace, scope, mode, server_url, api_key):
     if workspace:
         payload["workspace_id"] = workspace
     if files:
-        payload["files"] = [
-            {"path": rel_path, "content": content.decode("utf-8", errors="replace")}
-            for rel_path, content in files
-        ]
+        payload["files"] = [{"path": rel_path, "content": content.decode("utf-8", errors="replace")} for rel_path, content in files]
 
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -384,6 +380,7 @@ def pull(name, out, workspace, server_url, api_key):
 
             skill_id = skill["id"]
             import pathlib
+
             skill_dir = pathlib.Path(out) / name
             skill_dir.mkdir(parents=True, exist_ok=True)
 
@@ -470,9 +467,7 @@ def materialize(target, workspace, scope, server_url, api_key):
                 for file_info in files_res.json().get("files", []):
                     file_path = skill_dir / file_info["path"]
                     file_path.parent.mkdir(parents=True, exist_ok=True)
-                    content_res = client.get(
-                        f"{server_url}/v1/skills/{skill_id}/files/{file_info['path']}", headers=headers
-                    )
+                    content_res = client.get(f"{server_url}/v1/skills/{skill_id}/files/{file_info['path']}", headers=headers)
                     content_res.raise_for_status()
                     file_path.write_bytes(content_res.content)
 
@@ -498,12 +493,11 @@ def materialize(target, workspace, scope, server_url, api_key):
 def skills_sync(skill_dir, workspace, server_url, api_key, auto_push, auto_pull):
     """Reconcile a mirrored skill directory with the server."""
     import hashlib
-    import json
     import pathlib
 
     import httpx
-
     from memorylayer.skills import parse_skill_folder
+
     from memorylayer_server.services.skills.frontmatter import render_skill_md
 
     skill_path = pathlib.Path(skill_dir)
@@ -528,9 +522,7 @@ def skills_sync(skill_dir, workspace, server_url, api_key, auto_push, auto_pull)
     local_manifest_hash = hashlib.sha256(local_manifest_text.encode()).hexdigest()
 
     # Compute bundle hash: sorted (path, sha256) pairs
-    file_hashes = sorted(
-        (rel_path, hashlib.sha256(content).hexdigest()) for rel_path, content in files
-    )
+    file_hashes = sorted((rel_path, hashlib.sha256(content).hexdigest()) for rel_path, content in files)
     bundle_payload = "\n".join(f"{p}:{h}" for p, h in file_hashes)
     local_bundle_hash = hashlib.sha256(bundle_payload.encode()).hexdigest() if file_hashes else ""
 
@@ -588,7 +580,7 @@ def skills_sync(skill_dir, workspace, server_url, api_key, auto_push, auto_pull)
             click.echo(f"Error during push: {e}", err=True)
             raise SystemExit(1)
     elif action == "pull" and auto_pull:
-        import os
+
         # Re-use pull logic inline
         try:
             with httpx.Client(timeout=60.0) as client:
@@ -601,9 +593,7 @@ def skills_sync(skill_dir, workspace, server_url, api_key, auto_push, auto_pull)
                 for file_info in files_res.json().get("files", []):
                     fp = skill_path / file_info["path"]
                     fp.parent.mkdir(parents=True, exist_ok=True)
-                    content_res = client.get(
-                        f"{server_url}/v1/skills/{skill_id}/files/{file_info['path']}", headers=headers
-                    )
+                    content_res = client.get(f"{server_url}/v1/skills/{skill_id}/files/{file_info['path']}", headers=headers)
                     content_res.raise_for_status()
                     fp.write_bytes(content_res.content)
             click.echo("Pulled.")
@@ -620,10 +610,7 @@ def _push_skill(client, server_url, headers, workspace, manifest, files):
     if workspace:
         payload["workspace_id"] = workspace
     if files:
-        payload["files"] = [
-            {"path": rel_path, "content": content.decode("utf-8", errors="replace")}
-            for rel_path, content in files
-        ]
+        payload["files"] = [{"path": rel_path, "content": content.decode("utf-8", errors="replace")} for rel_path, content in files]
     h = {**headers, "Content-Type": "application/json"}
     response = client.post(f"{server_url}/v1/skills", content=json.dumps(payload), headers=h)
     response.raise_for_status()
@@ -646,7 +633,6 @@ def watch(watch_dir, workspace, server_url, api_key):
         raise SystemExit(1)
 
     import httpx
-
     from memorylayer.skills import parse_skill_folder
 
     watch_path = pathlib.Path(watch_dir)
@@ -662,14 +648,12 @@ def watch(watch_dir, workspace, server_url, api_key):
             try:
                 manifest, files = parse_skill_folder(watch_path)
                 import json
+
                 payload = {**manifest, "source_mode": "mirrored"}
                 if workspace:
                     payload["workspace_id"] = workspace
                 if files:
-                    payload["files"] = [
-                        {"path": rp, "content": c.decode("utf-8", errors="replace")}
-                        for rp, c in files
-                    ]
+                    payload["files"] = [{"path": rp, "content": c.decode("utf-8", errors="replace")} for rp, c in files]
                 h = {**headers, "Content-Type": "application/json"}
                 with httpx.Client(timeout=30.0) as client:
                     res = client.post(f"{server_url}/v1/skills", content=json.dumps(payload), headers=h)
@@ -699,12 +683,12 @@ def migrate_from_local(scan_dir, scope, workspace, mode, yes, server_url, api_ke
     import pathlib
 
     import httpx
-
     from memorylayer.skills import parse_skill_folder
 
     env_paths = None
     try:
         import os
+
         env_paths = os.environ.get("MEMORYLAYER_SKILLS_LOCAL_PATHS")
     except Exception:
         pass
@@ -770,10 +754,7 @@ def migrate_from_local(scan_dir, scope, workspace, mode, yes, server_url, api_ke
                 if workspace:
                     payload["workspace_id"] = workspace
                 if files:
-                    payload["files"] = [
-                        {"path": rp, "content_b64": __import__("base64").b64encode(c).decode()}
-                        for rp, c in files
-                    ]
+                    payload["files"] = [{"path": rp, "content_b64": __import__("base64").b64encode(c).decode()} for rp, c in files]
                 response = client.post(f"{server_url}/v1/skills", content=json.dumps(payload), headers=headers)
                 response.raise_for_status()
                 click.echo(f"  OK  {name}")
@@ -989,7 +970,9 @@ def mcp_sync(json_file, workspace, server_url, api_key):
 @click.option("--target", "-t", default=None, help="Output .mcp.json file (default: ./.mcp.json)")
 @click.option("--workspace", "-w", default=None, help="Workspace ID")
 @click.option("--transport", default=None, type=click.Choice(["stdio", "http", "sse", "streamable-http"]), help="Filter by transport")
-@click.option("--write-to-claude-json", "write_claude", is_flag=True, default=False, help="Also write servers to ~/.claude.json (user scope)")
+@click.option(
+    "--write-to-claude-json", "write_claude", is_flag=True, default=False, help="Also write servers to ~/.claude.json (user scope)"
+)
 @click.option("--server-url", default="http://localhost:61001", help="MemoryLayer server URL")
 @click.option("--api-key", default=None, help="API key for authentication")
 def mcp_materialize(target, workspace, transport, write_claude, server_url, api_key):
@@ -1036,6 +1019,7 @@ def mcp_materialize(target, workspace, transport, write_claude, server_url, api_
 
     if write_claude:
         from memorylayer_server.services.mcp_servers.claude_json import write_claude_json_servers
+
         write_claude_json_servers("user", data.get("mcpServers", {}))
         click.echo("Also wrote to ~/.claude.json (user scope)")
 

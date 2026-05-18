@@ -1147,11 +1147,7 @@ class MemoryService:
         # users. Requires user_id to be set — otherwise the filter would return
         # everything in _global_user, which is not intended.
         global_user_results = []
-        if (
-            input.include_global_user
-            and input.user_id
-            and workspace_id != GLOBAL_USER_WORKSPACE_ID
-        ):
+        if input.include_global_user and input.user_id and workspace_id != GLOBAL_USER_WORKSPACE_ID:
             # The user_id filter flows through entity_filters only when the
             # caller set it on the RecallInput; we need to force it here
             # regardless so cross-user leakage cannot happen.

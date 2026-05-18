@@ -5,7 +5,6 @@ Provides CRUD, resolve, pull/push/materialize, and parse_skill_folder.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 if TYPE_CHECKING:
     from .client import MemoryLayerClient
     from .models import AuthorityContext
+    from .sync_client import SyncMemoryLayerClient
 
 # Agentskills spec: dirs that map to known kinds
 _KIND_MAP = {
@@ -66,9 +66,7 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
             key = key.strip()
             val = val.strip()
             # Strip surrounding quotes
-            if (val.startswith('"') and val.endswith('"')) or (
-                val.startswith("'") and val.endswith("'")
-            ):
+            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                 val = val[1:-1]
             result[key] = val
     return result
@@ -150,7 +148,7 @@ class SkillModel(BaseModel):
 class SkillsAPI:
     """Skills namespace — access via client.skills.<method>."""
 
-    def __init__(self, client: "MemoryLayerClient") -> None:
+    def __init__(self, client: MemoryLayerClient) -> None:
         self._client = client
 
     def _ws(self, workspace_id: str | None) -> str | None:
@@ -168,7 +166,7 @@ class SkillsAPI:
         enabled: bool | None = None,
         include_shadowed: bool = False,
         workspace_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> list[SkillModel]:
         """List visible skills."""
         params: dict[str, Any] = {}
@@ -189,7 +187,7 @@ class SkillsAPI:
         data = await self._client._request("GET", "/skills", params=params, authority=authority)
         return [SkillModel(**s) for s in data.get("skills", [])]
 
-    async def get(self, skill_id: str, authority: "AuthorityContext | None" = None) -> SkillModel:
+    async def get(self, skill_id: str, authority: AuthorityContext | None = None) -> SkillModel:
         """Get a skill by ID."""
         data = await self._client._request("GET", f"/skills/{skill_id}", authority=authority)
         return SkillModel(**data["skill"])
@@ -209,11 +207,15 @@ class SkillsAPI:
         return response.content
 
     async def list_files(
-        self, skill_id: str, authority: "AuthorityContext | None" = None,
+        self,
+        skill_id: str,
+        authority: AuthorityContext | None = None,
     ) -> list[dict[str, Any]]:
         """List files in a skill bundle."""
         data = await self._client._request(
-            "GET", f"/skills/{skill_id}/files", authority=authority,
+            "GET",
+            f"/skills/{skill_id}/files",
+            authority=authority,
         )
         return data.get("files", [])
 
@@ -227,7 +229,7 @@ class SkillsAPI:
         source_mode: str = "server",
         workspace_id: str | None = None,
         user_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
         **manifest_extras: Any,
     ) -> SkillModel:
         """Create or update a skill by name."""
@@ -256,7 +258,7 @@ class SkillsAPI:
         data = await self._client._request("POST", "/skills", json=payload, authority=authority)
         return SkillModel(**data["skill"])
 
-    async def delete(self, skill_id: str, authority: "AuthorityContext | None" = None) -> None:
+    async def delete(self, skill_id: str, authority: AuthorityContext | None = None) -> None:
         """Delete a skill and its files."""
         await self._client._request("DELETE", f"/skills/{skill_id}", authority=authority)
 
@@ -265,8 +267,8 @@ class SkillsAPI:
         name: str | None = None,
         query: str | None = None,
         workspace_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
-    ) -> "SkillModel | list[SkillModel]":
+        authority: AuthorityContext | None = None,
+    ) -> SkillModel | list[SkillModel]:
         """Resolve a skill by name (precedence-winner) or query (vector recall)."""
         payload: dict[str, Any] = {}
         if name:
@@ -278,7 +280,10 @@ class SkillsAPI:
             payload["workspace_id"] = ws_id
 
         data = await self._client._request(
-            "POST", "/skills/resolve", json=payload, authority=authority,
+            "POST",
+            "/skills/resolve",
+            json=payload,
+            authority=authority,
         )
         # Server returns {"skill": null} when a name lookup misses, vs
         # {"skills": []} for query-mode empty results. The key may be
@@ -388,7 +393,7 @@ class SkillsAPI:
 class SyncSkillsAPI:
     """Synchronous Skills namespace — access via sync_client.skills.<method>."""
 
-    def __init__(self, client: "SyncMemoryLayerClient") -> None:  # type: ignore[name-defined]
+    def __init__(self, client: SyncMemoryLayerClient) -> None:  # type: ignore[name-defined]
         self._client = client
 
     def _ws(self, workspace_id: str | None) -> str | None:
@@ -493,7 +498,7 @@ class SyncSkillsAPI:
         name: str | None = None,
         query: str | None = None,
         workspace_id: str | None = None,
-    ) -> "SkillModel | list[SkillModel]":
+    ) -> SkillModel | list[SkillModel]:
         """Resolve a skill by name (precedence-winner) or query (vector recall)."""
         payload: dict[str, Any] = {}
         if name:

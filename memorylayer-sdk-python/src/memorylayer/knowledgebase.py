@@ -9,7 +9,7 @@ and the underlying graph analysis (communities, central nodes, bridges).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,7 +60,7 @@ class KbMetadata(BaseModel):
     article_count: int = 0
     community_count: int = 0
     generated_at: datetime
-    stats: Optional[KbGraphStats] = None
+    stats: KbGraphStats | None = None
 
 
 class KbCommunity(BaseModel):
@@ -73,7 +73,7 @@ class KbCommunity(BaseModel):
     size: int = 0
     cohesion_score: float = 0.0
     central_node_ids: list[str] = Field(default_factory=list)
-    label: Optional[str] = None
+    label: str | None = None
 
 
 class KbCentralNode(BaseModel):
@@ -106,7 +106,7 @@ class KbGraphSnapshot(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     workspace_id: str
-    context_id: Optional[str] = None
+    context_id: str | None = None
     node_count: int = 0
     edge_count: int = 0
     includes_rpg: bool = False
@@ -132,7 +132,7 @@ class KbGraphAnalysis(BaseModel):
 class KnowledgebaseAPI:
     """Knowledgebase namespace — access via ``client.kb.<method>``."""
 
-    def __init__(self, client: "MemoryLayerClient") -> None:
+    def __init__(self, client: MemoryLayerClient) -> None:
         self._client = client
 
     def _ws(self, workspace_id: str | None) -> str | None:
@@ -143,7 +143,7 @@ class KnowledgebaseAPI:
         workspace_id: str | None = None,
         *,
         context_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> KbMetadata:
         """Get the latest knowledgebase metadata for a workspace."""
         params: dict[str, Any] = {}
@@ -168,7 +168,7 @@ class KnowledgebaseAPI:
         article_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> list[KbArticle]:
         """List knowledgebase articles, optionally filtered by type."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -191,7 +191,7 @@ class KnowledgebaseAPI:
         article_id: str,
         workspace_id: str | None = None,
         *,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> KbArticle:
         """Fetch a single article by ID (e.g. ``index``, ``community-3``, ``entity-foo``)."""
         params: dict[str, Any] = {}
@@ -216,7 +216,7 @@ class KnowledgebaseAPI:
         max_god_nodes: int | None = None,
         include_rpg: bool = False,
         context_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> KbMetadata:
         """Trigger (re)generation of the workspace knowledgebase."""
         payload: dict[str, Any] = {"regenerate": regenerate, "include_rpg": include_rpg}
@@ -242,7 +242,7 @@ class KnowledgebaseAPI:
         self,
         workspace_id: str | None = None,
         *,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> bytes:
         """Download the knowledgebase as an Obsidian-compatible vault zip."""
         transport = self._client._ensure_transport()
@@ -252,7 +252,10 @@ class KnowledgebaseAPI:
             params["workspace_id"] = ws_id
         obo_headers = self._client._obo_headers(authority)
         response = await transport.request(
-            "GET", "/knowledgebase/export", params=params, headers=obo_headers,
+            "GET",
+            "/knowledgebase/export",
+            params=params,
+            headers=obo_headers,
         )
         response.raise_for_status()
         return response.content
@@ -262,7 +265,7 @@ class KnowledgebaseAPI:
         workspace_id: str | None = None,
         *,
         context_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> KbGraphAnalysis | None:
         """Run a fresh graph analysis on the workspace association graph."""
         params: dict[str, Any] = {}
@@ -288,7 +291,7 @@ class KnowledgebaseAPI:
         community_id: int,
         workspace_id: str | None = None,
         *,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> KbCommunity:
         """Fetch a single community by ID with cached label + live members."""
         params: dict[str, Any] = {}
@@ -313,7 +316,7 @@ class KnowledgebaseAPI:
 class SyncKnowledgebaseAPI:
     """Synchronous Knowledgebase namespace — access via ``sync_client.kb.<method>``."""
 
-    def __init__(self, client: "SyncMemoryLayerClient") -> None:
+    def __init__(self, client: SyncMemoryLayerClient) -> None:
         self._client = client
 
     def _ws(self, workspace_id: str | None) -> str | None:
@@ -332,7 +335,10 @@ class SyncKnowledgebaseAPI:
         if context_id:
             params["context_id"] = context_id
         data = self._client._request(
-            "GET", "/knowledgebase", params=params, enterprise_feature="Knowledgebase",
+            "GET",
+            "/knowledgebase",
+            params=params,
+            enterprise_feature="Knowledgebase",
         )
         return KbMetadata(**data)
 
@@ -351,7 +357,9 @@ class SyncKnowledgebaseAPI:
         if article_type:
             params["article_type"] = article_type
         data = self._client._request(
-            "GET", "/knowledgebase/articles", params=params,
+            "GET",
+            "/knowledgebase/articles",
+            params=params,
             enterprise_feature="Knowledgebase",
         )
         return [KbArticle(**a) for a in data.get("articles", [])]
@@ -366,7 +374,9 @@ class SyncKnowledgebaseAPI:
         if ws_id:
             params["workspace_id"] = ws_id
         data = self._client._request(
-            "GET", f"/knowledgebase/articles/{article_id}", params=params,
+            "GET",
+            f"/knowledgebase/articles/{article_id}",
+            params=params,
             enterprise_feature="Knowledgebase",
         )
         return KbArticle(**data)
@@ -392,7 +402,9 @@ class SyncKnowledgebaseAPI:
         if max_god_nodes is not None:
             payload["max_god_nodes"] = max_god_nodes
         data = self._client._request(
-            "POST", "/knowledgebase/generate", json=payload,
+            "POST",
+            "/knowledgebase/generate",
+            json=payload,
             enterprise_feature="Knowledgebase",
         )
         return KbMetadata(**data)
@@ -410,7 +422,9 @@ class SyncKnowledgebaseAPI:
         if context_id:
             params["context_id"] = context_id
         data = self._client._request(
-            "GET", "/knowledgebase/graph", params=params,
+            "GET",
+            "/knowledgebase/graph",
+            params=params,
             enterprise_feature="Knowledgebase",
         )
         analysis = data.get("analysis")
@@ -428,7 +442,9 @@ class SyncKnowledgebaseAPI:
         if ws_id:
             params["workspace_id"] = ws_id
         data = self._client._request(
-            "GET", f"/knowledgebase/graph/communities/{community_id}", params=params,
+            "GET",
+            f"/knowledgebase/graph/communities/{community_id}",
+            params=params,
             enterprise_feature="Knowledgebase",
         )
         return KbCommunity(**data)

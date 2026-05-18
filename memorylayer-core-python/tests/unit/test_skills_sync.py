@@ -1,7 +1,6 @@
 """Unit tests for services/skills/sync.py."""
-import pytest
-from memorylayer_server.services.skills.sync import compute_sync_action
 
+from memorylayer_server.services.skills.sync import compute_sync_action
 
 _HASH_A = "a" * 64
 _HASH_B = "b" * 64

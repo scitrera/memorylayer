@@ -23,9 +23,7 @@ def chat_history(base_url: str, api_key: str, workspace_id: str, session_id: str
 def test_add_message_human(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test adding a human message."""
     # Mock the empty messages response for getting current count
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Mock the POST response for storing memory
     mock_response = {
@@ -57,9 +55,7 @@ def test_add_message_human(chat_history: MemoryLayerChatMessageHistory, base_url
 def test_add_message_ai(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test adding an AI message."""
     # Mock the empty messages response for getting current count
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Mock the POST response for storing memory
     mock_response = {
@@ -89,24 +85,25 @@ def test_add_message_ai(chat_history: MemoryLayerChatMessageHistory, base_url: s
 def test_add_messages_multiple(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test adding multiple messages at once."""
     # Mock the empty messages response for getting current count
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Mock POST responses for storing memories
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_125",
-            "workspace_id": "ws_test",
-            "content": "test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_125",
+                "workspace_id": "ws_test",
+                "content": "test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test
@@ -125,9 +122,7 @@ def test_add_messages_multiple(chat_history: MemoryLayerChatMessageHistory, base
 def test_messages_property_empty(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test retrieving messages when history is empty."""
     # Mock empty response
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Test
     messages = chat_history.messages
@@ -177,9 +172,7 @@ def test_messages_property_with_messages(chat_history: MemoryLayerChatMessageHis
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Test
     messages = chat_history.messages
@@ -233,9 +226,7 @@ def test_messages_sorted_by_index(chat_history: MemoryLayerChatMessageHistory, b
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Test
     messages = chat_history.messages
@@ -279,9 +270,7 @@ def test_clear(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> No
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Mock delete responses
     respx.delete(f"{base_url}/v1/memories/mem_123").mock(return_value=Response(204))
@@ -298,9 +287,7 @@ def test_clear(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> No
 def test_clear_empty_history(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test clearing when history is already empty."""
     # Mock empty recall response
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Test - should not raise
     chat_history.clear()
@@ -313,24 +300,25 @@ def test_clear_empty_history(chat_history: MemoryLayerChatMessageHistory, base_u
 def test_system_message(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test adding and retrieving system messages."""
     # Mock the empty messages response for getting current count
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Mock the POST response for storing memory
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_126",
-            "workspace_id": "ws_test",
-            "content": "You are a helpful assistant.",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": ["session:sess_test_123", "chat_message", "role:system"],
-            "metadata": {"session_id": "sess_test_123", "role": "system", "message_index": 0},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_126",
+                "workspace_id": "ws_test",
+                "content": "You are a helpful assistant.",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": ["session:sess_test_123", "chat_message", "role:system"],
+                "metadata": {"session_id": "sess_test_123", "role": "system", "message_index": 0},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test
@@ -374,9 +362,7 @@ def test_message_with_full_reconstruction(chat_history: MemoryLayerChatMessageHi
         ],
         "total_count": 1,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Test
     messages = chat_history.messages
@@ -399,24 +385,25 @@ def test_custom_memory_tags(base_url: str, api_key: str, workspace_id: str, sess
     )
 
     # Mock the empty messages response for getting current count
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Mock the POST response
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_127",
-            "workspace_id": "ws_test",
-            "content": "Test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_127",
+                "workspace_id": "ws_test",
+                "content": "Test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test
@@ -434,14 +421,10 @@ def test_http_error_on_add_message(chat_history: MemoryLayerChatMessageHistory, 
     import httpx
 
     # Mock the empty messages response for getting current count
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Mock error response
-    respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.post(f"{base_url}/v1/memories").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test
     with pytest.raises(httpx.HTTPStatusError):
@@ -454,9 +437,7 @@ def test_http_error_on_clear(chat_history: MemoryLayerChatMessageHistory, base_u
     import httpx
 
     # Mock error response on recall
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test
     with pytest.raises(httpx.HTTPStatusError):
@@ -467,9 +448,7 @@ def test_http_error_on_clear(chat_history: MemoryLayerChatMessageHistory, base_u
 def test_http_error_on_messages_returns_empty(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test that messages property returns empty list on HTTP error."""
     # Mock error response
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test - should not raise but return empty list
     messages = chat_history.messages

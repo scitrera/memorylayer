@@ -22,6 +22,7 @@ Out of scope here:
   tests in ``tests/integration/test_aether_terminator_chain.py`` (which
   prove the terminator side; this client is the initiator complement).
 """
+
 from __future__ import annotations
 
 import json
@@ -31,11 +32,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from memorylayer_server.services.document.embed_client import (
-    EmbedServerClient,
     TRANSPORT_AETHER,
     TRANSPORT_HTTP,
+    EmbedServerClient,
 )
-
 
 # ---------------------------------------------------------------------------
 # HTTP transport
@@ -86,9 +86,7 @@ async def test_embed_client_aether_transport_calls_proxy_http_async(monkeypatch)
     # Fake proxy_http_async response
     fake_response = SimpleNamespace(
         status_code=200,
-        body=json.dumps(
-            {"data": [{"index": 0, "embedding": [0.5]}]}
-        ).encode("utf-8"),
+        body=json.dumps({"data": [{"index": 0, "embedding": [0.5]}]}).encode("utf-8"),
     )
     fake_proxy = AsyncMock(return_value=fake_response)
 

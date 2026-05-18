@@ -5,6 +5,7 @@ without spinning up real httpx clients or subprocesses. The route tests
 construct a tiny FastAPI app and drive it via ``TestClient`` with a
 fake provider stub.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -68,8 +69,7 @@ class _FakeProvider(LLMProvider):
 
     def list_models(self) -> list[dict]:
         return [
-            {"id": n, "object": "model", "profile": self.profile_name,
-             "model": self.model_name, "owned_by": "memorylayer-embed-server"}
+            {"id": n, "object": "model", "profile": self.profile_name, "model": self.model_name, "owned_by": "memorylayer-embed-server"}
             for n in self.served_names
         ]
 
@@ -192,6 +192,7 @@ def _build_test_app(svc: LLMRoutingService | None) -> TestClient:
 
     class _State:
         pass
+
     state = _State()
     state.v = MagicMock()
     state.v.get = MagicMock(return_value=svc)
@@ -238,7 +239,7 @@ def test_chat_completions_streaming_emits_sse():
     qwen.chat_response = [
         b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
         b'data: {"choices":[{"delta":{"content":" there"}}]}\n\n',
-        b'data: [DONE]\n\n',
+        b"data: [DONE]\n\n",
     ]
     svc = LLMRoutingService(profiles={"qwen": qwen}, default_profile="qwen")
 
@@ -252,7 +253,7 @@ def test_chat_completions_streaming_emits_sse():
     body = r.content
     assert b'"hi"' in body
     assert b'" there"' in body
-    assert b'[DONE]' in body
+    assert b"[DONE]" in body
     # stream=True flag forwarded to provider.
     assert qwen.chat_calls[0][1] is True
 

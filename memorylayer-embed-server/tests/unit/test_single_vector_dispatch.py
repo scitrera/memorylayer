@@ -5,13 +5,12 @@ vllm / openai / google / mock / colpali. Each branch is exercised by
 substituting the underlying provider plugin / module so the test stays
 free of torch, openai-client, and google-genai imports.
 """
+
 from __future__ import annotations
 
 import sys
 import types
 from unittest.mock import MagicMock
-
-import pytest
 
 from memorylayer_embed_server.dependencies import _init_single_vector_provider
 from memorylayer_embed_server.services.embedding.mock_providers import (
@@ -83,9 +82,7 @@ def test_single_provider_openai(monkeypatch):
             return sentinel
 
     fake_mod.OpenAIEmbeddingProviderPlugin = _FakeOpenAIPlugin
-    monkeypatch.setitem(
-        sys.modules, "memorylayer_server.services.embedding.openai", fake_mod
-    )
+    monkeypatch.setitem(sys.modules, "memorylayer_server.services.embedding.openai", fake_mod)
 
     provider = _init_single_vector_provider(v=None, logger=_make_logger(), kind="openai")
     assert provider is sentinel
@@ -105,9 +102,7 @@ def test_single_provider_google(monkeypatch):
             return sentinel
 
     fake_mod.GoogleEmbeddingProviderPlugin = _FakeGooglePlugin
-    monkeypatch.setitem(
-        sys.modules, "memorylayer_server.services.embedding.google", fake_mod
-    )
+    monkeypatch.setitem(sys.modules, "memorylayer_server.services.embedding.google", fake_mod)
 
     provider = _init_single_vector_provider(v=None, logger=_make_logger(), kind="google")
     assert provider is sentinel
@@ -124,9 +119,7 @@ def test_single_provider_unknown_returns_none_and_warns():
     assert provider is None
     # The implementation logs at warning level with the offending kind.
     assert any(
-        "EMBED_SERVER_SINGLE_VECTOR_PROVIDER" in str(call)
-        and "not-a-provider" in str(call)
-        for call in logger.warning.call_args_list
+        "EMBED_SERVER_SINGLE_VECTOR_PROVIDER" in str(call) and "not-a-provider" in str(call) for call in logger.warning.call_args_list
     )
 
 
@@ -146,9 +139,7 @@ def test_single_provider_openai_import_failure_returns_none(monkeypatch):
     # Insert a sentinel module without the expected attribute so attribute
     # lookup fails (mimicking a broken/legacy install).
     fake_mod = types.ModuleType("memorylayer_server.services.embedding.openai")
-    monkeypatch.setitem(
-        sys.modules, "memorylayer_server.services.embedding.openai", fake_mod
-    )
+    monkeypatch.setitem(sys.modules, "memorylayer_server.services.embedding.openai", fake_mod)
     logger = _make_logger()
     provider = _init_single_vector_provider(v=None, logger=logger, kind="openai")
     assert provider is None

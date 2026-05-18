@@ -308,7 +308,7 @@ class StorageBackend(ABC):
         """Delete a workspace and all associated data. Override in subclasses."""
         return False
 
-    async def update_workspace(self, workspace_id: str, **updates) -> Optional[Workspace]:
+    async def update_workspace(self, workspace_id: str, **updates) -> Workspace | None:
         """Update workspace fields (name, settings, etc.).
 
         Args:
@@ -735,7 +735,7 @@ class StorageBackend(ABC):
         self,
         workspace_id: str,
         name: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> "Skill | None":
         """Get skill by name within a workspace, optionally filtering by user scope. Override in subclasses."""
         raise NotImplementedError("Skill storage not implemented by this backend")
@@ -743,10 +743,10 @@ class StorageBackend(ABC):
     async def list_skills(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
-        name: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        enabled: Optional[bool] = None,
+        user_id: str | None = None,
+        name: str | None = None,
+        tags: list[str] | None = None,
+        enabled: bool | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list["Skill"]:
@@ -810,7 +810,7 @@ class StorageBackend(ABC):
         self,
         workspace_id: str,
         name: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> "McpServer | None":
         """Get MCP server by name within a workspace, optionally filtering by user scope. Override in subclasses."""
         raise NotImplementedError("MCP server storage not implemented by this backend")
@@ -818,10 +818,10 @@ class StorageBackend(ABC):
     async def list_mcp_servers(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
-        name: Optional[str] = None,
-        transport: Optional[str] = None,
-        enabled: Optional[bool] = None,
+        user_id: str | None = None,
+        name: str | None = None,
+        transport: str | None = None,
+        enabled: bool | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list["McpServer"]:

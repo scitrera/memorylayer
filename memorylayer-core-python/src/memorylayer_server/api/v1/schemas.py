@@ -763,4 +763,3 @@ class ThreadDecomposeResponse(BaseModel):
     memories_created: int
     from_index: int
     to_index: int
-

@@ -1,14 +1,15 @@
 """Unit tests for SkillsService and frontmatter utilities."""
+
 import pytest
 
 from memorylayer_server.models.skill import Skill, SkillCreateInput, SkillFile, SkillUpdateInput
 from memorylayer_server.services.skills import SkillsService
 from memorylayer_server.services.skills.frontmatter import parse_skill_md, render_skill_md
 
-
 # ---------------------------------------------------------------------------
 # Minimal in-memory storage stub for SkillsService tests
 # ---------------------------------------------------------------------------
+
 
 class _SkillStore:
     """Minimal skills-capable storage stub (no full StorageBackend required)."""
@@ -17,37 +18,93 @@ class _SkillStore:
         self._skills: dict[str, Skill] = {}
         self._files: dict[str, SkillFile] = {}  # key: f"{skill_id}:{path}"
 
-    async def connect(self): pass
-    async def disconnect(self): pass
-    async def health_check(self): return True
+    async def connect(self):
+        pass
+
+    async def disconnect(self):
+        pass
+
+    async def health_check(self):
+        return True
 
     # Stub mandatory abstract methods (not needed for skills tests)
-    async def create_memory(self, *a, **kw): raise NotImplementedError
-    async def get_memory(self, *a, **kw): return None
-    async def update_memory(self, *a, **kw): return None
-    async def delete_memory(self, *a, **kw): return False
-    async def search_memories(self, *a, **kw): return []
-    async def full_text_search(self, *a, **kw): return []
-    async def get_memory_by_hash(self, *a, **kw): return None
-    async def get_recent_memories(self, *a, **kw): return []
-    async def create_association(self, *a, **kw): raise NotImplementedError
-    async def get_associations(self, *a, **kw): return []
-    async def traverse_graph(self, *a, **kw): raise NotImplementedError
-    async def create_workspace(self, *a, **kw): raise NotImplementedError
-    async def get_workspace(self, *a, **kw): return None
-    async def create_context(self, *a, **kw): raise NotImplementedError
-    async def get_context(self, *a, **kw): return None
-    async def list_contexts(self, *a, **kw): return []
-    async def list_workspaces(self, *a, **kw): return []
-    async def get_workspace_stats(self, *a, **kw): return {}
-    async def create_session(self, *a, **kw): raise NotImplementedError
-    async def get_session(self, *a, **kw): return None
-    async def get_session_by_id(self, *a, **kw): return None
-    async def delete_session(self, *a, **kw): return False
-    async def set_working_memory(self, *a, **kw): raise NotImplementedError
-    async def get_working_memory(self, *a, **kw): return None
-    async def get_all_working_memory(self, *a, **kw): return []
-    async def cleanup_expired_sessions(self, *a, **kw): return 0
+    async def create_memory(self, *a, **kw):
+        raise NotImplementedError
+
+    async def get_memory(self, *a, **kw):
+        return None
+
+    async def update_memory(self, *a, **kw):
+        return None
+
+    async def delete_memory(self, *a, **kw):
+        return False
+
+    async def search_memories(self, *a, **kw):
+        return []
+
+    async def full_text_search(self, *a, **kw):
+        return []
+
+    async def get_memory_by_hash(self, *a, **kw):
+        return None
+
+    async def get_recent_memories(self, *a, **kw):
+        return []
+
+    async def create_association(self, *a, **kw):
+        raise NotImplementedError
+
+    async def get_associations(self, *a, **kw):
+        return []
+
+    async def traverse_graph(self, *a, **kw):
+        raise NotImplementedError
+
+    async def create_workspace(self, *a, **kw):
+        raise NotImplementedError
+
+    async def get_workspace(self, *a, **kw):
+        return None
+
+    async def create_context(self, *a, **kw):
+        raise NotImplementedError
+
+    async def get_context(self, *a, **kw):
+        return None
+
+    async def list_contexts(self, *a, **kw):
+        return []
+
+    async def list_workspaces(self, *a, **kw):
+        return []
+
+    async def get_workspace_stats(self, *a, **kw):
+        return {}
+
+    async def create_session(self, *a, **kw):
+        raise NotImplementedError
+
+    async def get_session(self, *a, **kw):
+        return None
+
+    async def get_session_by_id(self, *a, **kw):
+        return None
+
+    async def delete_session(self, *a, **kw):
+        return False
+
+    async def set_working_memory(self, *a, **kw):
+        raise NotImplementedError
+
+    async def get_working_memory(self, *a, **kw):
+        return None
+
+    async def get_all_working_memory(self, *a, **kw):
+        return []
+
+    async def cleanup_expired_sessions(self, *a, **kw):
+        return 0
 
     # Skill operations
     async def create_skill(self, skill: Skill) -> Skill:
@@ -73,7 +130,7 @@ class _SkillStore:
             results = [s for s in results if s.name == name]
         if enabled is not None:
             results = [s for s in results if s.enabled == enabled]
-        return results[offset: offset + limit]
+        return results[offset : offset + limit]
 
     async def find_skills_by_name(self, name, scope_filters):
         results = []
@@ -133,6 +190,7 @@ def make_service():
 # SkillsService CRUD tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_create_and_get_skill():
     svc, _ = make_service()
@@ -171,14 +229,10 @@ async def test_list_skills():
 @pytest.mark.asyncio
 async def test_update_skill():
     svc, _ = make_service()
-    skill = await svc.create_skill(
-        SkillCreateInput(name="my-skill", description="Original"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="my-skill", description="Original"), workspace_id="ws1")
     old_hash = skill.manifest_hash
 
-    updated = await svc.update_skill(
-        "ws1", skill.id, SkillUpdateInput(description="Updated description")
-    )
+    updated = await svc.update_skill("ws1", skill.id, SkillUpdateInput(description="Updated description"))
     assert updated is not None
     assert updated.description == "Updated description"
     assert updated.manifest_hash != old_hash
@@ -187,9 +241,7 @@ async def test_update_skill():
 @pytest.mark.asyncio
 async def test_delete_skill():
     svc, storage = make_service()
-    skill = await svc.create_skill(
-        SkillCreateInput(name="delete-me", description="Temp"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="delete-me", description="Temp"), workspace_id="ws1")
     assert await svc.delete_skill("ws1", skill.id) is True
     assert await svc.get_skill("ws1", skill.id) is None
 
@@ -204,12 +256,11 @@ async def test_delete_skill_not_found():
 # File operations
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_upsert_and_get_file():
     svc, _ = make_service()
-    skill = await svc.create_skill(
-        SkillCreateInput(name="file-skill", description="Has files"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="file-skill", description="Has files"), workspace_id="ws1")
     content = b"print('hello')"
     sf = await svc.upsert_file(skill.id, "scripts/hello.py", content, workspace_id="ws1")
     assert sf.kind == "script"
@@ -224,9 +275,7 @@ async def test_upsert_and_get_file():
 @pytest.mark.asyncio
 async def test_bundle_hash_updates_on_upsert():
     svc, storage = make_service()
-    skill = await svc.create_skill(
-        SkillCreateInput(name="bundle-skill", description="Bundle"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="bundle-skill", description="Bundle"), workspace_id="ws1")
     assert skill.bundle_hash == ""
 
     await svc.upsert_file(skill.id, "scripts/a.py", b"a", workspace_id="ws1")
@@ -242,9 +291,7 @@ async def test_bundle_hash_updates_on_upsert():
 @pytest.mark.asyncio
 async def test_file_kind_inference():
     svc, _ = make_service()
-    skill = await svc.create_skill(
-        SkillCreateInput(name="kind-skill", description="Kinds"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="kind-skill", description="Kinds"), workspace_id="ws1")
     cases = [
         ("scripts/run.py", "script"),
         ("references/GUIDE.md", "reference"),
@@ -259,9 +306,7 @@ async def test_file_kind_inference():
 @pytest.mark.asyncio
 async def test_delete_file():
     svc, _ = make_service()
-    skill = await svc.create_skill(
-        SkillCreateInput(name="rm-skill", description="Remove"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="rm-skill", description="Remove"), workspace_id="ws1")
     await svc.upsert_file(skill.id, "scripts/x.py", b"x")
     assert await svc.delete_file(skill.id, "scripts/x.py") is True
     assert await svc.get_file(skill.id, "scripts/x.py") is None
@@ -270,6 +315,7 @@ async def test_delete_file():
 # ---------------------------------------------------------------------------
 # memory_indexer hook
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_memory_indexer_called_on_create():
@@ -280,24 +326,21 @@ async def test_memory_indexer_called_on_create():
 
     storage = _SkillStore()
     svc = SkillsService(storage=storage, memory_indexer=indexer)
-    skill = await svc.create_skill(
-        SkillCreateInput(name="indexed-skill", description="Will be indexed"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="indexed-skill", description="Will be indexed"), workspace_id="ws1")
     assert skill.id in indexed
 
 
 @pytest.mark.asyncio
 async def test_memory_indexer_not_required():
     svc, _ = make_service()  # no indexer
-    skill = await svc.create_skill(
-        SkillCreateInput(name="no-index", description="No indexer"), workspace_id="ws1"
-    )
+    skill = await svc.create_skill(SkillCreateInput(name="no-index", description="No indexer"), workspace_id="ws1")
     assert skill is not None
 
 
 # ---------------------------------------------------------------------------
 # Frontmatter parse / render round-trip
 # ---------------------------------------------------------------------------
+
 
 def test_frontmatter_roundtrip_basic():
     fm = {"name": "pdf-processing", "description": "Extract PDFs", "version": "1.0.0"}
@@ -328,9 +371,9 @@ def test_frontmatter_stable_key_order():
     rendered = render_skill_md(fm, "")
     lines = rendered.splitlines()
     # name should come before description, description before version
-    name_idx = next(i for i, l in enumerate(lines) if l.startswith("name:"))
-    desc_idx = next(i for i, l in enumerate(lines) if l.startswith("description:"))
-    ver_idx = next(i for i, l in enumerate(lines) if l.startswith("version:"))
+    name_idx = next(i for i, line in enumerate(lines) if line.startswith("name:"))
+    desc_idx = next(i for i, line in enumerate(lines) if line.startswith("description:"))
+    ver_idx = next(i for i, line in enumerate(lines) if line.startswith("version:"))
     assert name_idx < desc_idx < ver_idx
 
 

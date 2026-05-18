@@ -9,6 +9,11 @@ from typing import Any
 import httpx
 from pydantic import TypeAdapter
 
+from ._transport import (
+    AetherTransport,
+    HttpTransport,
+    Transport,
+)
 from .exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -19,6 +24,8 @@ from .exceptions import (
     ServerError,
     ValidationError,
 )
+from .knowledgebase import KnowledgebaseAPI
+from .mcp_servers import McpServersAPI
 from .models import (
     Association,
     AuthorityContext,
@@ -40,20 +47,12 @@ from .models import (
     SessionBriefing,
     Workspace,
 )
-from .knowledgebase import KnowledgebaseAPI
-from .mcp_servers import McpServersAPI
 from .skills import SkillsAPI
 from .types import (
     MemoryType,
     RecallMode,
     RelationshipType,
     SearchTolerance,
-)
-from ._transport import (
-    AetherTransport,
-    HttpTransport,
-    Transport,
-    TransportResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -140,8 +139,7 @@ class MemoryLayerClient:
         self._transport: Transport | None = None
         if transport == "aether" and aether_client is None:
             raise ValueError(
-                "transport='aether' requires aether_client (an AsyncAgentClient "
-                "or AsyncServiceClient with a live gateway connection)"
+                "transport='aether' requires aether_client (an AsyncAgentClient or AsyncServiceClient with a live gateway connection)"
             )
         self.skills = SkillsAPI(self)
         self.mcp_servers = McpServersAPI(self)
@@ -168,10 +166,7 @@ class MemoryLayerClient:
                     timeout=self.timeout,
                 )
             else:
-                raise ValueError(
-                    f"Unknown transport: {self._transport_kind!r} "
-                    "(expected 'http' or 'aether', or a Transport instance)"
-                )
+                raise ValueError(f"Unknown transport: {self._transport_kind!r} (expected 'http' or 'aether', or a Transport instance)")
         else:
             # Custom Transport instance — caller owns it.
             self._transport = self._transport_kind
@@ -240,10 +235,7 @@ class MemoryLayerClient:
         if self._transport is None:
             raise RuntimeError("Client not initialized. Use async with context manager.")
         if self._client is None:
-            raise NotImplementedError(
-                "This SDK code path requires the HTTP transport. "
-                "Construct the client with transport='http' for now."
-            )
+            raise NotImplementedError("This SDK code path requires the HTTP transport. Construct the client with transport='http' for now.")
         return self._client
 
     def _ensure_transport(self) -> Transport:
@@ -2750,7 +2742,10 @@ class _SkillsOBOProxy:
         authority: AuthorityContext | None = None,
     ):
         return await self._parent.list(
-            scope=scope, name=name, tags=tags, enabled=enabled,
+            scope=scope,
+            name=name,
+            tags=tags,
+            enabled=enabled,
             include_shadowed=include_shadowed,
             workspace_id=self._ws(workspace_id),
             authority=authority if authority is not None else self._authority,
@@ -2758,12 +2753,14 @@ class _SkillsOBOProxy:
 
     async def get(self, skill_id: str, authority: AuthorityContext | None = None):
         return await self._parent.get(
-            skill_id, authority=authority if authority is not None else self._authority,
+            skill_id,
+            authority=authority if authority is not None else self._authority,
         )
 
     async def list_files(self, skill_id: str, authority: AuthorityContext | None = None):
         return await self._parent.list_files(
-            skill_id, authority=authority if authority is not None else self._authority,
+            skill_id,
+            authority=authority if authority is not None else self._authority,
         )
 
     async def save(
@@ -2780,16 +2777,22 @@ class _SkillsOBOProxy:
         **manifest_extras: Any,
     ):
         return await self._parent.save(
-            name=name, description=description, body=body, files=files,
-            scope=scope, source_mode=source_mode,
-            workspace_id=self._ws(workspace_id), user_id=user_id,
+            name=name,
+            description=description,
+            body=body,
+            files=files,
+            scope=scope,
+            source_mode=source_mode,
+            workspace_id=self._ws(workspace_id),
+            user_id=user_id,
             authority=authority if authority is not None else self._authority,
             **manifest_extras,
         )
 
     async def delete(self, skill_id: str, authority: AuthorityContext | None = None):
         return await self._parent.delete(
-            skill_id, authority=authority if authority is not None else self._authority,
+            skill_id,
+            authority=authority if authority is not None else self._authority,
         )
 
     async def resolve(
@@ -2800,7 +2803,8 @@ class _SkillsOBOProxy:
         authority: AuthorityContext | None = None,
     ):
         return await self._parent.resolve(
-            name=name, query=query,
+            name=name,
+            query=query,
             workspace_id=self._ws(workspace_id),
             authority=authority if authority is not None else self._authority,
         )
@@ -2825,54 +2829,78 @@ class _KbOBOProxy:
     def _auth(self, authority: AuthorityContext | None) -> AuthorityContext | None:
         return authority if authority is not None else self._authority
 
-    async def get(self, workspace_id: str | None = None, *, context_id: str | None = None,
-                  authority: AuthorityContext | None = None):
+    async def get(self, workspace_id: str | None = None, *, context_id: str | None = None, authority: AuthorityContext | None = None):
         return await self._parent.get(
-            self._ws(workspace_id), context_id=context_id, authority=self._auth(authority),
+            self._ws(workspace_id),
+            context_id=context_id,
+            authority=self._auth(authority),
         )
 
-    async def list_articles(self, workspace_id: str | None = None, *,
-                            article_type: str | None = None, limit: int = 100, offset: int = 0,
-                            authority: AuthorityContext | None = None):
+    async def list_articles(
+        self,
+        workspace_id: str | None = None,
+        *,
+        article_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        authority: AuthorityContext | None = None,
+    ):
         return await self._parent.list_articles(
-            self._ws(workspace_id), article_type=article_type, limit=limit, offset=offset,
+            self._ws(workspace_id),
+            article_type=article_type,
+            limit=limit,
+            offset=offset,
             authority=self._auth(authority),
         )
 
-    async def get_article(self, article_id: str, workspace_id: str | None = None, *,
-                          authority: AuthorityContext | None = None):
+    async def get_article(self, article_id: str, workspace_id: str | None = None, *, authority: AuthorityContext | None = None):
         return await self._parent.get_article(
-            article_id, self._ws(workspace_id), authority=self._auth(authority),
-        )
-
-    async def generate(self, workspace_id: str | None = None, *,
-                       regenerate: bool = False, max_communities: int | None = None,
-                       max_god_nodes: int | None = None, include_rpg: bool = False,
-                       context_id: str | None = None,
-                       authority: AuthorityContext | None = None):
-        return await self._parent.generate(
-            self._ws(workspace_id), regenerate=regenerate, max_communities=max_communities,
-            max_god_nodes=max_god_nodes, include_rpg=include_rpg, context_id=context_id,
+            article_id,
+            self._ws(workspace_id),
             authority=self._auth(authority),
         )
 
-    async def export_vault(self, workspace_id: str | None = None, *,
-                           authority: AuthorityContext | None = None):
+    async def generate(
+        self,
+        workspace_id: str | None = None,
+        *,
+        regenerate: bool = False,
+        max_communities: int | None = None,
+        max_god_nodes: int | None = None,
+        include_rpg: bool = False,
+        context_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ):
+        return await self._parent.generate(
+            self._ws(workspace_id),
+            regenerate=regenerate,
+            max_communities=max_communities,
+            max_god_nodes=max_god_nodes,
+            include_rpg=include_rpg,
+            context_id=context_id,
+            authority=self._auth(authority),
+        )
+
+    async def export_vault(self, workspace_id: str | None = None, *, authority: AuthorityContext | None = None):
         return await self._parent.export_vault(
-            self._ws(workspace_id), authority=self._auth(authority),
+            self._ws(workspace_id),
+            authority=self._auth(authority),
         )
 
-    async def get_graph_analysis(self, workspace_id: str | None = None, *,
-                                 context_id: str | None = None,
-                                 authority: AuthorityContext | None = None):
+    async def get_graph_analysis(
+        self, workspace_id: str | None = None, *, context_id: str | None = None, authority: AuthorityContext | None = None
+    ):
         return await self._parent.get_graph_analysis(
-            self._ws(workspace_id), context_id=context_id, authority=self._auth(authority),
+            self._ws(workspace_id),
+            context_id=context_id,
+            authority=self._auth(authority),
         )
 
-    async def get_community(self, community_id: int, workspace_id: str | None = None, *,
-                            authority: AuthorityContext | None = None):
+    async def get_community(self, community_id: int, workspace_id: str | None = None, *, authority: AuthorityContext | None = None):
         return await self._parent.get_community(
-            community_id, self._ws(workspace_id), authority=self._auth(authority),
+            community_id,
+            self._ws(workspace_id),
+            authority=self._auth(authority),
         )
 
 
@@ -2901,12 +2929,14 @@ class _McpServersOBOProxy:
 
     async def get(self, server_id: str, authority: AuthorityContext | None = None):
         return await self._parent.get(
-            server_id, authority=authority if authority is not None else self._authority,
+            server_id,
+            authority=authority if authority is not None else self._authority,
         )
 
     async def get_by_name(self, name: str, workspace_id: str | None = None, authority: AuthorityContext | None = None, **kwargs: Any):
         return await self._parent.get_by_name(
-            name, workspace_id=self._ws(workspace_id),
+            name,
+            workspace_id=self._ws(workspace_id),
             authority=authority if authority is not None else self._authority,
             **kwargs,
         )
@@ -2920,17 +2950,20 @@ class _McpServersOBOProxy:
 
     async def update(self, server_id: str, authority: AuthorityContext | None = None, **kwargs: Any):
         return await self._parent.update(
-            server_id, authority=authority if authority is not None else self._authority,
+            server_id,
+            authority=authority if authority is not None else self._authority,
             **kwargs,
         )
 
     async def delete(self, server_id: str, authority: AuthorityContext | None = None):
         return await self._parent.delete(
-            server_id, authority=authority if authority is not None else self._authority,
+            server_id,
+            authority=authority if authority is not None else self._authority,
         )
 
     async def resolve(self, name: str, workspace_id: str | None = None, authority: AuthorityContext | None = None):
         return await self._parent.resolve(
-            name, workspace_id=self._ws(workspace_id),
+            name,
+            workspace_id=self._ws(workspace_id),
             authority=authority if authority is not None else self._authority,
         )

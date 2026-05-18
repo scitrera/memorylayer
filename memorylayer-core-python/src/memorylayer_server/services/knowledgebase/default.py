@@ -15,7 +15,6 @@ import io
 import zipfile
 from datetime import UTC, datetime
 from logging import Logger
-from typing import Optional
 
 from scitrera_app_framework import get_extension, get_logger
 from scitrera_app_framework.api import Variables
@@ -65,8 +64,8 @@ class DefaultKnowledgebaseService:
     async def generate(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
-        options: Optional[KBGenerateOptions] = None,
+        context_id: str | None = None,
+        options: KBGenerateOptions | None = None,
     ) -> Knowledgebase:
         """Run full KB generation pipeline for a workspace."""
         if options is None:
@@ -220,8 +219,8 @@ class DefaultKnowledgebaseService:
     async def get_knowledgebase(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
-    ) -> Optional[Knowledgebase]:
+        context_id: str | None = None,
+    ) -> Knowledgebase | None:
         """Return KB metadata without regenerating."""
         try:
             index_raw = await self.storage.get_kb_article(workspace_id, "index")
@@ -254,6 +253,7 @@ class DefaultKnowledgebaseService:
             analysis_raw = await self.storage.get_graph_analysis(workspace_id)
             if analysis_raw and "stats" in analysis_raw:
                 from ...models.graph_analysis import GraphStats
+
                 stats = GraphStats(**analysis_raw["stats"])
         except (NotImplementedError, Exception) as e:
             self.logger.debug("Could not load cached graph analysis: %s", e)
@@ -270,7 +270,7 @@ class DefaultKnowledgebaseService:
         self,
         workspace_id: str,
         article_id: str,
-    ) -> Optional[Article]:
+    ) -> Article | None:
         """Retrieve a single article by ID."""
         try:
             raw = await self.storage.get_kb_article(workspace_id, article_id)
@@ -285,7 +285,7 @@ class DefaultKnowledgebaseService:
     async def list_articles(
         self,
         workspace_id: str,
-        article_type: Optional[str] = None,
+        article_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Article]:
@@ -305,7 +305,7 @@ class DefaultKnowledgebaseService:
     async def export_vault(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> bytes:
         """Export all articles as an Obsidian vault zip."""
         try:
@@ -350,10 +350,7 @@ class DefaultKnowledgebaseService:
         community.label = label
 
         # Bridges involving this community
-        community_bridges = [
-            b for b in analysis.bridges
-            if b.source_community_id == community.id or b.target_community_id == community.id
-        ]
+        community_bridges = [b for b in analysis.bridges if b.source_community_id == community.id or b.target_community_id == community.id]
 
         content_md = self.renderer.render_community(
             community=community,
@@ -375,7 +372,7 @@ class DefaultKnowledgebaseService:
         self,
         workspace_id: str,
         memory_id: str,
-        community: Optional[Community],
+        community: Community | None,
     ) -> Article:
         """Generate a markdown article for a god-node entity."""
         # Fetch the central memory
@@ -393,16 +390,18 @@ class DefaultKnowledgebaseService:
         try:
             assocs = await self.storage.get_associations(workspace_id, memory_id, direction="both")
             for assoc in assocs[:20]:
-                connections.append({
-                    "target_id": assoc.target_id if assoc.source_id == memory_id else assoc.source_id,
-                    "relationship": assoc.relationship,
-                    "strength": assoc.strength,
-                })
+                connections.append(
+                    {
+                        "target_id": assoc.target_id if assoc.source_id == memory_id else assoc.source_id,
+                        "relationship": assoc.relationship,
+                        "strength": assoc.strength,
+                    }
+                )
         except Exception as e:
             self.logger.debug("Could not fetch associations for %s: %s", memory_id, e)
 
         # Derive entity insights
-        entity_card: Optional[dict] = None
+        entity_card: dict | None = None
         if self.inference_service:
             try:
                 result = await self.inference_service.derive_insights(
@@ -468,9 +467,7 @@ class DefaultKnowledgebaseService:
             return label, summary
 
         # Build a short content preview for the prompt
-        content_snippets = [
-            m["content"][:150] for m in members[:10] if m.get("content")
-        ]
+        content_snippets = [m["content"][:150] for m in members[:10] if m.get("content")]
         combined = "\n".join(f"- {s}" for s in content_snippets)
 
         if self.reflect_service:

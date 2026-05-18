@@ -7,10 +7,10 @@ upstream LB can route to the least-loaded embed-server replica:
   - Gauge updated on acquire and release
   - ``get_load_snapshot()`` reflects current in-flight count
 """
+
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 
 import pytest
 
@@ -40,8 +40,11 @@ class _StubMetrics:
 
 def _make_provider(stub_metrics: _StubMetrics, *, max_concurrent=2, queue_timeout_sec=0.0) -> ColPaliEmbeddingProvider:
     p = ColPaliEmbeddingProvider(
-        v=None, model_name="test/mock", device="cpu",
-        max_concurrent=max_concurrent, queue_timeout_sec=queue_timeout_sec,
+        v=None,
+        model_name="test/mock",
+        device="cpu",
+        max_concurrent=max_concurrent,
+        queue_timeout_sec=queue_timeout_sec,
     )
     p._get_metrics = lambda: stub_metrics
     p._get_model = lambda: (object(), object())
@@ -60,13 +63,11 @@ async def test_metrics_emit_on_acquire_and_release():
         pass
 
     # Counter: one acquire
-    acquire_counters = [c for c in m.counters if c[0] == "embed_server_colpali_gpu_slot_total"
-                        and c[2] == {"result": "acquired"}]
+    acquire_counters = [c for c in m.counters if c[0] == "embed_server_colpali_gpu_slot_total" and c[2] == {"result": "acquired"}]
     assert len(acquire_counters) == 1
 
     # Histogram: one wait_seconds sample, labelled acquired, value >= 0
-    acquire_hists = [h for h in m.histograms if h[0] == "embed_server_colpali_gpu_slot_wait_seconds"
-                     and h[2] == {"result": "acquired"}]
+    acquire_hists = [h for h in m.histograms if h[0] == "embed_server_colpali_gpu_slot_wait_seconds" and h[2] == {"result": "acquired"}]
     assert len(acquire_hists) == 1 and acquire_hists[0][1] >= 0.0
 
     # Gauges: in_flight = 1 at entry, = 0 at exit
@@ -91,10 +92,8 @@ async def test_metrics_emit_on_queue_timeout():
         async with p._gpu_slot():
             pass
 
-    timeout_counters = [c for c in m.counters if c[0] == "embed_server_colpali_gpu_slot_total"
-                        and c[2] == {"result": "timeout"}]
-    timeout_hists = [h for h in m.histograms if h[0] == "embed_server_colpali_gpu_slot_wait_seconds"
-                     and h[2] == {"result": "timeout"}]
+    timeout_counters = [c for c in m.counters if c[0] == "embed_server_colpali_gpu_slot_total" and c[2] == {"result": "timeout"}]
+    timeout_hists = [h for h in m.histograms if h[0] == "embed_server_colpali_gpu_slot_wait_seconds" and h[2] == {"result": "timeout"}]
     assert len(timeout_counters) == 1
     assert len(timeout_hists) == 1 and timeout_hists[0][1] >= 0.04
 

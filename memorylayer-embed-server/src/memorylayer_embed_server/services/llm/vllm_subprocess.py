@@ -11,13 +11,14 @@ transparently proxy the raw HTTP request via ``httpx`` so tool calls,
 ``response_format``, multimodal (``image_url``) inputs, reasoning
 fields, and any other OpenAI-API extension pass through unchanged.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json as _json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from logging import Logger
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from scitrera_app_framework import Variables, get_logger
 
@@ -30,19 +31,19 @@ class VLLMSubprocessLLMProvider(LLMProvider):
 
     def __init__(
         self,
-        v: Optional[Variables] = None,
+        v: Variables | None = None,
         *,
         profile_name: str,
         model_name: str,
         host: str = "127.0.0.1",
         port: int,
         dtype: str = "auto",
-        max_model_len: Optional[int] = None,
+        max_model_len: int | None = None,
         gpu_memory_utilization: float = 0.25,
         enforce_eager: bool = False,
         tensor_parallel_size: int = 1,
-        aliases: Optional[Sequence[str]] = None,
-        extra_args: Optional[Sequence[str]] = None,
+        aliases: Sequence[str] | None = None,
+        extra_args: Sequence[str] | None = None,
         cmd: str = "vllm",
         startup_timeout_sec: float = 600.0,
         request_timeout_sec: float = 600.0,
@@ -92,9 +93,11 @@ class VLLMSubprocessLLMProvider(LLMProvider):
         self._skip_subprocess: bool = False
 
         self.logger.info(
-            "Initialized VLLMSubprocessLLMProvider: profile=%s, model=%s, port=%d, "
-            "served_names=%s",
-            profile_name, model_name, port, served,
+            "Initialized VLLMSubprocessLLMProvider: profile=%s, model=%s, port=%d, served_names=%s",
+            profile_name,
+            model_name,
+            port,
+            served,
         )
 
     # ------------------------------------------------------------------
@@ -120,6 +123,7 @@ class VLLMSubprocessLLMProvider(LLMProvider):
                 await self._runner.start()
             if self._http is None:
                 import httpx
+
                 self._http = httpx.AsyncClient(
                     base_url=self._runner.base_url,
                     timeout=self.request_timeout_sec,
@@ -226,14 +230,15 @@ class VLLMSubprocessLLMProvider(LLMProvider):
 
 
 # Helper for cleanly building from env config (used by dependencies.py).
-def _shellsplit(s: Optional[str]) -> list[str]:
+def _shellsplit(s: str | None) -> list[str]:
     if not s:
         return []
     import shlex
+
     return shlex.split(s)
 
 
-def _csv_split(s: Optional[str]) -> list[str]:
+def _csv_split(s: str | None) -> list[str]:
     if not s:
         return []
     return [piece.strip() for piece in s.split(",") if piece.strip()]
@@ -262,9 +267,7 @@ def build_provider_from_env(
 
     model_name = _env("MODEL", default=None)
     if not model_name:
-        raise RuntimeError(
-            f"Missing required env var {prefix}MODEL for LLM profile {profile_name!r}"
-        )
+        raise RuntimeError(f"Missing required env var {prefix}MODEL for LLM profile {profile_name!r}")
 
     aliases = _csv_split(_env("ALIASES", default=""))
     dtype = _env("DTYPE", default="auto")

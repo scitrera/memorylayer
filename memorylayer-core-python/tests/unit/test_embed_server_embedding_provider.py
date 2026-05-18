@@ -5,6 +5,7 @@ EmbedServerClient. These tests stub the client surface and assert
 that each public provider method routes to the right client method
 with the expected payload shape.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -69,17 +70,13 @@ async def test_embed_batch_empty_short_circuits(stub_client):
 
 
 async def test_embed_text_multivector_routes_with_query_input_type(stub_client):
-    stub_client.embed_texts_multivector.return_value = [
-        {"vectors": [[0.1, 0.1], [0.2, 0.2]], "num_vectors": 2}
-    ]
+    stub_client.embed_texts_multivector.return_value = [{"vectors": [[0.1, 0.1], [0.2, 0.2]], "num_vectors": 2}]
     provider = _provider_with_client(stub_client)
 
     mv = await provider.embed_text_multivector("query text")
 
     assert mv.vectors == [[0.1, 0.1], [0.2, 0.2]]
-    stub_client.embed_texts_multivector.assert_awaited_once_with(
-        ["query text"], input_type="query"
-    )
+    stub_client.embed_texts_multivector.assert_awaited_once_with(["query text"], input_type="query")
 
 
 async def test_embed_batch_multivector_routes_with_document_input_type(stub_client):
@@ -92,9 +89,7 @@ async def test_embed_batch_multivector_routes_with_document_input_type(stub_clie
     out = await provider.embed_batch_multivector(["doc1", "doc2"])
 
     assert len(out) == 2
-    stub_client.embed_texts_multivector.assert_awaited_once_with(
-        ["doc1", "doc2"], input_type="document"
-    )
+    stub_client.embed_texts_multivector.assert_awaited_once_with(["doc1", "doc2"], input_type="document")
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +98,7 @@ async def test_embed_batch_multivector_routes_with_document_input_type(stub_clie
 
 
 async def test_embed_image_multivector_sends_base64(stub_client):
-    stub_client.embed_images_multivector.return_value = [
-        {"vectors": [[0.1, 0.2, 0.3, 0.4]], "num_vectors": 1}
-    ]
+    stub_client.embed_images_multivector.return_value = [{"vectors": [[0.1, 0.2, 0.3, 0.4]], "num_vectors": 1}]
     provider = _provider_with_client(stub_client)
 
     raw_bytes = b"\x89PNG\r\n\x1a\nfake-image-bytes"
@@ -127,9 +120,7 @@ async def test_embed_image_multivector_sends_base64(stub_client):
 
 
 async def test_embed_image_returns_average(stub_client):
-    stub_client.embed_images_multivector.return_value = [
-        {"vectors": [[1.0, 0.0], [0.0, 1.0]], "num_vectors": 2}
-    ]
+    stub_client.embed_images_multivector.return_value = [{"vectors": [[1.0, 0.0], [0.0, 1.0]], "num_vectors": 2}]
     provider = _provider_with_client(stub_client)
 
     avg = await provider.embed_image(b"png-bytes")

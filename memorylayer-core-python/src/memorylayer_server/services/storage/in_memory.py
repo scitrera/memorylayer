@@ -13,9 +13,9 @@ from scitrera_app_framework import Variables
 
 from ...config import DEFAULT_CONTEXT_ID, DEFAULT_TENANT_ID
 from ...models.association import AssociateInput, Association, GraphPath, GraphQueryResult
+from ...models.mcp_server import McpServer
 from ...models.memory import Memory, MemoryType, RememberInput
 from ...models.session import Session, WorkingMemory
-from ...models.mcp_server import McpServer
 from ...models.skill import Skill, SkillFile
 from ...models.workspace import Context, Workspace
 from ...utils import compute_content_hash, cosine_similarity, generate_id, utc_now_iso

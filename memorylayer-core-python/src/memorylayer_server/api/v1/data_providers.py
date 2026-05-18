@@ -12,7 +12,7 @@ Endpoints:
 
 import logging
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -34,23 +34,23 @@ router = APIRouter(prefix="/v1/data-providers", tags=["data-providers"])
 
 
 class DataProviderCreateRequest(BaseModel):
-    workspace_id: Optional[str] = Field(None, description="Workspace ID (overrides auth context)")
+    workspace_id: str | None = Field(None, description="Workspace ID (overrides auth context)")
     name: str = Field(..., description="Provider name")
     provider_type: str = Field("local", description="Provider type")
-    description: Optional[str] = None
+    description: str | None = None
     enabled: bool = True
     connection_args: dict[str, Any] = Field(default_factory=dict)
-    schedule: Optional[str] = None
+    schedule: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DataProviderUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    enabled: Optional[bool] = None
-    connection_args: Optional[dict[str, Any]] = None
-    schedule: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    name: str | None = None
+    description: str | None = None
+    enabled: bool | None = None
+    connection_args: dict[str, Any] | None = None
+    schedule: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class DataProviderResponse(BaseModel):
@@ -140,7 +140,7 @@ async def create_data_provider(
 )
 async def list_data_providers(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     auth_service: AuthenticationService = Depends(get_auth_service),
@@ -179,7 +179,7 @@ async def list_data_providers(
 async def get_data_provider(
     http_request: Request,
     provider_id: str,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     dp_service: DataProviderService = Depends(get_data_provider_service),
@@ -222,7 +222,7 @@ async def update_data_provider(
     http_request: Request,
     provider_id: str,
     request: DataProviderUpdateRequest,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     dp_service: DataProviderService = Depends(get_data_provider_service),
@@ -267,7 +267,7 @@ async def update_data_provider(
 async def delete_data_provider(
     http_request: Request,
     provider_id: str,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     dp_service: DataProviderService = Depends(get_data_provider_service),
@@ -308,7 +308,7 @@ async def delete_data_provider(
 async def sync_data_provider(
     http_request: Request,
     provider_id: str,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     dp_service: DataProviderService = Depends(get_data_provider_service),

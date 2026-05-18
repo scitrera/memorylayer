@@ -1,7 +1,6 @@
 """Obsidian-compatible markdown renderer for knowledgebase articles."""
 
 import re
-from typing import Optional
 
 from ...models.graph_analysis import Bridge, CentralNode, Community, GraphStats
 
@@ -20,10 +19,10 @@ class ObsidianRenderer:
     def render_index(
         self,
         workspace_name: str,
-        stats: Optional[GraphStats],
+        stats: GraphStats | None,
         communities: list[Community],
         god_nodes: list[CentralNode],
-        node_titles: Optional[dict[str, str]] = None,
+        node_titles: dict[str, str] | None = None,
     ) -> str:
         """Render the workspace index article.
 
@@ -49,8 +48,8 @@ class ObsidianRenderer:
         if stats:
             lines.append("## Graph Overview")
             lines.append("")
-            lines.append(f"| Metric | Value |")
-            lines.append(f"|--------|-------|")
+            lines.append("| Metric | Value |")
+            lines.append("|--------|-------|")
             lines.append(f"| Memories (nodes) | {stats.node_count} |")
             lines.append(f"| Associations (edges) | {stats.edge_count} |")
             lines.append(f"| Communities | {stats.community_count} |")
@@ -91,7 +90,7 @@ class ObsidianRenderer:
         summary: str,
         members: list[dict],
         bridges: list[Bridge],
-        source_docs: Optional[list[str]] = None,
+        source_docs: list[str] | None = None,
     ) -> str:
         """Render a community article.
 
@@ -136,11 +135,7 @@ class ObsidianRenderer:
             lines.append("")
             seen_communities: set[int] = set()
             for bridge in bridges:
-                other_id = (
-                    bridge.target_community_id
-                    if bridge.source_community_id == community.id
-                    else bridge.source_community_id
-                )
+                other_id = bridge.target_community_id if bridge.source_community_id == community.id else bridge.source_community_id
                 if other_id not in seen_communities:
                     seen_communities.add(other_id)
                     other_slug = f"community-{other_id}"
@@ -162,9 +157,9 @@ class ObsidianRenderer:
         self,
         entity_id: str,
         title: str,
-        entity_card: Optional[dict],
+        entity_card: dict | None,
         connections: list[dict],
-        community: Optional[Community],
+        community: Community | None,
         source_memories: list[dict],
     ) -> str:
         """Render an entity deep-dive article.
@@ -256,7 +251,7 @@ class ObsidianRenderer:
         slug = slug.strip("-")
         return slug or "unknown"
 
-    def wikilink(self, target: str, display: Optional[str] = None) -> str:
+    def wikilink(self, target: str, display: str | None = None) -> str:
         """Format an Obsidian wikilink.
 
         Args:

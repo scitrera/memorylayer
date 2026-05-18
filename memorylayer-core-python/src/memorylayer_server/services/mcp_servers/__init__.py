@@ -5,7 +5,6 @@ from scitrera_app_framework import Variables, get_extension
 from .._constants import EXT_STORAGE_BACKEND
 from .._plugin_factory import make_service_plugin_base
 from .base import McpServerService
-from .resolution import McpServerResolutionService, RequestContext
 
 EXT_MCP_SERVERS_SERVICE = "memorylayer-mcp-servers-service"
 MEMORYLAYER_MCP_SERVERS_PROVIDER = "MEMORYLAYER_MCP_SERVERS_PROVIDER"

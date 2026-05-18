@@ -8,7 +8,6 @@ library disables the parser rather than crashing at import time.
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -98,7 +97,7 @@ class ContentChunk(BaseModel):
     """A parsed chunk of content from a document."""
 
     text: str
-    page_number: Optional[int] = None
+    page_number: int | None = None
     metadata: dict = {}
 
 
@@ -263,8 +262,7 @@ class PDFParser(ContentParser):
     ) -> list[ContentChunk]:
         if pymupdf is None:
             logger.warning(
-                "pymupdf not installed — cannot parse PDF '%s'. "
-                "Install pymupdf to enable PDF support.",
+                "pymupdf not installed — cannot parse PDF '%s'. Install pymupdf to enable PDF support.",
                 filename,
             )
             return [
@@ -356,8 +354,7 @@ class DocxParser(ContentParser):
 
         if not text:
             logger.warning(
-                "No DOCX parser available for '%s'. "
-                "Install python-docx or mammoth to enable DOCX support.",
+                "No DOCX parser available for '%s'. Install python-docx or mammoth to enable DOCX support.",
                 filename,
             )
             return [
@@ -383,8 +380,7 @@ class PptxParser(ContentParser):
     ) -> list[ContentChunk]:
         if PptxPresentation is None:
             logger.warning(
-                "python-pptx not installed — cannot parse PPTX '%s'. "
-                "Install python-pptx to enable PPTX support.",
+                "python-pptx not installed — cannot parse PPTX '%s'. Install python-pptx to enable PPTX support.",
                 filename,
             )
             return [
@@ -503,7 +499,7 @@ for _ext in _EXTENSION_LANGUAGE_MAP:
         _EXTENSION_TO_TYPE[_ext] = DocumentType.CODE
 
 
-def detect_document_type(filename: str, mime_type: Optional[str] = None) -> DocumentType:
+def detect_document_type(filename: str, mime_type: str | None = None) -> DocumentType:
     """Detect document type from filename extension or MIME type.
 
     MIME type takes priority over extension when both are available.

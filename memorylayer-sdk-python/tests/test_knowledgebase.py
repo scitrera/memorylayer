@@ -182,6 +182,7 @@ async def test_kb_generate(async_client: MemoryLayerClient) -> None:
     assert route.called
     body = route.calls[0].request.read()
     import json
+
     payload = json.loads(body)
     assert payload["regenerate"] is True
     assert payload["max_communities"] == 10
@@ -221,7 +222,9 @@ async def test_kb_export_vault_returns_bytes(async_client: MemoryLayerClient) ->
     zip_bytes = b"PK\x03\x04...fake-zip..."
     respx.get(f"{BASE_URL}/v1/knowledgebase/export").mock(
         return_value=Response(
-            200, content=zip_bytes, headers={"content-type": "application/zip"},
+            200,
+            content=zip_bytes,
+            headers={"content-type": "application/zip"},
         ),
     )
     async with async_client:
@@ -233,14 +236,17 @@ async def test_kb_export_vault_returns_bytes(async_client: MemoryLayerClient) ->
 @respx.mock
 async def test_kb_get_community(async_client: MemoryLayerClient) -> None:
     route = respx.get(f"{BASE_URL}/v1/knowledgebase/graph/communities/3").mock(
-        return_value=Response(200, json={
-            "id": 3,
-            "memory_ids": ["m1"],
-            "size": 1,
-            "cohesion_score": 0.0,
-            "central_node_ids": [],
-            "label": "Some topic",
-        }),
+        return_value=Response(
+            200,
+            json={
+                "id": 3,
+                "memory_ids": ["m1"],
+                "size": 1,
+                "cohesion_score": 0.0,
+                "central_node_ids": [],
+                "label": "Some topic",
+            },
+        ),
     )
     async with async_client:
         community = await async_client.kb.get_community(3)

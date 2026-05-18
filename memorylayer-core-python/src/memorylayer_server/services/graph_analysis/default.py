@@ -2,7 +2,6 @@
 
 import logging
 import statistics
-from typing import Optional
 
 import networkx as nx
 from networkx.algorithms import community as nx_community
@@ -47,7 +46,7 @@ class NetworkXGraphAnalysisService(GraphAnalysisService):
     async def _build_graph(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
         include_rpg: bool = False,
     ) -> nx.Graph:
         """Build a NetworkX undirected graph from workspace associations.
@@ -131,7 +130,7 @@ class NetworkXGraphAnalysisService(GraphAnalysisService):
     async def build_workspace_graph(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
         include_rpg: bool = False,
     ) -> GraphSnapshot:
         g = await self._build_graph(workspace_id, context_id=context_id, include_rpg=include_rpg)
@@ -146,7 +145,7 @@ class NetworkXGraphAnalysisService(GraphAnalysisService):
     async def detect_communities(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> list[Community]:
         g = await self._build_graph(workspace_id, context_id=context_id)
         if g.number_of_nodes() == 0:
@@ -183,15 +182,13 @@ class NetworkXGraphAnalysisService(GraphAnalysisService):
                 )
             )
 
-        self.logger.debug(
-            "Detected %d communities in workspace %s", len(result), workspace_id
-        )
+        self.logger.debug("Detected %d communities in workspace %s", len(result), workspace_id)
         return result
 
     async def compute_centrality(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> list[CentralNode]:
         g = await self._build_graph(workspace_id, context_id=context_id)
         if g.number_of_nodes() == 0:
@@ -245,7 +242,7 @@ class NetworkXGraphAnalysisService(GraphAnalysisService):
     async def get_bridges(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> list[Bridge]:
         g = await self._build_graph(workspace_id, context_id=context_id)
         if g.number_of_edges() == 0:
@@ -283,15 +280,13 @@ class NetworkXGraphAnalysisService(GraphAnalysisService):
 
         # Sort by strength descending
         bridges.sort(key=lambda b: b.strength, reverse=True)
-        self.logger.debug(
-            "Found %d bridges in workspace %s", len(bridges), workspace_id
-        )
+        self.logger.debug("Found %d bridges in workspace %s", len(bridges), workspace_id)
         return bridges
 
     async def get_statistics(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> GraphStats:
         g = await self._build_graph(workspace_id, context_id=context_id)
 
@@ -336,7 +331,7 @@ class NetworkXGraphAnalysisService(GraphAnalysisService):
     async def analyze(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
         include_rpg: bool = False,
     ) -> GraphAnalysis:
         """Run complete graph analysis and return a bundled GraphAnalysis."""

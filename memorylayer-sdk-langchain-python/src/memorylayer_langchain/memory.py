@@ -6,9 +6,8 @@ from typing import Any
 import httpx
 from langchain_classic.base_memory import BaseMemory
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import ConfigDict
-
 from memorylayer import SyncMemoryLayerClient
+from pydantic import ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +136,7 @@ class MemoryLayerMemory(BaseMemory):
         """Get the current message count for this session."""
         try:
             from memorylayer import RecallMode, SearchTolerance
+
             result = self._client.recall(
                 query=f"conversation history for session {self.session_id}",
                 tags=[f"session:{self.session_id}", "conversation_memory"],
@@ -153,6 +153,7 @@ class MemoryLayerMemory(BaseMemory):
         """Retrieve all memories for this session, ordered by index."""
         try:
             from memorylayer import RecallMode, SearchTolerance
+
             result = self._client.recall(
                 query=f"conversation history for session {self.session_id}",
                 tags=[f"session:{self.session_id}", "conversation_memory"],
@@ -239,9 +240,7 @@ class MemoryLayerMemory(BaseMemory):
 
             return {self.memory_key: buffer_string.strip()}
 
-    def save_context(
-        self, inputs: dict[str, Any], outputs: dict[str, str]
-    ) -> None:
+    def save_context(self, inputs: dict[str, Any], outputs: dict[str, str]) -> None:
         """
         Save the context of a conversation turn to memory.
 
@@ -314,6 +313,7 @@ class MemoryLayerMemory(BaseMemory):
 
         try:
             from memorylayer import MemoryType
+
             self._client.remember(
                 content=content,
                 type=MemoryType.EPISODIC,
@@ -476,6 +476,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
         """Get the current message count for this session."""
         try:
             from memorylayer import RecallMode, SearchTolerance
+
             result = self._client.recall(
                 query=f"conversation history for session {self.session_id}",
                 tags=[f"session:{self.session_id}", "conversation_memory"],
@@ -552,9 +553,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
             # Return as formatted string
             return {self.memory_key: summary}
 
-    def save_context(
-        self, inputs: dict[str, Any], outputs: dict[str, str]
-    ) -> None:
+    def save_context(self, inputs: dict[str, Any], outputs: dict[str, str]) -> None:
         """
         Save the context of a conversation turn to memory.
 
@@ -627,6 +626,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
 
         try:
             from memorylayer import MemoryType
+
             self._client.remember(
                 content=content,
                 type=MemoryType.EPISODIC,
@@ -646,6 +646,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
         """Retrieve all memories for this session, ordered by index."""
         try:
             from memorylayer import RecallMode, SearchTolerance
+
             result = self._client.recall(
                 query=f"conversation history for session {self.session_id}",
                 tags=[f"session:{self.session_id}", "conversation_memory"],

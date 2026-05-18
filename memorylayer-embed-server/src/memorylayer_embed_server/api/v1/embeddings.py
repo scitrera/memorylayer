@@ -7,11 +7,14 @@ from scitrera_app_framework import Plugin, Variables
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
 from ...models.embedding import (
-    EmbeddingRequest, EmbeddingResponse, EmbeddingData, EmbeddingUsage,
+    EmbeddingData,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    EmbeddingUsage,
 )
 from .. import EXT_MULTI_API_ROUTERS
 
-router = APIRouter(prefix="/v1", tags=['embeddings'])
+router = APIRouter(prefix="/v1", tags=["embeddings"])
 
 
 @router.post("/embeddings", response_model=EmbeddingResponse)
@@ -26,7 +29,7 @@ async def create_embeddings(
     Accepts text input (string or list of strings) and returns
     embeddings in OpenAI API format.
     """
-    dual_service = v.get('dual_embedding_service', default=None)
+    dual_service = v.get("dual_embedding_service", default=None)
     if dual_service is None or not dual_service.has_single_vector:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

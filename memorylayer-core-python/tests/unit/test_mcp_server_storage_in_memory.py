@@ -5,7 +5,6 @@ Tests MCP server CRUD operations against MemoryStorageBackend directly,
 without requiring the full service stack.
 """
 
-from datetime import UTC, datetime
 
 import pytest
 

@@ -5,6 +5,7 @@ input_type=``query``, documents with input_type=``document``, and the
 score endpoint is invoked with both. Raw MaxSim scores are sigmoid-normalised
 before being returned.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock

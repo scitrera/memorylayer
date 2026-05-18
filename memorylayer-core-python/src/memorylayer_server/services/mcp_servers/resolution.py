@@ -9,9 +9,10 @@ Scope encoding:
   USER    (2): user_id set + workspace_id == "_global_user"     (cross-project private)
   GLOBAL  (3): user_id None + workspace_id == "_global"         (tenant/plugin)
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ...models.mcp_server import McpServer
@@ -27,7 +28,7 @@ _MODE_RANK: dict[str, int] = {
 }
 
 
-def _scope_rank(server: "McpServer", ctx_workspace_id: str, ctx_user_id: Optional[str]) -> int:
+def _scope_rank(server: McpServer, ctx_workspace_id: str, ctx_user_id: str | None) -> int:
     """Return the 4-tier scope rank for an MCP server record given the request context."""
     if server.user_id and server.user_id == ctx_user_id:
         if server.workspace_id == ctx_workspace_id:
@@ -43,7 +44,7 @@ def _scope_rank(server: "McpServer", ctx_workspace_id: str, ctx_user_id: Optiona
     return 99
 
 
-def _mode_rank(server: "McpServer") -> int:
+def _mode_rank(server: McpServer) -> int:
     return _MODE_RANK.get(server.source_mode, 99)
 
 
@@ -55,7 +56,7 @@ class RequestContext:
     def __init__(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         tenant_id: str = "_default",
     ) -> None:
         self.workspace_id = workspace_id
@@ -73,7 +74,7 @@ class McpServerResolutionService:
     RBAC-filtered visibility without changing resolution logic.
     """
 
-    def __init__(self, storage: "StorageBackend") -> None:
+    def __init__(self, storage: StorageBackend) -> None:
         self._storage = storage
 
     def visible_scopes_for(self, ctx: RequestContext) -> list[dict]:
@@ -94,7 +95,7 @@ class McpServerResolutionService:
         scopes.append({"workspace_id": _GLOBAL_WORKSPACE_ID})
         return scopes
 
-    async def resolve(self, name: str, ctx: RequestContext) -> "Optional[McpServer]":
+    async def resolve(self, name: str, ctx: RequestContext) -> McpServer | None:
         """Return the precedence-winning MCP server for the given name + context."""
         scopes = self.visible_scopes_for(ctx)
         candidates = await self._storage.find_mcp_servers_by_name(name, scopes)
@@ -104,14 +105,14 @@ class McpServerResolutionService:
 
     def apply_shadowing(
         self,
-        servers: "list[McpServer]",
+        servers: list[McpServer],
         ctx: RequestContext,
-    ) -> "list[McpServer]":
+    ) -> list[McpServer]:
         """Given a list of servers, return only the precedence winner per name.
 
         Used by GET /v1/mcp-servers when ``include_shadowed=false`` (default).
         """
-        by_name: dict[str, list["McpServer"]] = {}
+        by_name: dict[str, list[McpServer]] = {}
         for s in servers:
             by_name.setdefault(s.name, []).append(s)
 
@@ -126,9 +127,9 @@ class McpServerResolutionService:
 
     def _rank(
         self,
-        candidates: "list[McpServer]",
+        candidates: list[McpServer],
         ctx: RequestContext,
-    ) -> "list[McpServer]":
+    ) -> list[McpServer]:
         """Sort candidates by (scope_rank, mode_rank, -updated_at) ascending."""
         return sorted(
             candidates,

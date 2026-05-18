@@ -1,4 +1,5 @@
 """Unit tests for MCP server encryption passthrough and masking."""
+
 from __future__ import annotations
 
 import pytest
@@ -11,11 +12,12 @@ from memorylayer_server.services.mcp_servers.encryption import (
     register_encrypter,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_encrypter():
     """Return a simple reversible encrypter pair for testing."""
+
     def encrypt(data: dict) -> dict:
         return {k: f"enc:{v}" for k, v in data.items()}
 
@@ -28,7 +30,7 @@ def _make_encrypter():
 class MockStorage:
     def __init__(self):
         self._servers: dict[str, McpServer] = {}
-        self.stored_env: dict[str, dict] = {}   # raw as stored
+        self.stored_env: dict[str, dict] = {}  # raw as stored
 
     async def create_mcp_server(self, server: McpServer) -> McpServer:
         self._servers[server.id] = server
@@ -45,8 +47,7 @@ class MockStorage:
                 return s
         return None
 
-    async def list_mcp_servers(self, workspace_id, user_id=None, name=None,
-                                transport=None, enabled=None, limit=100, offset=0):
+    async def list_mcp_servers(self, workspace_id, user_id=None, name=None, transport=None, enabled=None, limit=100, offset=0):
         return [s for s in self._servers.values() if s.workspace_id == workspace_id]
 
     async def update_mcp_server(self, workspace_id, server_id, updates):
@@ -72,11 +73,13 @@ class MockStorage:
 
 # ── Tests: passthrough (no encrypter registered) ──────────────────────────────
 
+
 class TestEncryptionPassthrough:
     def setup_method(self):
         # Reset module-level state to passthrough
         register_encrypter.__module__
         import memorylayer_server.services.mcp_servers.encryption as enc_mod
+
         enc_mod._encrypt_fn = None
         enc_mod._decrypt_fn = None
 
@@ -103,15 +106,18 @@ class TestEncryptionPassthrough:
 
 # ── Tests: with encrypter registered ─────────────────────────────────────────
 
+
 class TestEncryptionRegistered:
     def setup_method(self):
         import memorylayer_server.services.mcp_servers.encryption as enc_mod
+
         enc, dec = _make_encrypter()
         enc_mod._encrypt_fn = enc
         enc_mod._decrypt_fn = dec
 
     def teardown_method(self):
         import memorylayer_server.services.mcp_servers.encryption as enc_mod
+
         enc_mod._encrypt_fn = None
         enc_mod._decrypt_fn = None
 
@@ -136,9 +142,11 @@ class TestEncryptionRegistered:
 
 # ── Tests: service encrypt/decrypt round-trip ─────────────────────────────────
 
+
 class TestServiceEncryptionRoundTrip:
     def setup_method(self):
         import memorylayer_server.services.mcp_servers.encryption as enc_mod
+
         enc, dec = _make_encrypter()
         enc_mod._encrypt_fn = enc
         enc_mod._decrypt_fn = dec
@@ -147,6 +155,7 @@ class TestServiceEncryptionRoundTrip:
 
     def teardown_method(self):
         import memorylayer_server.services.mcp_servers.encryption as enc_mod
+
         enc_mod._encrypt_fn = None
         enc_mod._decrypt_fn = None
 
@@ -205,9 +214,11 @@ class TestServiceEncryptionRoundTrip:
 
 # ── Tests: _mask_secrets ${VAR} preservation ──────────────────────────────────
 
+
 class TestMaskSecretsVarPreservation:
     def test_var_placeholder_preserved(self):
         from memorylayer_server.api.v1.mcp_servers import _mask_secrets
+
         server = McpServer(
             id="mcp_abc123def456",
             workspace_id="ws1",
@@ -222,6 +233,7 @@ class TestMaskSecretsVarPreservation:
 
     def test_reveal_returns_plaintext(self):
         from memorylayer_server.api.v1.mcp_servers import _mask_secrets
+
         server = McpServer(
             id="mcp_abc123def456",
             workspace_id="ws1",
@@ -235,6 +247,7 @@ class TestMaskSecretsVarPreservation:
 
     def test_headers_var_placeholder_preserved(self):
         from memorylayer_server.api.v1.mcp_servers import _mask_secrets
+
         server = McpServer(
             id="mcp_abc123def456",
             workspace_id="ws1",
@@ -249,6 +262,7 @@ class TestMaskSecretsVarPreservation:
 
     def test_empty_env_returns_empty(self):
         from memorylayer_server.api.v1.mcp_servers import _mask_secrets
+
         server = McpServer(
             id="mcp_abc123def456",
             workspace_id="ws1",

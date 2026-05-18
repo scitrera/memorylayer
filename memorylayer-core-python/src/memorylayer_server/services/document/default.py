@@ -13,7 +13,6 @@ Pipeline:
 import hashlib
 import logging
 from datetime import UTC, datetime
-from typing import Optional
 
 from scitrera_app_framework import Variables, get_extension, get_logger
 
@@ -73,16 +72,14 @@ class DefaultDocumentService(DocumentService):
         workspace_id: str,
         file_data: bytes,
         filename: str,
-        document_type: Optional[str] = None,
-        extraction_options: Optional[dict] = None,
-        metadata: Optional[dict] = None,
+        document_type: str | None = None,
+        extraction_options: dict | None = None,
+        metadata: dict | None = None,
     ) -> tuple[Document, IngestionJob]:
         # 1. Validate file size
         max_size = self._max_file_size
         if len(file_data) > max_size:
-            raise ValueError(
-                "File size %d bytes exceeds maximum allowed size of %d bytes" % (len(file_data), max_size)
-            )
+            raise ValueError("File size %d bytes exceeds maximum allowed size of %d bytes" % (len(file_data), max_size))
 
         # 2. Detect document type
         if document_type:
@@ -194,24 +191,20 @@ class DefaultDocumentService(DocumentService):
                 workspace_id,
             )
         except Exception as e:
-            self.logger.error(
-                "Failed to schedule processing task for document %s: %s", doc_id, e
-            )
-            await self.storage.update_document(
-                workspace_id, doc_id, status=DocumentStatus.FAILED, error_message=str(e)
-            )
+            self.logger.error("Failed to schedule processing task for document %s: %s", doc_id, e)
+            await self.storage.update_document(workspace_id, doc_id, status=DocumentStatus.FAILED, error_message=str(e))
             await self.storage.update_job(job_id, status=JobStatus.FAILED)
 
         return doc, job
 
-    async def get_document(self, workspace_id: str, doc_id: str) -> Optional[Document]:
+    async def get_document(self, workspace_id: str, doc_id: str) -> Document | None:
         return await self.storage.get_document(workspace_id, doc_id)
 
     async def list_documents(
         self,
         workspace_id: str,
-        status: Optional[str] = None,
-        document_type: Optional[str] = None,
+        status: str | None = None,
+        document_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Document], int]:
@@ -227,7 +220,7 @@ class DefaultDocumentService(DocumentService):
         self,
         workspace_id: str,
         doc_id: str,
-        extraction_options: Optional[dict] = None,
+        extraction_options: dict | None = None,
     ) -> tuple[Document, IngestionJob]:
         doc = await self.storage.get_document(workspace_id, doc_id)
         if not doc:
@@ -284,9 +277,7 @@ class DefaultDocumentService(DocumentService):
             self.logger.info("Scheduled reprocess task for document %s", doc_id)
         except Exception as e:
             self.logger.error("Failed to schedule reprocess task for document %s: %s", doc_id, e)
-            await self.storage.update_document(
-                workspace_id, doc_id, status=DocumentStatus.FAILED, error_message=str(e)
-            )
+            await self.storage.update_document(workspace_id, doc_id, status=DocumentStatus.FAILED, error_message=str(e))
             await self.storage.update_job(job_id, status=JobStatus.FAILED)
 
         return doc, job
@@ -297,17 +288,13 @@ class DefaultDocumentService(DocumentService):
         doc_id: str,
         delete_memories: bool = False,
     ) -> bool:
-        return await self.storage.delete_document(
-            workspace_id, doc_id, delete_memories=delete_memories
-        )
+        return await self.storage.delete_document(workspace_id, doc_id, delete_memories=delete_memories)
 
-    async def get_document_status(
-        self, workspace_id: str, doc_id: str
-    ) -> Optional[DocumentStatus]:
+    async def get_document_status(self, workspace_id: str, doc_id: str) -> DocumentStatus | None:
         doc = await self.storage.get_document(workspace_id, doc_id)
         return doc.status if doc else None
 
-    async def get_job(self, workspace_id: str, job_id: str) -> Optional[IngestionJob]:
+    async def get_job(self, workspace_id: str, job_id: str) -> IngestionJob | None:
         job = await self.storage.get_job(job_id, workspace_id=workspace_id)
         if job and job.workspace_id != workspace_id:
             return None
@@ -316,7 +303,7 @@ class DefaultDocumentService(DocumentService):
     async def list_jobs(
         self,
         workspace_id: str,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[IngestionJob]:
@@ -327,22 +314,16 @@ class DefaultDocumentService(DocumentService):
             offset=offset,
         )
 
-    async def cancel_job(
-        self, workspace_id: str, job_id: str
-    ) -> Optional[IngestionJob]:
+    async def cancel_job(self, workspace_id: str, job_id: str) -> IngestionJob | None:
         job = await self.get_job(workspace_id, job_id)
         if not job:
             return None
 
         if job.status not in (JobStatus.QUEUED, JobStatus.RUNNING):
-            self.logger.debug(
-                "Job %s is in terminal state %s, cannot cancel", job_id, job.status
-            )
+            self.logger.debug("Job %s is in terminal state %s, cannot cancel", job_id, job.status)
             return job
 
-        updated = await self.storage.update_job(
-            job_id, status=JobStatus.CANCELLED, completed_at=datetime.now(UTC)
-        )
+        updated = await self.storage.update_job(job_id, status=JobStatus.CANCELLED, completed_at=datetime.now(UTC))
 
         # Best-effort task cancellation (asyncio backend may not support it)
         try:
@@ -389,7 +370,6 @@ class DocumentProcessTaskHandler(TaskHandlerPlugin):
         return None  # On-demand only
 
     async def handle(self, v: Variables, payload: dict) -> None:
-        import base64
 
         logger: logging.Logger = get_logger(v, name=DOCUMENT_PROCESS_TASK)
 
@@ -424,9 +404,7 @@ class DocumentProcessTaskHandler(TaskHandlerPlugin):
 
         # Mark as running
         now = datetime.now(UTC)
-        await storage.update_document(
-            workspace_id, document_id, status=DocumentStatus.PROCESSING, processing_started_at=now
-        )
+        await storage.update_document(workspace_id, document_id, status=DocumentStatus.PROCESSING, processing_started_at=now)
         await storage.update_job(job_id, status=JobStatus.RUNNING, started_at=now)
 
         try:
@@ -478,9 +456,7 @@ class DocumentProcessTaskHandler(TaskHandlerPlugin):
             if raw_b64:
                 file_data = base64.b64decode(raw_b64)
             else:
-                logger.warning(
-                    "No file data available for document %s, cannot process", document_id
-                )
+                logger.warning("No file data available for document %s, cannot process", document_id)
                 await storage.update_document(
                     workspace_id,
                     document_id,

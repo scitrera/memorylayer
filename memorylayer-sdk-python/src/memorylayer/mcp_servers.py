@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,7 +45,7 @@ class McpServerModel(BaseModel):
 class McpServersAPI:
     """MCP servers namespace — access via client.mcp_servers.<method>."""
 
-    def __init__(self, client: "MemoryLayerClient") -> None:
+    def __init__(self, client: MemoryLayerClient) -> None:
         self._client = client
 
     def _ws(self, workspace_id: str | None) -> str | None:
@@ -64,7 +64,7 @@ class McpServersAPI:
         limit: int = 100,
         offset: int = 0,
         workspace_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> list[McpServerModel]:
         """List MCP servers with optional filters."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -83,7 +83,7 @@ class McpServersAPI:
         data = await self._client._request("GET", "/mcp-servers", params=params, authority=authority)
         return [McpServerModel(**s) for s in data.get("mcp_servers", [])]
 
-    async def get(self, server_id: str, authority: "AuthorityContext | None" = None) -> McpServerModel:
+    async def get(self, server_id: str, authority: AuthorityContext | None = None) -> McpServerModel:
         """Get an MCP server by ID."""
         data = await self._client._request("GET", f"/mcp-servers/{server_id}", authority=authority)
         return McpServerModel(**data["mcp_server"])
@@ -93,7 +93,7 @@ class McpServersAPI:
         name: str,
         user_id: str | None = None,
         workspace_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> McpServerModel | None:
         """Get an MCP server by name; returns None if not found."""
         params: dict[str, Any] = {"name": name}
@@ -124,7 +124,7 @@ class McpServersAPI:
         enabled: bool = True,
         workspace_id: str | None = None,
         user_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> McpServerModel:
         """Create a new MCP server record."""
         payload: dict[str, Any] = {
@@ -168,7 +168,7 @@ class McpServersAPI:
         metadata: dict[str, Any] | None = None,
         source_mode: str | None = None,
         enabled: bool | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> McpServerModel:
         """Partially update an MCP server record."""
         payload: dict[str, Any] = {}
@@ -194,7 +194,7 @@ class McpServersAPI:
         data = await self._client._request("PUT", f"/mcp-servers/{server_id}", json=payload, authority=authority)
         return McpServerModel(**data["mcp_server"])
 
-    async def delete(self, server_id: str, authority: "AuthorityContext | None" = None) -> None:
+    async def delete(self, server_id: str, authority: AuthorityContext | None = None) -> None:
         """Delete an MCP server record."""
         await self._client._request("DELETE", f"/mcp-servers/{server_id}", authority=authority)
 
@@ -202,7 +202,7 @@ class McpServersAPI:
         self,
         name: str,
         workspace_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> McpServerModel | None:
         """Resolve an MCP server by name using 4-tier precedence; returns None if not found."""
         payload: dict[str, Any] = {"name": name}
@@ -227,7 +227,7 @@ class McpServersAPI:
         source_mode: str = "server",
         workspace_id: str | None = None,
         user_id: str | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> list[McpServerModel]:
         """Push a .mcp.json file to MemoryLayer, creating/updating one record per server entry."""
         json_path = Path(json_path)
@@ -264,7 +264,7 @@ class McpServersAPI:
         user_id: str | None = None,
         transport: str | None = None,
         enabled: bool | None = None,
-        authority: "AuthorityContext | None" = None,
+        authority: AuthorityContext | None = None,
     ) -> Path:
         """Materialize MCP servers to a .mcp.json file at out_path."""
         servers = await self.list(
@@ -303,7 +303,7 @@ class McpServersAPI:
 class SyncMcpServersAPI:
     """Synchronous MCP servers namespace — access via sync_client.mcp_servers.<method>."""
 
-    def __init__(self, client: "SyncMemoryLayerClient") -> None:
+    def __init__(self, client: SyncMemoryLayerClient) -> None:
         self._client = client
 
     def _ws(self, workspace_id: str | None) -> str | None:

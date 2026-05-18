@@ -118,11 +118,7 @@ class OpenAILLMProvider(LLMProvider):
             kwargs["stream"] = True
         if request.stop is not None:
             kwargs["stop"] = request.stop
-        effective_max = (
-            request.max_completion_tokens
-            if request.max_completion_tokens is not None
-            else max_tokens
-        )
+        effective_max = request.max_completion_tokens if request.max_completion_tokens is not None else max_tokens
         if effective_max is not None:
             kwargs["max_completion_tokens"] = effective_max
         if temperature is not None:
@@ -145,7 +141,8 @@ class OpenAILLMProvider(LLMProvider):
         kwargs = self._build_kwargs(request, stream=False)
         self.logger.debug(
             "LLM request: model=%s, messages=%d, tools=%s",
-            kwargs["model"], len(kwargs["messages"]),
+            kwargs["model"],
+            len(kwargs["messages"]),
             (len(request.tools) if request.tools else 0),
         )
 
@@ -194,9 +191,7 @@ class OpenAILLMProvider(LLMProvider):
                 yield LLMStreamChunk(
                     content="",
                     is_final=False,
-                    tool_calls_delta=[
-                        _openai_tool_call_delta_to_dict(tc) for tc in raw_tc_deltas
-                    ],
+                    tool_calls_delta=[_openai_tool_call_delta_to_dict(tc) for tc in raw_tc_deltas],
                 )
 
             if choice.finish_reason:

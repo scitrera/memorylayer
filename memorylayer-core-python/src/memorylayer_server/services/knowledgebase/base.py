@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +35,7 @@ class Knowledgebase(BaseModel):
     article_count: int = 0
     community_count: int = 0
     generated_at: datetime
-    stats: Optional[GraphStats] = None
+    stats: GraphStats | None = None
 
 
 class KnowledgebaseService(ABC):
@@ -46,8 +45,8 @@ class KnowledgebaseService(ABC):
     async def generate(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
-        options: Optional[KBGenerateOptions] = None,
+        context_id: str | None = None,
+        options: KBGenerateOptions | None = None,
     ) -> Knowledgebase:
         """Generate (or regenerate) the knowledgebase for a workspace.
 
@@ -68,8 +67,8 @@ class KnowledgebaseService(ABC):
     async def get_knowledgebase(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
-    ) -> Optional[Knowledgebase]:
+        context_id: str | None = None,
+    ) -> Knowledgebase | None:
         """Get knowledgebase metadata for a workspace without regenerating.
 
         Args:
@@ -86,7 +85,7 @@ class KnowledgebaseService(ABC):
         self,
         workspace_id: str,
         article_id: str,
-    ) -> Optional[Article]:
+    ) -> Article | None:
         """Retrieve a single article by ID.
 
         Args:
@@ -102,7 +101,7 @@ class KnowledgebaseService(ABC):
     async def list_articles(
         self,
         workspace_id: str,
-        article_type: Optional[str] = None,
+        article_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Article]:
@@ -123,7 +122,7 @@ class KnowledgebaseService(ABC):
     async def export_vault(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> bytes:
         """Export the knowledgebase as an Obsidian-compatible zip vault.
 

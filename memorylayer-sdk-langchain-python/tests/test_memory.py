@@ -5,7 +5,7 @@ import respx
 from httpx import Response
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from memorylayer_langchain import MemoryLayerMemory, MemoryLayerConversationSummaryMemory
+from memorylayer_langchain import MemoryLayerConversationSummaryMemory, MemoryLayerMemory
 
 
 @pytest.fixture
@@ -13,9 +13,7 @@ def memory(base_url: str, api_key: str, workspace_id: str, session_id: str) -> M
     """Create test MemoryLayerMemory instance."""
     with respx.mock:
         # Mock the initial message count request
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         return MemoryLayerMemory(
             session_id=session_id,
             base_url=base_url,
@@ -29,9 +27,7 @@ def summary_memory(base_url: str, api_key: str, workspace_id: str, session_id: s
     """Create test MemoryLayerConversationSummaryMemory instance."""
     with respx.mock:
         # Mock the initial message count request
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         return MemoryLayerConversationSummaryMemory(
             session_id=session_id,
             base_url=base_url,
@@ -53,9 +49,7 @@ def test_memory_variables(memory: MemoryLayerMemory) -> None:
 def test_memory_variables_custom_key(base_url: str, api_key: str, workspace_id: str, session_id: str) -> None:
     """Test that memory_variables returns custom key when set."""
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerMemory(
             session_id=session_id,
             base_url=base_url,
@@ -70,9 +64,7 @@ def test_memory_variables_custom_key(base_url: str, api_key: str, workspace_id: 
 def test_load_memory_variables_empty(memory: MemoryLayerMemory, base_url: str) -> None:
     """Test loading memory variables when history is empty."""
     # Mock empty response
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Test
     result = memory.load_memory_variables({})
@@ -100,9 +92,7 @@ def test_load_memory_variables_with_messages(memory: MemoryLayerMemory, base_url
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Test
     result = memory.load_memory_variables({})
@@ -117,9 +107,7 @@ def test_load_memory_variables_return_messages(base_url: str, api_key: str, work
     """Test loading memory variables with return_messages=True."""
     # Create memory with return_messages=True
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerMemory(
             session_id=session_id,
             base_url=base_url,
@@ -144,9 +132,7 @@ def test_load_memory_variables_return_messages(base_url: str, api_key: str, work
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Test
     result = memory.load_memory_variables({})
@@ -165,9 +151,7 @@ def test_load_memory_variables_custom_prefixes(base_url: str, api_key: str, work
     """Test loading memory variables with custom prefixes."""
     # Create memory with custom prefixes
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerMemory(
             session_id=session_id,
             base_url=base_url,
@@ -193,9 +177,7 @@ def test_load_memory_variables_custom_prefixes(base_url: str, api_key: str, work
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Test
     result = memory.load_memory_variables({})
@@ -210,25 +192,25 @@ def test_save_context(memory: MemoryLayerMemory, base_url: str) -> None:
     """Test saving context (input and output)."""
     # Mock the POST response for storing memories
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_125",
-            "workspace_id": "ws_test",
-            "content": "test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_125",
+                "workspace_id": "ws_test",
+                "content": "test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test
-    memory.save_context(
-        inputs={"input": "Hello"},
-        outputs={"output": "Hi there!"}
-    )
+    memory.save_context(inputs={"input": "Hello"}, outputs={"output": "Hi there!"})
 
     # Verify - 2 memory creates (human + AI)
     assert len(respx.calls) == 2
@@ -249,9 +231,7 @@ def test_save_context_with_input_output_keys(base_url: str, api_key: str, worksp
     """Test saving context with custom input/output keys."""
     # Create memory with custom keys
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerMemory(
             session_id=session_id,
             base_url=base_url,
@@ -263,25 +243,25 @@ def test_save_context_with_input_output_keys(base_url: str, api_key: str, worksp
 
     # Mock the POST response
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_126",
-            "workspace_id": "ws_test",
-            "content": "test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_126",
+                "workspace_id": "ws_test",
+                "content": "test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test with multiple keys in input/output
-    memory.save_context(
-        inputs={"question": "What is 2+2?", "other": "ignored"},
-        outputs={"answer": "4", "confidence": "high"}
-    )
+    memory.save_context(inputs={"question": "What is 2+2?", "other": "ignored"}, outputs={"answer": "4", "confidence": "high"})
 
     # Verify the correct keys were used
     first_request = respx.calls[0].request.content
@@ -297,25 +277,25 @@ def test_save_context_non_string_values(memory: MemoryLayerMemory, base_url: str
     """Test saving context with non-string values."""
     # Mock the POST response
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_127",
-            "workspace_id": "ws_test",
-            "content": "test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_127",
+                "workspace_id": "ws_test",
+                "content": "test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test with non-string values (should be converted to strings)
-    memory.save_context(
-        inputs={"input": 42},
-        outputs={"output": ["a", "list"]}
-    )
+    memory.save_context(inputs={"input": 42}, outputs={"output": ["a", "list"]})
 
     # Verify - should not raise and should convert to strings
     assert len(respx.calls) == 2
@@ -332,9 +312,7 @@ def test_clear(memory: MemoryLayerMemory, base_url: str) -> None:
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Mock delete responses
     respx.delete(f"{base_url}/v1/memories/mem_123").mock(return_value=Response(204))
@@ -351,9 +329,7 @@ def test_clear(memory: MemoryLayerMemory, base_url: str) -> None:
 def test_clear_empty_history(memory: MemoryLayerMemory, base_url: str) -> None:
     """Test clearing when history is already empty."""
     # Mock empty recall response
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json={"memories": [], "total_count": 0})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
     # Test - should not raise
     memory.clear()
@@ -371,9 +347,7 @@ def test_headers_with_api_key_and_workspace(memory: MemoryLayerMemory) -> None:
 def test_headers_without_api_key(base_url: str, session_id: str) -> None:
     """Test that headers are set correctly without API key."""
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerMemory(
             session_id=session_id,
             base_url=base_url,
@@ -388,9 +362,7 @@ def test_custom_memory_tags(base_url: str, api_key: str, workspace_id: str, sess
     """Test that custom memory_tags are included."""
     # Create memory with custom tags
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerMemory(
             session_id=session_id,
             base_url=base_url,
@@ -401,25 +373,25 @@ def test_custom_memory_tags(base_url: str, api_key: str, workspace_id: str, sess
 
     # Mock the POST response
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_128",
-            "workspace_id": "ws_test",
-            "content": "test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_128",
+                "workspace_id": "ws_test",
+                "content": "test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test
-    memory.save_context(
-        inputs={"input": "Test"},
-        outputs={"output": "Response"}
-    )
+    memory.save_context(inputs={"input": "Test"}, outputs={"output": "Response"})
 
     # Verify custom tags are in the requests
     request_body = respx.calls[0].request.content
@@ -433,25 +405,18 @@ def test_http_error_on_save_context(memory: MemoryLayerMemory, base_url: str) ->
     import httpx
 
     # Mock error response
-    respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.post(f"{base_url}/v1/memories").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test
     with pytest.raises(httpx.HTTPStatusError):
-        memory.save_context(
-            inputs={"input": "Test"},
-            outputs={"output": "Response"}
-        )
+        memory.save_context(inputs={"input": "Test"}, outputs={"output": "Response"})
 
 
 @respx.mock
 def test_http_error_on_clear_recall(memory: MemoryLayerMemory, base_url: str) -> None:
     """Test that clear handles HTTP error during recall gracefully."""
     # Mock error response on recall - _get_memories catches this and returns []
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test - should not raise since _get_memories catches the error
     memory.clear()
@@ -463,7 +428,6 @@ def test_http_error_on_clear_recall(memory: MemoryLayerMemory, base_url: str) ->
 @respx.mock
 def test_http_error_on_clear_delete(memory: MemoryLayerMemory, base_url: str) -> None:
     """Test HTTP error handling when deleting during clear."""
-    import httpx
 
     # Mock successful recall response
     mock_response = {
@@ -472,14 +436,10 @@ def test_http_error_on_clear_delete(memory: MemoryLayerMemory, base_url: str) ->
         ],
         "total_count": 1,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Mock error response on delete - this should log warning but not raise
-    respx.delete(f"{base_url}/v1/memories/mem_123").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.delete(f"{base_url}/v1/memories/mem_123").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test - the delete failure logs a warning but doesn't raise
     # (based on the implementation which uses logger.warning for delete failures)
@@ -493,9 +453,7 @@ def test_http_error_on_clear_delete(memory: MemoryLayerMemory, base_url: str) ->
 def test_load_memory_variables_on_http_error(memory: MemoryLayerMemory, base_url: str) -> None:
     """Test that load_memory_variables returns empty on HTTP error."""
     # Mock error response
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test - should not raise but return empty
     result = memory.load_memory_variables({})
@@ -523,9 +481,7 @@ def test_messages_sorted_by_index(memory: MemoryLayerMemory, base_url: str) -> N
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Test
     result = memory.load_memory_variables({})
@@ -549,7 +505,7 @@ def test_summary_load_memory_variables_empty(summary_memory: MemoryLayerConversa
     """Test loading summary memory variables when history is empty."""
     # Mock reflect response with empty summary
     respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": "", "reflection": "", "confidence": 0.9})
+        return_value=Response(200, json={"reflection": "", "confidence": 0.9})
     )
 
     # Test
@@ -565,7 +521,7 @@ def test_summary_load_memory_variables_with_summary(summary_memory: MemoryLayerC
     # Mock reflect response
     summary_text = "The user greeted the assistant and discussed the weather."
     respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": summary_text, "reflection": "", "confidence": 0.9})
+        return_value=Response(200, json={"reflection": summary_text, "confidence": 0.9})
     )
 
     # Test
@@ -580,9 +536,7 @@ def test_summary_load_memory_variables_return_messages(base_url: str, api_key: s
     """Test loading summary memory variables with return_messages=True."""
     # Create memory with return_messages=True
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerConversationSummaryMemory(
             session_id=session_id,
             base_url=base_url,
@@ -593,9 +547,7 @@ def test_summary_load_memory_variables_return_messages(base_url: str, api_key: s
 
     # Mock reflect response
     summary_text = "The user greeted the assistant."
-    respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": summary_text, "confidence": 0.9})
-    )
+    respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(200, json={"reflection": summary_text, "confidence": 0.9}))
 
     # Test
     result = memory.load_memory_variables({})
@@ -612,9 +564,7 @@ def test_summary_load_memory_variables_return_messages_empty(base_url: str, api_
     """Test loading summary memory variables with return_messages=True when empty."""
     # Create memory with return_messages=True
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerConversationSummaryMemory(
             session_id=session_id,
             base_url=base_url,
@@ -624,9 +574,7 @@ def test_summary_load_memory_variables_return_messages_empty(base_url: str, api_
         )
 
     # Mock reflect response with empty summary
-    respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": "", "confidence": 0.9})
-    )
+    respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(200, json={"reflection": "", "confidence": 0.9}))
 
     # Test
     result = memory.load_memory_variables({})
@@ -640,25 +588,25 @@ def test_summary_save_context(summary_memory: MemoryLayerConversationSummaryMemo
     """Test saving context with summary memory."""
     # Mock the POST response for storing memories
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_130",
-            "workspace_id": "ws_test",
-            "content": "test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_130",
+                "workspace_id": "ws_test",
+                "content": "test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test
-    summary_memory.save_context(
-        inputs={"input": "Hello"},
-        outputs={"output": "Hi there!"}
-    )
+    summary_memory.save_context(inputs={"input": "Hello"}, outputs={"output": "Hi there!"})
 
     # Verify - 2 memory creates (human + AI)
     assert len(respx.calls) == 2
@@ -675,9 +623,7 @@ def test_summary_clear(summary_memory: MemoryLayerConversationSummaryMemory, bas
         ],
         "total_count": 2,
     }
-    respx.post(f"{base_url}/v1/memories/recall").mock(
-        return_value=Response(200, json=mock_response)
-    )
+    respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json=mock_response))
 
     # Mock delete responses
     respx.delete(f"{base_url}/v1/memories/mem_131").mock(return_value=Response(204))
@@ -697,9 +643,7 @@ def test_summary_custom_prompt(base_url: str, api_key: str, workspace_id: str, s
 
     # Create memory with custom prompt
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerConversationSummaryMemory(
             session_id=session_id,
             base_url=base_url,
@@ -726,9 +670,7 @@ def test_summary_max_tokens(base_url: str, api_key: str, workspace_id: str, sess
     """Test max_tokens parameter is sent to reflect endpoint."""
     # Create memory with custom max_tokens
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerConversationSummaryMemory(
             session_id=session_id,
             base_url=base_url,
@@ -738,9 +680,7 @@ def test_summary_max_tokens(base_url: str, api_key: str, workspace_id: str, sess
         )
 
     # Mock reflect response
-    respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": "Summary", "confidence": 0.9})
-    )
+    respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(200, json={"reflection": "Summary", "confidence": 0.9}))
 
     # Test
     memory.load_memory_variables({})
@@ -755,9 +695,7 @@ def test_summary_include_sources(base_url: str, api_key: str, workspace_id: str,
     """Test include_sources parameter is sent to reflect endpoint."""
     # Create memory with include_sources=True
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerConversationSummaryMemory(
             session_id=session_id,
             base_url=base_url,
@@ -767,9 +705,7 @@ def test_summary_include_sources(base_url: str, api_key: str, workspace_id: str,
         )
 
     # Mock reflect response
-    respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": "Summary", "confidence": 0.9})
-    )
+    respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(200, json={"reflection": "Summary", "confidence": 0.9}))
 
     # Test
     memory.load_memory_variables({})
@@ -784,9 +720,7 @@ def test_summary_include_sources(base_url: str, api_key: str, workspace_id: str,
 def test_summary_http_error_returns_empty(summary_memory: MemoryLayerConversationSummaryMemory, base_url: str) -> None:
     """Test that summary returns empty string on HTTP error."""
     # Mock error response
-    respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(500, json={"detail": "Internal server error"})
-    )
+    respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test - should not raise but return empty
     result = summary_memory.load_memory_variables({})
@@ -821,9 +755,7 @@ def test_summary_custom_memory_tags(base_url: str, api_key: str, workspace_id: s
     """Test that custom memory_tags are included in summary memory."""
     # Create memory with custom tags
     with respx.mock:
-        respx.post(f"{base_url}/v1/memories/recall").mock(
-            return_value=Response(200, json={"memories": [], "total_count": 0})
-        )
+        respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
         memory = MemoryLayerConversationSummaryMemory(
             session_id=session_id,
             base_url=base_url,
@@ -834,25 +766,25 @@ def test_summary_custom_memory_tags(base_url: str, api_key: str, workspace_id: s
 
     # Mock the POST response
     respx.post(f"{base_url}/v1/memories").mock(
-        return_value=Response(200, json={
-            "id": "mem_133",
-            "workspace_id": "ws_test",
-            "content": "test",
-            "type": "episodic",
-            "importance": 0.5,
-            "tags": [],
-            "metadata": {},
-            "access_count": 0,
-            "created_at": "2026-01-26T10:00:00Z",
-            "updated_at": "2026-01-26T10:00:00Z",
-        })
+        return_value=Response(
+            200,
+            json={
+                "id": "mem_133",
+                "workspace_id": "ws_test",
+                "content": "test",
+                "type": "episodic",
+                "importance": 0.5,
+                "tags": [],
+                "metadata": {},
+                "access_count": 0,
+                "created_at": "2026-01-26T10:00:00Z",
+                "updated_at": "2026-01-26T10:00:00Z",
+            },
+        )
     )
 
     # Test
-    memory.save_context(
-        inputs={"input": "Test"},
-        outputs={"output": "Response"}
-    )
+    memory.save_context(inputs={"input": "Test"}, outputs={"output": "Response"})
 
     # Verify custom tags are in the requests
     request_body = respx.calls[0].request.content

@@ -4,13 +4,16 @@ import time
 
 from scitrera_app_framework import Variables
 
-from .base import (
-    TranscriptionProvider, TranscriptionAttempt, clean_transcription_output,
-    REJECTED_FINISH_REASONS, LENGTH_FINISH_REASONS,
-)
 from ...config import (
-    EMBED_SERVER_GEMINI_MODEL, DEFAULT_EMBED_SERVER_GEMINI_MODEL,
-    EMBED_SERVER_GEMINI_MAX_TOKENS, DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_GEMINI_MODEL,
+)
+from .base import (
+    LENGTH_FINISH_REASONS,
+    REJECTED_FINISH_REASONS,
+    TranscriptionAttempt,
+    TranscriptionProvider,
+    clean_transcription_output,
 )
 
 
@@ -26,10 +29,10 @@ class GeminiProvider(TranscriptionProvider):
 
     # TODO: add api key as an input here -- so that we can feed it in via plugin+custom env variable
     def __init__(
-            self,
-            v: Variables = None,
-            model_name: str = DEFAULT_EMBED_SERVER_GEMINI_MODEL,
-            max_tokens: int = DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS,
+        self,
+        v: Variables = None,
+        model_name: str = DEFAULT_EMBED_SERVER_GEMINI_MODEL,
+        max_tokens: int = DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS,
     ):
         super().__init__(v)
         self.model_name = model_name
@@ -47,10 +50,10 @@ class GeminiProvider(TranscriptionProvider):
         return self._client
 
     async def transcribe_page(
-            self,
-            image_data: bytes,
-            system_prompt: str,
-            max_tokens: int = None,
+        self,
+        image_data: bytes,
+        system_prompt: str,
+        max_tokens: int = None,
     ) -> TranscriptionAttempt:
         """Transcribe a page image using Gemini Flash."""
         import asyncio
@@ -91,18 +94,18 @@ class GeminiProvider(TranscriptionProvider):
                 raw_content = response.text
 
                 # Extract usage metadata
-                if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                    attempt.tokens_in = getattr(response.usage_metadata, 'prompt_token_count', 0) or 0
-                    attempt.tokens_out = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
+                if hasattr(response, "usage_metadata") and response.usage_metadata:
+                    attempt.tokens_in = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+                    attempt.tokens_out = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
 
                 # Extract finish reason
-                finish_reason = 'unknown'
+                finish_reason = "unknown"
                 if response.candidates and len(response.candidates) > 0:
                     candidate = response.candidates[0]
-                    if hasattr(candidate, 'finish_reason'):
+                    if hasattr(candidate, "finish_reason"):
                         finish_reason = str(candidate.finish_reason).lower()
                         # google-genai uses enum values like STOP, MAX_TOKENS, SAFETY, RECITATION
-                        finish_reason = finish_reason.replace('finishreason.', '').lower()
+                        finish_reason = finish_reason.replace("finishreason.", "").lower()
 
                 attempt.finish_reason = finish_reason
 
@@ -110,7 +113,7 @@ class GeminiProvider(TranscriptionProvider):
                 if finish_reason in REJECTED_FINISH_REASONS:
                     attempt.error = f"Rejected finish reason: {finish_reason}"
                     self.logger.info("Gemini rejected: finish_reason=%s", finish_reason)
-                elif finish_reason in LENGTH_FINISH_REASONS or finish_reason == 'max_tokens':
+                elif finish_reason in LENGTH_FINISH_REASONS or finish_reason == "max_tokens":
                     attempt.error = f"Token limit reached: {finish_reason}"
                     self.logger.info("Gemini token limit: finish_reason=%s", finish_reason)
                 else:

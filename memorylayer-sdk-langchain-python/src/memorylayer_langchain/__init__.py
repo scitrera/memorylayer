@@ -1,10 +1,10 @@
 """MemoryLayer LangChain Integration - Persistent memory for LangChain agents."""
 
-from .chat_message_history import MemoryLayerChatMessageHistory
-from .memory import MemoryLayerConversationSummaryMemory, MemoryLayerMemory
-
 # Re-export SDK's sync client for backwards compatibility
 from memorylayer import SyncMemoryLayerClient, sync_client
+
+from .chat_message_history import MemoryLayerChatMessageHistory
+from .memory import MemoryLayerConversationSummaryMemory, MemoryLayerMemory
 
 __version__ = "0.1.22"
 

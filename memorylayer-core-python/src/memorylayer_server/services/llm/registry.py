@@ -171,9 +171,16 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
         # ``embed_server_aether_target`` must win over ``base_url`` /
         # ``api_key`` even though we iterate a set in undefined order.
         known_fields = {
-            "provider", "base_url", "api_key", "model", "max_tokens", "temperature",
-            "embed_server_url", "embed_server_transport",
-            "embed_server_aether_target", "embed_server_timeout",
+            "provider",
+            "base_url",
+            "api_key",
+            "model",
+            "max_tokens",
+            "temperature",
+            "embed_server_url",
+            "embed_server_transport",
+            "embed_server_aether_target",
+            "embed_server_timeout",
         }
         # Longest first ensures specific multi-word fields are stripped
         # rather than a shorter trailing word collapsing into the profile name.
@@ -210,9 +217,7 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
             temperature = float(temp_raw) if temp_raw is not None else None
 
             embed_server_timeout_raw = profile_vars.get(f"{name}_embed_server_timeout")
-            embed_server_timeout = (
-                float(embed_server_timeout_raw) if embed_server_timeout_raw is not None else None
-            )
+            embed_server_timeout = float(embed_server_timeout_raw) if embed_server_timeout_raw is not None else None
 
             provider = create_provider_from_config(
                 name=name,

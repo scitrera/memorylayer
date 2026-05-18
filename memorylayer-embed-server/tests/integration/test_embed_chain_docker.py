@@ -17,6 +17,7 @@ The test uses the lightweight mock-provider variant of the embed-server
 (``Dockerfile.test``), so no GPU / torch / model downloads are needed.
 For the heavy real-model variant, see the README in this directory.
 """
+
 from __future__ import annotations
 
 import os
@@ -27,7 +28,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 
 COMPOSE_FILE = Path(__file__).parent / "docker-compose.embed-chain.yml"
 # Optional second compose file layered on top (for the heavy real-model

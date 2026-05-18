@@ -1,4 +1,5 @@
 """MCP server sync logic — pure hash comparison, no I/O."""
+
 from __future__ import annotations
 
 from typing import Literal

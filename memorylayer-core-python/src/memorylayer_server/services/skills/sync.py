@@ -1,4 +1,5 @@
 """Skills sync logic: compare local vs server state, return reconciliation action."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

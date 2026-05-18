@@ -10,24 +10,20 @@ SHA-256 seed of the input. Intended for:
   (``Dockerfile.test``) so the chain memorylayer-server →
   memorylayer-embed-server can be exercised in CI without GPUs.
 """
+
 from __future__ import annotations
 
 import base64
 import hashlib
 import math
-from logging import Logger
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
-from scitrera_app_framework import Variables
-
 from memorylayer_server.services.embedding._maxsim import MultiVectorEmbedding
 from memorylayer_server.services.embedding.base import (
-    EmbeddingProvider,
     MultimodalEmbeddingProvider,
 )
-
+from scitrera_app_framework import Variables
 
 DEFAULT_MOCK_SINGLE_VECTOR_DIMS = 384
 DEFAULT_MOCK_MULTI_VECTOR_DIMS = 128
@@ -45,7 +41,7 @@ def _l2_normalize(vec: np.ndarray) -> np.ndarray:
     return vec / norm
 
 
-def _image_to_bytes(image: Union[str, bytes, Path]) -> bytes:
+def _image_to_bytes(image: str | bytes | Path) -> bytes:
     """Coerce supported image inputs to raw bytes (used as a hash key)."""
     if isinstance(image, bytes):
         return image
@@ -92,13 +88,13 @@ class MockSingleVectorProvider(MultimodalEmbeddingProvider):
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self._vec_from_payload(t.encode("utf-8")) for t in texts]
 
-    async def embed_image(self, image: Union[str, bytes, Path]) -> list[float]:
+    async def embed_image(self, image: str | bytes | Path) -> list[float]:
         return self._vec_from_payload(_image_to_bytes(image))
 
     async def embed_multimodal(
         self,
-        text: Optional[str] = None,
-        image: Optional[Union[str, bytes, Path]] = None,
+        text: str | None = None,
+        image: str | bytes | Path | None = None,
     ) -> list[float]:
         if image is not None:
             return await self.embed_image(image)
@@ -127,7 +123,8 @@ class MockMultiVectorProvider(MultimodalEmbeddingProvider):
         self.model_name = f"mock-multi-t{num_tokens}-d{dimensions}"
         self.logger.info(
             "Initialized MockMultiVectorProvider (num_tokens=%d, dims=%d)",
-            num_tokens, dimensions,
+            num_tokens,
+            dimensions,
         )
 
     async def preload(self) -> None:
@@ -152,23 +149,26 @@ class MockMultiVectorProvider(MultimodalEmbeddingProvider):
         return self._mv_from_payload(text.encode("utf-8"))
 
     async def embed_batch_multivector(
-        self, texts: list[str], batch_size: int = 8,
+        self,
+        texts: list[str],
+        batch_size: int = 8,
     ) -> list[MultiVectorEmbedding]:
         del batch_size
         return [self._mv_from_payload(t.encode("utf-8")) for t in texts]
 
-    async def embed_image(self, image: Union[str, bytes, Path]) -> list[float]:
+    async def embed_image(self, image: str | bytes | Path) -> list[float]:
         mv = self._mv_from_payload(_image_to_bytes(image))
         return np.mean(np.array(mv.vectors), axis=0).tolist()
 
     async def embed_image_multivector(
-        self, image: Union[str, bytes, Path],
+        self,
+        image: str | bytes | Path,
     ) -> MultiVectorEmbedding:
         return self._mv_from_payload(_image_to_bytes(image))
 
     async def embed_images_batch_multivector(
         self,
-        images: list[Union[str, bytes, Path]],
+        images: list[str | bytes | Path],
         batch_size: int = 4,
     ) -> list[MultiVectorEmbedding]:
         del batch_size
@@ -176,8 +176,8 @@ class MockMultiVectorProvider(MultimodalEmbeddingProvider):
 
     async def embed_multimodal(
         self,
-        text: Optional[str] = None,
-        image: Optional[Union[str, bytes, Path]] = None,
+        text: str | None = None,
+        image: str | bytes | Path | None = None,
     ) -> list[float]:
         if image is not None:
             return await self.embed_image(image)

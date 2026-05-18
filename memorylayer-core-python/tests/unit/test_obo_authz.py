@@ -1,15 +1,15 @@
 """
 Unit tests for Phase 2: OBO authz enforcement — grant ceiling + workspace scope.
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi import HTTPException
 
 from memorylayer_server.models.auth import AuthorityContext, PrincipalRef, RequestContext
 from memorylayer_server.models.authz import AuthorizationContext, AuthorizationDecision
 from memorylayer_server.services.authentication.aether import (
-    AetherAuthenticationService,
     HEADER_AUTH_AUTHORITY_MODE,
     HEADER_AUTH_SUBJECT_ID,
     HEADER_AUTH_SUBJECT_TYPE,
@@ -19,6 +19,7 @@ from memorylayer_server.services.authentication.aether import (
     HEADER_AUTH_WORKSPACE_SCOPE,
     META_ACCESS_LEVEL,
     META_GRANT_MAX_ACCESS_LEVEL,
+    AetherAuthenticationService,
 )
 from memorylayer_server.services.authorization.aether import (
     ACCESS_ADMIN,
@@ -27,10 +28,10 @@ from memorylayer_server.services.authorization.aether import (
     AetherAuthorizationService,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_request(headers: dict) -> MagicMock:
     req = MagicMock()
@@ -73,6 +74,7 @@ def _authz_ctx(access_level: int, grant_ceiling: int | None = None, resource="me
 # ---------------------------------------------------------------------------
 # Grant ceiling tests (authorization/aether.py)
 # ---------------------------------------------------------------------------
+
 
 class TestGrantCeilingIntersect:
     def setup_method(self):
@@ -129,6 +131,7 @@ class TestGrantCeilingIntersect:
 # ---------------------------------------------------------------------------
 # Workspace scope enforcement (authentication/aether.py::resolve_workspace)
 # ---------------------------------------------------------------------------
+
 
 class TestWorkspaceScopeEnforcement:
     def setup_method(self):
@@ -188,37 +191,42 @@ class TestWorkspaceScopeEnforcement:
 # build_context end-to-end with workspace scope
 # ---------------------------------------------------------------------------
 
+
 class TestBuildContextWorkspaceScope:
     def setup_method(self):
         self.svc = _make_auth_service()
 
     @pytest.mark.asyncio
     async def test_obo_request_with_allowed_workspace_succeeds(self):
-        req = _make_request({
-            HEADER_AUTH_TENANT_ID: "t1",
-            HEADER_AUTH_USER_ID: "alice",
-            HEADER_AUTH_WORKSPACE_ACCESS: "20",
-            HEADER_AUTH_AUTHORITY_MODE: "on_behalf_of",
-            HEADER_AUTH_SUBJECT_TYPE: "user",
-            HEADER_AUTH_SUBJECT_ID: "alice",
-            HEADER_AUTH_WORKSPACE_SCOPE: "ws_allowed,ws_other",
-            "X-Workspace-ID": "ws_allowed",
-        })
+        req = _make_request(
+            {
+                HEADER_AUTH_TENANT_ID: "t1",
+                HEADER_AUTH_USER_ID: "alice",
+                HEADER_AUTH_WORKSPACE_ACCESS: "20",
+                HEADER_AUTH_AUTHORITY_MODE: "on_behalf_of",
+                HEADER_AUTH_SUBJECT_TYPE: "user",
+                HEADER_AUTH_SUBJECT_ID: "alice",
+                HEADER_AUTH_WORKSPACE_SCOPE: "ws_allowed,ws_other",
+                "X-Workspace-ID": "ws_allowed",
+            }
+        )
         ctx = await self.svc.build_context(req)
         assert ctx.workspace_id == "ws_allowed"
 
     @pytest.mark.asyncio
     async def test_obo_request_with_disallowed_workspace_raises_403(self):
-        req = _make_request({
-            HEADER_AUTH_TENANT_ID: "t1",
-            HEADER_AUTH_USER_ID: "alice",
-            HEADER_AUTH_WORKSPACE_ACCESS: "20",
-            HEADER_AUTH_AUTHORITY_MODE: "on_behalf_of",
-            HEADER_AUTH_SUBJECT_TYPE: "user",
-            HEADER_AUTH_SUBJECT_ID: "alice",
-            HEADER_AUTH_WORKSPACE_SCOPE: "ws_allowed",
-            "X-Workspace-ID": "ws_forbidden",
-        })
+        req = _make_request(
+            {
+                HEADER_AUTH_TENANT_ID: "t1",
+                HEADER_AUTH_USER_ID: "alice",
+                HEADER_AUTH_WORKSPACE_ACCESS: "20",
+                HEADER_AUTH_AUTHORITY_MODE: "on_behalf_of",
+                HEADER_AUTH_SUBJECT_TYPE: "user",
+                HEADER_AUTH_SUBJECT_ID: "alice",
+                HEADER_AUTH_WORKSPACE_SCOPE: "ws_allowed",
+                "X-Workspace-ID": "ws_forbidden",
+            }
+        )
         with pytest.raises(HTTPException) as exc_info:
             await self.svc.build_context(req)
         assert exc_info.value.status_code == 403
@@ -227,6 +235,7 @@ class TestBuildContextWorkspaceScope:
 # ---------------------------------------------------------------------------
 # require_authorization passes actor/authority fields through
 # ---------------------------------------------------------------------------
+
 
 class TestRequireAuthorizationOBOFields:
     @pytest.mark.asyncio

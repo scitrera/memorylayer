@@ -6,7 +6,6 @@ without requiring the full service stack.
 """
 
 import hashlib
-from datetime import UTC, datetime
 
 import pytest
 

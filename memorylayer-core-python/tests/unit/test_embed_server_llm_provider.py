@@ -16,11 +16,11 @@ and assert that:
   * Per-profile URL/transport/aether-target/timeout overrides build a
     dedicated client rather than using the shared singleton.
 """
+
 from __future__ import annotations
 
 import json
-
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -35,10 +35,12 @@ class _FakeEmbedClient:
         self.chat_response: dict | list[bytes] = {
             "id": "chatcmpl-test",
             "model": "qwen",
-            "choices": [{
-                "message": {"content": "ok", "tool_calls": None},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "ok", "tool_calls": None},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
         }
 
@@ -92,10 +94,12 @@ async def test_complete_forwards_canonical_fields():
 
     request = LLMRequest(
         messages=[_user("weather?")],
-        tools=[{
-            "type": "function",
-            "function": {"name": "get_weather", "parameters": {}},
-        }],
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "get_weather", "parameters": {}},
+            }
+        ],
         tool_choice="auto",
         response_format={"type": "json_object"},
         reasoning_effort="medium",
@@ -123,18 +127,22 @@ async def test_complete_materializes_response_with_tool_calls():
     fake.chat_response = {
         "id": "chatcmpl-1",
         "model": "qwen-7b",
-        "choices": [{
-            "message": {
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_a",
-                    "type": "function",
-                    "function": {"name": "get_weather", "arguments": '{"loc": "Boston"}'},
-                }],
-                "reasoning_content": "let me think",
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_a",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"loc": "Boston"}'},
+                        }
+                    ],
+                    "reasoning_content": "let me think",
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
         "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
     }
     provider = _build_provider(fake_client=fake)
@@ -154,10 +162,12 @@ async def test_complete_materializes_response_with_tool_calls():
 async def test_extra_body_merged_into_payload():
     fake = _FakeEmbedClient()
     provider = _build_provider(fake_client=fake)
-    await provider.complete(LLMRequest(
-        messages=[_user("hi")],
-        extra_body={"vllm_custom_field": True, "metadata": {"trace_id": "abc"}},
-    ))
+    await provider.complete(
+        LLMRequest(
+            messages=[_user("hi")],
+            extra_body={"vllm_custom_field": True, "metadata": {"trace_id": "abc"}},
+        )
+    )
     payload = fake.chat_calls[0][0]
     assert payload["vllm_custom_field"] is True
     assert payload["metadata"] == {"trace_id": "abc"}
@@ -167,23 +177,29 @@ async def test_extra_body_merged_into_payload():
 async def test_message_with_tool_calls_serialized_correctly():
     fake = _FakeEmbedClient()
     provider = _build_provider(fake_client=fake)
-    await provider.complete(LLMRequest(messages=[
-        _user("weather in Boston?"),
-        LLMMessage(
-            role=LLMRole.ASSISTANT,
-            content="",
-            tool_calls=[{
-                "id": "call_a",
-                "type": "function",
-                "function": {"name": "get_weather", "arguments": '{"loc": "Boston"}'},
-            }],
-        ),
-        LLMMessage(
-            role=LLMRole.TOOL,
-            content='{"temp_f": 65}',
-            tool_call_id="call_a",
-        ),
-    ]))
+    await provider.complete(
+        LLMRequest(
+            messages=[
+                _user("weather in Boston?"),
+                LLMMessage(
+                    role=LLMRole.ASSISTANT,
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "call_a",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"loc": "Boston"}'},
+                        }
+                    ],
+                ),
+                LLMMessage(
+                    role=LLMRole.TOOL,
+                    content='{"temp_f": 65}',
+                    tool_call_id="call_a",
+                ),
+            ]
+        )
+    )
     sent_messages = fake.chat_calls[0][0]["messages"]
     assert sent_messages[1]["role"] == "assistant"
     assert sent_messages[1]["tool_calls"][0]["function"]["name"] == "get_weather"
@@ -199,7 +215,7 @@ async def test_message_with_tool_calls_serialized_correctly():
 
 
 def _sse_chunk(data: dict) -> bytes:
-    return f"data: {json.dumps(data)}\n\n".encode("utf-8")
+    return f"data: {json.dumps(data)}\n\n".encode()
 
 
 @pytest.mark.asyncio
@@ -232,16 +248,40 @@ async def test_complete_stream_yields_text_deltas():
 async def test_complete_stream_extracts_tool_call_deltas():
     fake = _FakeEmbedClient()
     fake.chat_response = [
-        _sse_chunk({"choices": [{"delta": {
-            "tool_calls": [{"index": 0, "id": "call_a", "type": "function",
-                            "function": {"name": "get_weather"}}],
-        }}]}),
-        _sse_chunk({"choices": [{"delta": {
-            "tool_calls": [{"index": 0, "function": {"arguments": '{"loc'}}],
-        }}]}),
-        _sse_chunk({"choices": [{"delta": {
-            "tool_calls": [{"index": 0, "function": {"arguments": '": "Boston"}'}}],
-        }, "finish_reason": "tool_calls"}]}),
+        _sse_chunk(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [{"index": 0, "id": "call_a", "type": "function", "function": {"name": "get_weather"}}],
+                        }
+                    }
+                ]
+            }
+        ),
+        _sse_chunk(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [{"index": 0, "function": {"arguments": '{"loc'}}],
+                        }
+                    }
+                ]
+            }
+        ),
+        _sse_chunk(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [{"index": 0, "function": {"arguments": '": "Boston"}'}}],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            }
+        ),
         b"data: [DONE]\n\n",
     ]
     provider = _build_provider(fake_client=fake)
@@ -266,9 +306,12 @@ async def test_complete_stream_extracts_reasoning_content_delta():
         b"data: [DONE]\n\n",
     ]
     provider = _build_provider(fake_client=fake)
-    chunks = [c async for c in provider.complete_stream(
-        LLMRequest(messages=[_user("hard q")], stream=True, reasoning_effort="high"),
-    )]
+    chunks = [
+        c
+        async for c in provider.complete_stream(
+            LLMRequest(messages=[_user("hard q")], stream=True, reasoning_effort="high"),
+        )
+    ]
     reasoning = [c for c in chunks if c.reasoning_content_delta]
     text = [c for c in chunks if c.content]
     assert reasoning[0].reasoning_content_delta == "let me think"
@@ -291,9 +334,12 @@ async def test_complete_stream_handles_multi_chunk_split_records():
         b"data: [DONE]\n\n",
     ]
     provider = _build_provider(fake_client=fake)
-    chunks = [c async for c in provider.complete_stream(
-        LLMRequest(messages=[_user("hi")], stream=True),
-    )]
+    chunks = [
+        c
+        async for c in provider.complete_stream(
+            LLMRequest(messages=[_user("hi")], stream=True),
+        )
+    ]
     text = [c.content for c in chunks if c.content]
     assert text == ["Hello world"]
 

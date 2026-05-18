@@ -1,13 +1,12 @@
 """Unit tests for SQLite skill storage implementation."""
+
 import hashlib
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from memorylayer_server.models.skill import Skill, SkillFile
 from memorylayer_server.services.storage.sqlite import SQLiteStorageBackend
-from memorylayer_server.utils import generate_id, utc_now_iso
+from memorylayer_server.utils import generate_id
 
 
 def _make_skill(**overrides) -> Skill:
@@ -235,7 +234,5 @@ class TestFindSkillsByName:
         assert results == []
 
     async def test_find_skills_no_match(self, sqlite_backend):
-        results = await sqlite_backend.find_skills_by_name(
-            "nonexistent-skill", [{"workspace_id": "ws_test"}]
-        )
+        results = await sqlite_backend.find_skills_by_name("nonexistent-skill", [{"workspace_id": "ws_test"}])
         assert results == []

@@ -4,17 +4,19 @@ import base64
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from scitrera_app_framework import Variables
+from scitrera_app_framework import Plugin, Variables
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
 from ...models.transcription import (
-    TranscriptionRequest, TranscriptionResponse, TranscriptionResult,
-    TranscriptionStats, ModelAttempt,
+    ModelAttempt,
+    TranscriptionRequest,
+    TranscriptionResponse,
+    TranscriptionResult,
+    TranscriptionStats,
 )
 from .. import EXT_MULTI_API_ROUTERS
-from scitrera_app_framework import Plugin
 
-router = APIRouter(prefix="/v1", tags=['transcription'])
+router = APIRouter(prefix="/v1", tags=["transcription"])
 
 
 @router.post("/transcribe", response_model=TranscriptionResponse)
@@ -29,7 +31,7 @@ async def transcribe(
     Accepts base64-encoded page images and returns markdown transcriptions
     using a cascade of models (GLM-OCR primary, Gemini Flash fallback).
     """
-    cascade = v.get('cascade_transcriber', default=None)
+    cascade = v.get("cascade_transcriber", default=None)
     if cascade is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -79,14 +81,16 @@ async def transcribe(
             for a in page.attempts
         ]
 
-        results.append(TranscriptionResult(
-            page_index=page.page_index,
-            content=page.content,
-            success=page.success,
-            model_used=page.model_used,
-            provider_used=page.provider_used,
-            attempts=attempts,
-        ))
+        results.append(
+            TranscriptionResult(
+                page_index=page.page_index,
+                content=page.content,
+                success=page.success,
+                model_used=page.model_used,
+                provider_used=page.provider_used,
+                attempts=attempts,
+            )
+        )
 
         if page.success:
             successful += 1

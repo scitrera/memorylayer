@@ -15,7 +15,7 @@ class PrincipalRef:
     """Reference to an authenticated or delegated principal."""
 
     type: str  # "user" | "service" | "agent" | "task"
-    id: str    # canonical identity string
+    id: str  # canonical identity string
 
 
 @dataclass
@@ -29,11 +29,11 @@ class AuthorityContext:
 
     mode: Literal["direct", "on_behalf_of"] = "direct"
     grant_id: str | None = None
-    subject: PrincipalRef | None = None       # whose authority is being exercised
+    subject: PrincipalRef | None = None  # whose authority is being exercised
     root_subject: PrincipalRef | None = None  # top of delegation chain
     audience_type: str | None = None
     audience_id: str | None = None
-    max_access_level: int | None = None       # grant ceiling (None = uncapped)
+    max_access_level: int | None = None  # grant ceiling (None = uncapped)
     workspace_scope: list[str] | None = None  # None or empty = any workspace
 
 

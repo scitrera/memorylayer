@@ -68,9 +68,7 @@ async def test_recall_input_include_global_user_can_be_false():
 
 
 @pytest.mark.asyncio
-async def test_recall_includes_global_user_workspace(
-    memory_service, test_workspace, global_user_workspace
-):
+async def test_recall_includes_global_user_workspace(memory_service, test_workspace, global_user_workspace):
     """A user's profile memory in _global_user surfaces when recalling in
     another workspace as the same user."""
     user_id = "alice@example.com"
@@ -100,9 +98,7 @@ async def test_recall_includes_global_user_workspace(
 
 
 @pytest.mark.asyncio
-async def test_recall_can_exclude_global_user_workspace(
-    memory_service, test_workspace, global_user_workspace
-):
+async def test_recall_can_exclude_global_user_workspace(memory_service, test_workspace, global_user_workspace):
     """include_global_user=False prevents cross-workspace leakage."""
     user_id = "alice@example.com"
 
@@ -133,9 +129,7 @@ async def test_recall_can_exclude_global_user_workspace(
 
 
 @pytest.mark.asyncio
-async def test_recall_global_user_is_user_isolated(
-    memory_service, test_workspace, global_user_workspace
-):
+async def test_recall_global_user_is_user_isolated(memory_service, test_workspace, global_user_workspace):
     """Alice's user-global memory must NOT be recalled as Bob."""
     alice_memory = await memory_service.remember(
         workspace_id=GLOBAL_USER_WORKSPACE_ID,
@@ -163,9 +157,7 @@ async def test_recall_global_user_is_user_isolated(
 
 
 @pytest.mark.asyncio
-async def test_recall_global_user_requires_user_id(
-    memory_service, test_workspace, global_user_workspace
-):
+async def test_recall_global_user_requires_user_id(memory_service, test_workspace, global_user_workspace):
     """Without a user_id, _global_user union is skipped (no leak-everything)."""
     alice_memory = await memory_service.remember(
         workspace_id=GLOBAL_USER_WORKSPACE_ID,

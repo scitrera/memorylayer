@@ -507,9 +507,15 @@ class TestSessionOperations:
     async def test_create_and_get_session(self, backend, workspace_id):
         now = datetime.now(UTC)
         session = Session(
-            id="sess_1", tenant_id="_default", workspace_id=workspace_id, context_id="_default",
-            user_id="user1", metadata={"key": "val"}, auto_commit=True,
-            expires_at=now + timedelta(hours=1), created_at=now,
+            id="sess_1",
+            tenant_id="_default",
+            workspace_id=workspace_id,
+            context_id="_default",
+            user_id="user1",
+            metadata={"key": "val"},
+            auto_commit=True,
+            expires_at=now + timedelta(hours=1),
+            created_at=now,
         )
         created = await backend.create_session(workspace_id, session)
         assert created.id == "sess_1"
@@ -521,9 +527,15 @@ class TestSessionOperations:
     async def test_get_session_by_id(self, backend, workspace_id):
         now = datetime.now(UTC)
         session = Session(
-            id="sess_global", tenant_id="_default", workspace_id=workspace_id, context_id="_default",
-            user_id="user2", metadata={}, auto_commit=True,
-            expires_at=now + timedelta(hours=1), created_at=now,
+            id="sess_global",
+            tenant_id="_default",
+            workspace_id=workspace_id,
+            context_id="_default",
+            user_id="user2",
+            metadata={},
+            auto_commit=True,
+            expires_at=now + timedelta(hours=1),
+            created_at=now,
         )
         await backend.create_session(workspace_id, session)
 
@@ -534,9 +546,15 @@ class TestSessionOperations:
     async def test_delete_session(self, backend, workspace_id):
         now = datetime.now(UTC)
         session = Session(
-            id="sess_del", tenant_id="_default", workspace_id=workspace_id, context_id="_default",
-            user_id="user3", metadata={}, auto_commit=True,
-            expires_at=now + timedelta(hours=1), created_at=now,
+            id="sess_del",
+            tenant_id="_default",
+            workspace_id=workspace_id,
+            context_id="_default",
+            user_id="user3",
+            metadata={},
+            auto_commit=True,
+            expires_at=now + timedelta(hours=1),
+            created_at=now,
         )
         await backend.create_session(workspace_id, session)
 
@@ -549,9 +567,15 @@ class TestSessionOperations:
     async def test_working_memory_crud(self, backend, workspace_id):
         now = datetime.now(UTC)
         session = Session(
-            id="sess_wm", tenant_id="_default", workspace_id=workspace_id, context_id="_default",
-            user_id="user4", metadata={}, auto_commit=True,
-            expires_at=now + timedelta(hours=1), created_at=now,
+            id="sess_wm",
+            tenant_id="_default",
+            workspace_id=workspace_id,
+            context_id="_default",
+            user_id="user4",
+            metadata={},
+            auto_commit=True,
+            expires_at=now + timedelta(hours=1),
+            created_at=now,
         )
         await backend.create_session(workspace_id, session)
 
@@ -577,9 +601,15 @@ class TestSessionOperations:
     async def test_update_session(self, backend, workspace_id):
         now = datetime.now(UTC)
         session = Session(
-            id="sess_upd", tenant_id="_default", workspace_id=workspace_id, context_id="_default",
-            user_id="user5", metadata={}, auto_commit=True,
-            expires_at=now + timedelta(hours=1), created_at=now,
+            id="sess_upd",
+            tenant_id="_default",
+            workspace_id=workspace_id,
+            context_id="_default",
+            user_id="user5",
+            metadata={},
+            auto_commit=True,
+            expires_at=now + timedelta(hours=1),
+            created_at=now,
         )
         await backend.create_session(workspace_id, session)
 
@@ -590,9 +620,15 @@ class TestSessionOperations:
     async def test_list_sessions(self, backend, workspace_id):
         now = datetime.now(UTC)
         session = Session(
-            id="sess_list", tenant_id="_default", workspace_id=workspace_id, context_id="_default",
-            user_id="user6", metadata={}, auto_commit=True,
-            expires_at=now + timedelta(hours=1), created_at=now,
+            id="sess_list",
+            tenant_id="_default",
+            workspace_id=workspace_id,
+            context_id="_default",
+            user_id="user6",
+            metadata={},
+            auto_commit=True,
+            expires_at=now + timedelta(hours=1),
+            created_at=now,
         )
         await backend.create_session(workspace_id, session)
 
@@ -692,7 +728,9 @@ class TestContradictions:
 @pytest.mark.asyncio
 class TestSearchMemoriesByFilter:
     async def test_filter_by_subtype(self, backend, workspace_id):
-        await backend.create_memory(workspace_id, RememberInput(content="Semantic one", type=MemoryType.SEMANTIC, subtype=MemorySubtype.PREFERENCE))
+        await backend.create_memory(
+            workspace_id, RememberInput(content="Semantic one", type=MemoryType.SEMANTIC, subtype=MemorySubtype.PREFERENCE)
+        )
         await backend.create_memory(workspace_id, RememberInput(content="Episodic one", type=MemoryType.EPISODIC))
 
         results = await backend.search_memories_by_filter(workspace_id, subtypes=["preference"])
@@ -708,27 +746,25 @@ class TestSearchMemoriesByFilter:
         assert all("rpg" in r.tags for r in results)
 
     async def test_filter_by_metadata(self, backend, workspace_id):
-        await backend.create_memory(workspace_id, RememberInput(
-            content="Node A", type=MemoryType.SEMANTIC, metadata={"rpg_node_id": "src/main.py"}
-        ))
-        await backend.create_memory(workspace_id, RememberInput(
-            content="Node B", type=MemoryType.SEMANTIC, metadata={"rpg_node_id": "src/utils.py"}
-        ))
-
-        results = await backend.search_memories_by_filter(
-            workspace_id, metadata_filter={"rpg_node_id": "src/main.py"}
+        await backend.create_memory(
+            workspace_id, RememberInput(content="Node A", type=MemoryType.SEMANTIC, metadata={"rpg_node_id": "src/main.py"})
         )
+        await backend.create_memory(
+            workspace_id, RememberInput(content="Node B", type=MemoryType.SEMANTIC, metadata={"rpg_node_id": "src/utils.py"})
+        )
+
+        results = await backend.search_memories_by_filter(workspace_id, metadata_filter={"rpg_node_id": "src/main.py"})
         assert len(results) == 1
         assert results[0].metadata["rpg_node_id"] == "src/main.py"
 
     async def test_filter_combined(self, backend, workspace_id):
-        await backend.create_memory(workspace_id, RememberInput(
-            content="RPG file", type=MemoryType.SEMANTIC, subtype="rpg_file",
-            tags=["rpg"], metadata={"rpg_node_id": "combined_test"}
-        ))
-        await backend.create_memory(workspace_id, RememberInput(
-            content="Not RPG", type=MemoryType.SEMANTIC, tags=["other"]
-        ))
+        await backend.create_memory(
+            workspace_id,
+            RememberInput(
+                content="RPG file", type=MemoryType.SEMANTIC, subtype="rpg_file", tags=["rpg"], metadata={"rpg_node_id": "combined_test"}
+            ),
+        )
+        await backend.create_memory(workspace_id, RememberInput(content="Not RPG", type=MemoryType.SEMANTIC, tags=["other"]))
 
         results = await backend.search_memories_by_filter(
             workspace_id, subtypes=["rpg_file"], tags=["rpg"], metadata_filter={"rpg_node_id": "combined_test"}
@@ -737,15 +773,13 @@ class TestSearchMemoriesByFilter:
         assert results[0].content == "RPG file"
 
     async def test_filter_returns_empty_when_no_match(self, backend, workspace_id):
-        results = await backend.search_memories_by_filter(
-            workspace_id, metadata_filter={"nonexistent_key": "no_value"}
-        )
+        results = await backend.search_memories_by_filter(workspace_id, metadata_filter={"nonexistent_key": "no_value"})
         assert results == []
 
     async def test_filter_excludes_deleted(self, backend, workspace_id):
-        mem = await backend.create_memory(workspace_id, RememberInput(
-            content="Deletable", type=MemoryType.SEMANTIC, subtype=MemorySubtype.PREFERENCE
-        ))
+        mem = await backend.create_memory(
+            workspace_id, RememberInput(content="Deletable", type=MemoryType.SEMANTIC, subtype=MemorySubtype.PREFERENCE)
+        )
         await backend.delete_memory(workspace_id, mem.id)
 
         results = await backend.search_memories_by_filter(workspace_id, subtypes=["preference"])
@@ -788,9 +822,9 @@ class TestDeleteAssociation:
 class TestUpdateWorkspace:
     async def test_update_workspace_name(self, backend):
         now = datetime.now(UTC)
-        await backend.create_workspace(Workspace(
-            id="ws_upd", tenant_id="_default", name="Old Name", settings={}, created_at=now, updated_at=now
-        ))
+        await backend.create_workspace(
+            Workspace(id="ws_upd", tenant_id="_default", name="Old Name", settings={}, created_at=now, updated_at=now)
+        )
 
         updated = await backend.update_workspace("ws_upd", name="New Name")
         assert updated is not None
@@ -798,9 +832,9 @@ class TestUpdateWorkspace:
 
     async def test_update_workspace_settings(self, backend):
         now = datetime.now(UTC)
-        await backend.create_workspace(Workspace(
-            id="ws_settings", tenant_id="_default", name="Test", settings={"a": 1}, created_at=now, updated_at=now
-        ))
+        await backend.create_workspace(
+            Workspace(id="ws_settings", tenant_id="_default", name="Test", settings={"a": 1}, created_at=now, updated_at=now)
+        )
 
         updated = await backend.update_workspace("ws_settings", settings={"a": 2, "b": 3})
         assert updated is not None

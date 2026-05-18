@@ -7,10 +7,10 @@ the OpenAI-compatible payload as-is so tool calls, multimodal,
 response_format, and reasoning fields pass through whatever the
 underlying model supports.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
 from typing import Any
 
 

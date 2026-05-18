@@ -58,6 +58,7 @@ class FastApiPlugin(Plugin):
             # extension is disabled or the connection isn't loaded.
             try:
                 from ..services._constants import EXT_AETHER_SERVICE_CONNECTION
+
                 aether_svc = _saf_get_extension(v, EXT_AETHER_SERVICE_CONNECTION)
             except Exception:
                 aether_svc = None
@@ -66,8 +67,7 @@ class FastApiPlugin(Plugin):
                     await aether_svc.attach_fastapi_app(app)
                 except Exception:  # noqa: BLE001
                     _saf_get_logger(v).exception(
-                        "Failed to attach FastAPI app to Aether service connection; "
-                        "REST-over-Aether front door will be unavailable"
+                        "Failed to attach FastAPI app to Aether service connection; REST-over-Aether front door will be unavailable"
                     )
 
             try:
@@ -103,11 +103,13 @@ class FastApiPlugin(Plugin):
         # safe to call unconditionally here.
         try:
             from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
             FastAPIInstrumentor.instrument_app(
                 app,
                 excluded_urls="health,metrics-internal,metrics",
             )
             import logging as _logging
+
             _logging.getLogger(__name__).debug("FastAPIInstrumentor registered for memorylayer app")
         except ImportError:
             pass

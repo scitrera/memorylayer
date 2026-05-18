@@ -3,10 +3,10 @@
 Verifies that writes preserve unrelated keys, test against a fixture
 ~/.claude.json with theme + claude.user_id + multiple projects.
 """
+
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -57,15 +57,11 @@ class TestReadClaudeJsonServers:
         assert servers["global-server"]["command"] == "npx"
 
     def test_read_local_scope(self, claude_json_file: Path):
-        servers = read_claude_json_servers(
-            "local", project_path="/home/user/project-a", target_path=claude_json_file
-        )
+        servers = read_claude_json_servers("local", project_path="/home/user/project-a", target_path=claude_json_file)
         assert "existing-server" in servers
 
     def test_read_local_scope_missing_project(self, claude_json_file: Path):
-        servers = read_claude_json_servers(
-            "local", project_path="/home/user/no-such-project", target_path=claude_json_file
-        )
+        servers = read_claude_json_servers("local", project_path="/home/user/no-such-project", target_path=claude_json_file)
         assert servers == {}
 
     def test_read_missing_file(self, tmp_path: Path):
@@ -101,7 +97,8 @@ class TestWriteClaudeJsonServers:
             "project-mcp": {"command": "npx", "args": ["-y", "project-tool"]},
         }
         write_claude_json_servers(
-            "local", new_servers,
+            "local",
+            new_servers,
             project_path="/home/user/project-a",
             target_path=claude_json_file,
         )

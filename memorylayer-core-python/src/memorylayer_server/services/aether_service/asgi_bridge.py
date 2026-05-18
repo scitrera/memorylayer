@@ -35,9 +35,11 @@ Notes / decisions
   middleware that wants to read the originating Aether workspace doesn't
   have to re-parse a header. Cheap and side-effect-free.
 """
+
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from scitrera_aether_client.proto import aether_pb2
 from scitrera_aether_client.proxy_terminator import MintedRequest
@@ -103,10 +105,7 @@ async def asgi_dispatch(
         "path": req.path,
         "raw_path": req.path.encode("utf-8"),
         "query_string": query_bytes,
-        "headers": [
-            (k.lower().encode("latin-1"), v.encode("latin-1"))
-            for k, v in req.headers.items()
-        ],
+        "headers": [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in req.headers.items()],
         "client": ("aether", 0),
         "server": ("memorylayer", 0),
         "root_path": "",

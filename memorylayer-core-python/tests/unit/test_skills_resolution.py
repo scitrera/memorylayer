@@ -1,4 +1,5 @@
 """Unit tests for SkillsResolutionService precedence and shadowing logic."""
+
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -32,6 +33,7 @@ def _make_skill(
 # Stub storage for resolution tests
 # ---------------------------------------------------------------------------
 
+
 class _StubStorage:
     def __init__(self, skills: list[Skill]) -> None:
         self._skills = skills
@@ -63,6 +65,7 @@ class _StubStorage:
 # ---------------------------------------------------------------------------
 # Tests: scope precedence
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_user_scope_wins_over_workspace():
@@ -120,6 +123,7 @@ async def test_returns_none_when_no_match():
 # Tests: source_mode tie-breaker within same scope
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_server_beats_mirrored_same_scope():
     server_skill = _make_skill("tool", workspace_id="ws1", source_mode="server")
@@ -170,6 +174,7 @@ async def test_most_recent_wins_same_mode():
 # Tests: user isolation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_user_a_skill_not_visible_to_user_b():
     """User A's user-scoped skill must not be returned for user B."""
@@ -202,6 +207,7 @@ async def test_user_a_skill_visible_to_user_a():
 # ---------------------------------------------------------------------------
 # Tests: apply_shadowing
 # ---------------------------------------------------------------------------
+
 
 def test_apply_shadowing_keeps_winner_per_name():
     user_skill = _make_skill("tool", workspace_id="ws1")
@@ -238,6 +244,7 @@ def test_apply_shadowing_empty():
 # ---------------------------------------------------------------------------
 # Tests: scope_hint filtering
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_scope_hint_user_returns_user_variant_over_local():
@@ -293,6 +300,7 @@ async def test_scope_hint_workspace_skips_user_scope():
 # ---------------------------------------------------------------------------
 # Tests: visible_scopes_for
 # ---------------------------------------------------------------------------
+
 
 def test_visible_scopes_with_user():
     svc = SkillsResolutionService(storage=None)

@@ -9,6 +9,7 @@ Skipped by default in regular pytest runs. To execute::
 
     pytest -m slow oss/memorylayer-embed-server/tests/unit/test_colpali_provider_real.py
 """
+
 from __future__ import annotations
 
 import io
@@ -67,10 +68,9 @@ def test_real_colpali_maxsim_self_score_is_max(colpali_provider):
     async def _go():
         q = await colpali_provider.embed_text_multivector("apple orchards")
         d_same = await colpali_provider.embed_text_multivector("apple orchards")
-        d_other = await colpali_provider.embed_text_multivector(
-            "quantum chromodynamics lecture"
-        )
+        d_other = await colpali_provider.embed_text_multivector("quantum chromodynamics lecture")
         from memorylayer_server.services.embedding._maxsim import maxsim_score
+
         same = maxsim_score(q, d_same)
         other = maxsim_score(q, d_other)
         return same, other

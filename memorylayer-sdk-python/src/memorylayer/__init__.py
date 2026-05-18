@@ -1,6 +1,16 @@
 """MemoryLayer.ai Python SDK - Memory infrastructure for AI agents."""
 
 from .client import MemoryLayerClient
+from .exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    EnterpriseRequiredError,
+    MemoryLayerError,
+    NotFoundError,
+    RateLimitError,
+    ServerError,
+    ValidationError,
+)
 from .knowledgebase import (
     KbArticle,
     KbBridge,
@@ -12,16 +22,6 @@ from .knowledgebase import (
     KbMetadata,
     KnowledgebaseAPI,
     SyncKnowledgebaseAPI,
-)
-from .exceptions import (
-    AuthenticationError,
-    AuthorizationError,
-    EnterpriseRequiredError,
-    MemoryLayerError,
-    NotFoundError,
-    RateLimitError,
-    ServerError,
-    ValidationError,
 )
 from .models import (
     Association,

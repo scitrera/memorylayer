@@ -5,9 +5,10 @@ Ported from enterprise (memorylayer_saas.models.document), adapted for OSS:
 - SQLite-friendly field types
 - Full page-level tracking and source attribution
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -19,10 +20,10 @@ class DocumentType(str, Enum):
     TEXT = "text"
     CODE = "code"
     HTML = "html"
-    PDF = "pdf"      # optional dep (pymupdf)
+    PDF = "pdf"  # optional dep (pymupdf)
     IMAGE = "image"  # optional dep (LLM vision)
-    DOCX = "docx"    # optional dep (python-docx/mammoth)
-    PPTX = "pptx"    # optional dep (python-pptx)
+    DOCX = "docx"  # optional dep (python-docx/mammoth)
+    PPTX = "pptx"  # optional dep (python-pptx)
 
 
 class DocumentStatus(str, Enum):
@@ -54,7 +55,7 @@ class DocumentExtractionOptions(BaseModel):
     chunk_overlap: int = Field(200, description="Overlap between chunks in characters")
     target_context_id: str = Field("_default", description="Target context for created memories")
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Default importance for memories")
-    system_prompt: Optional[str] = Field(None, description="Custom LLM transcription/extraction prompt")
+    system_prompt: str | None = Field(None, description="Custom LLM transcription/extraction prompt")
     retain_original: bool = Field(True, description="Keep raw content in storage")
 
 
@@ -73,9 +74,9 @@ class Document(BaseModel):
     filename: str
     document_type: DocumentType
     content_hash: str = Field(..., description="SHA-256 hash for deduplication")
-    source_vfs_ref: Optional[str] = Field(None, description="VFS reference from data-connectors (for by-reference ingestion)")
+    source_vfs_ref: str | None = Field(None, description="VFS reference from data-connectors (for by-reference ingestion)")
     size_bytes: int
-    mime_type: Optional[str] = None
+    mime_type: str | None = None
     status: DocumentStatus = DocumentStatus.PENDING
     target_context_id: str = "_default"
     extraction_options: DocumentExtractionOptions = Field(default_factory=DocumentExtractionOptions)
@@ -83,12 +84,12 @@ class Document(BaseModel):
     chunk_count: int = 0
     memory_ids: list[str] = Field(default_factory=list, description="IDs of memories created from this document")
     deduplicated_count: int = 0
-    error_message: Optional[str] = None
+    error_message: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     extracted_metadata: dict[str, Any] = Field(default_factory=dict, description="Metadata discovered during processing")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    processing_started_at: Optional[datetime] = None
-    processing_completed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    processing_started_at: datetime | None = None
+    processing_completed_at: datetime | None = None
 
 
 class DocumentPage(BaseModel):
@@ -101,18 +102,16 @@ class DocumentPage(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    id: Optional[str] = Field(None, description="Page identifier (generated on persist)")
+    id: str | None = Field(None, description="Page identifier (generated on persist)")
     document_id: str = Field(..., description="Parent document identifier")
     workspace_id: str = Field(..., description="Workspace identifier")
     page_no: int = Field(..., description="Zero-indexed page number")
-    transcript: Optional[str] = Field(None, description="Extracted/transcribed text as markdown")
-    embedding: Optional[list[float]] = Field(None, description="Single-vector text embedding", exclude=True)
-    multivector: Optional[list[list[float]]] = Field(
-        None, description="ColPali multi-vector embedding (when available)"
-    )
-    transcript_model: Optional[str] = Field(None, description="Model used for transcription")
+    transcript: str | None = Field(None, description="Extracted/transcribed text as markdown")
+    embedding: list[float] | None = Field(None, description="Single-vector text embedding", exclude=True)
+    multivector: list[list[float]] | None = Field(None, description="ColPali multi-vector embedding (when available)")
+    transcript_model: str | None = Field(None, description="Model used for transcription")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary page metadata")
-    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
+    created_at: datetime | None = Field(None, description="Creation timestamp")
 
 
 class IngestionJob(BaseModel):
@@ -133,9 +132,9 @@ class IngestionJob(BaseModel):
     total_memories_created: int = 0
     errors: list[dict[str, Any]] = Field(default_factory=list, description="Per-document error details")
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class DocumentChunk(BaseModel):

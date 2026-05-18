@@ -9,7 +9,7 @@ from ...lifecycle.fastapi import get_logger, get_variables_dep
 from ...models.embedding import ScoreRequest, ScoreResponse, ScoreResult
 from .. import EXT_MULTI_API_ROUTERS
 
-router = APIRouter(prefix="/v1", tags=['score'])
+router = APIRouter(prefix="/v1", tags=["score"])
 
 
 @router.post("/score", response_model=ScoreResponse)
@@ -24,7 +24,7 @@ async def compute_score(
     Used for late interaction retrieval scoring with ColPali-style
     multi-vector embeddings.
     """
-    dual_service = v.get('dual_embedding_service', default=None)
+    dual_service = v.get("dual_embedding_service", default=None)
     if dual_service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -37,10 +37,7 @@ async def compute_score(
             detail="document_vectors must not be empty",
         )
 
-    logger.debug(
-        "Computing MaxSim scores: query_vecs=%d, documents=%d",
-        len(request.query_vectors), len(request.document_vectors)
-    )
+    logger.debug("Computing MaxSim scores: query_vecs=%d, documents=%d", len(request.query_vectors), len(request.document_vectors))
 
     try:
         from memorylayer_server.services.embedding._maxsim import MultiVectorEmbedding

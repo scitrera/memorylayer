@@ -1,25 +1,36 @@
 """FastAPI application factory with lifespan for model warm-up."""
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 from logging import Logger
 
 from fastapi import FastAPI, Request
 from scitrera_app_framework import (
-    Plugin, Variables, get_logger as _saf_get_logger, get_variables as _saf_get_variables,
-    get_extension as _saf_get_extension, ext_parse_bool,
+    Plugin,
+    Variables,
+    ext_parse_bool,
+)
+from scitrera_app_framework import (
+    get_extension as _saf_get_extension,
+)
+from scitrera_app_framework import (
+    get_logger as _saf_get_logger,
+)
+from scitrera_app_framework import (
+    get_variables as _saf_get_variables,
 )
 from scitrera_app_framework.core.plugins import init_all_plugins as _saf_init_all_plugins
 
 from .. import __version__
-from ..config import (
-    EMBED_SERVER_PRELOAD_MODELS, DEFAULT_EMBED_SERVER_PRELOAD_MODELS,
-    EMBED_SERVER_LLM_PRELOAD, DEFAULT_EMBED_SERVER_LLM_PRELOAD,
-)
-from ..services.embedding.dual_service import EXT_DUAL_EMBEDDING_SERVICE
 from ..api import EXT_MULTI_API_ROUTERS
+from ..config import (
+    DEFAULT_EMBED_SERVER_LLM_PRELOAD,
+    DEFAULT_EMBED_SERVER_PRELOAD_MODELS,
+    EMBED_SERVER_LLM_PRELOAD,
+    EMBED_SERVER_PRELOAD_MODELS,
+)
 
-EXT_FASTAPI_SERVER = 'embed-server-fastapi-server'
+EXT_FASTAPI_SERVER = "embed-server-fastapi-server"
 
 
 async def get_variables_dep(request: Request) -> Variables:
@@ -40,7 +51,7 @@ class FastApiPlugin(Plugin):
         return EXT_FASTAPI_SERVER
 
     def initialize(self, v, logger) -> object | None:
-        logger.info('Initializing Embed Server FastAPI App')
+        logger.info("Initializing Embed Server FastAPI App")
 
         # noinspection PyShadowingNames
         @asynccontextmanager
@@ -52,7 +63,7 @@ class FastApiPlugin(Plugin):
             await initialize_services(v)
 
             # store app in variables for access in services
-            v.set('app', app)
+            v.set("app", app)
 
             # store variables in app state
             app.state.v = v
@@ -67,13 +78,13 @@ class FastApiPlugin(Plugin):
                 logger.info("Preloading models during startup")
                 try:
                     # Preload transcription providers
-                    cascade = v.get('cascade_transcriber', default=None)
+                    cascade = v.get("cascade_transcriber", default=None)
                     if cascade:
                         await cascade.preload()
                         logger.info("Transcription providers preloaded")
 
                     # Preload embedding providers
-                    dual_service = v.get('dual_embedding_service', default=None)
+                    dual_service = v.get("dual_embedding_service", default=None)
                     if dual_service:
                         await dual_service.preload()
                         logger.info("Embedding providers preloaded")
@@ -92,7 +103,7 @@ class FastApiPlugin(Plugin):
                 type_fn=ext_parse_bool,
             )
             if llm_preload:
-                llm_svc = v.get('llm_routing_service', default=None)
+                llm_svc = v.get("llm_routing_service", default=None)
                 if llm_svc is not None:
                     logger.info("Preloading LLM profiles during startup")
                     try:
@@ -116,13 +127,15 @@ class FastApiPlugin(Plugin):
         # Map the GPU queue-timeout exception from any ColPali code path
         # to a 503 with Retry-After so callers can shed load gracefully.
         try:
-            from ..services.embedding.colpali import ColPaliQueueTimeoutError
             from fastapi import Request
             from fastapi.responses import JSONResponse
 
+            from ..services.embedding.colpali import ColPaliQueueTimeoutError
+
             @app.exception_handler(ColPaliQueueTimeoutError)
             async def _colpali_queue_timeout_handler(  # noqa: ARG001 - signature mandated
-                request: Request, exc: ColPaliQueueTimeoutError,
+                request: Request,
+                exc: ColPaliQueueTimeoutError,
             ) -> JSONResponse:
                 return JSONResponse(
                     status_code=503,
@@ -149,6 +162,7 @@ class FastApiPlugin(Plugin):
 
         # Register API routers from multi-extension point
         from scitrera_app_framework import get_extensions
+
         try:
             routers = get_extensions(EXT_MULTI_API_ROUTERS, v)
             if routers:

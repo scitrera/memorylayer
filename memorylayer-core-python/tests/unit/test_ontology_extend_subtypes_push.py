@@ -50,9 +50,7 @@ def test_extend_subtypes_collision_with_oss_known_logs_warning(caplog):
     with caplog.at_level(logging.WARNING):
         service.extend_subtypes({"semantic": {"preference"}}, source="test_override")
 
-    assert any(
-        "preference" in rec.message and "test_override" in rec.message for rec in caplog.records
-    )
+    assert any("preference" in rec.message and "test_override" in rec.message for rec in caplog.records)
 
 
 def test_extend_subtypes_validates_input():

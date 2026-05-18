@@ -10,6 +10,7 @@ Covers the full MCP server spec as implemented:
 - Secrets masking + ${VAR} passthrough
 - ~/.claude.json surgical write (read/write_claude_json_servers)
 """
+
 from __future__ import annotations
 
 import json
@@ -29,7 +30,6 @@ from memorylayer_server.services.mcp_servers.resolution import (
     RequestContext,
 )
 from memorylayer_server.services.mcp_servers.sync import compare_hashes, resolve_conflict
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -53,13 +53,13 @@ class TestNameRegex:
     ]
 
     INVALID_NAMES = [
-        "Bad Name",        # uppercase + space
-        "-leading-hyphen", # leading hyphen
-        "trailing-hyphen-", # trailing hyphen
+        "Bad Name",  # uppercase + space
+        "-leading-hyphen",  # leading hyphen
+        "trailing-hyphen-",  # trailing hyphen
         "double--hyphen",  # consecutive hyphens
-        "",                # empty
-        "x" * 65,          # too long
-        "UPPER",           # uppercase
+        "",  # empty
+        "x" * 65,  # too long
+        "UPPER",  # uppercase
         "has_underscore",  # underscore not allowed
     ]
 
@@ -196,11 +196,7 @@ class TestMcpJsonRoundTrip:
         assert servers["rt-web-search"]["url"] == "https://mcp.example.com/search"
 
     def test_mcp_json_import_is_idempotent(self, test_client: TestClient, ws_headers: dict) -> None:
-        payload: dict[str, Any] = {
-            "mcpServers": {
-                "idempotent-rt": {"command": "python", "args": ["-m", "server"]}
-            }
-        }
+        payload: dict[str, Any] = {"mcpServers": {"idempotent-rt": {"command": "python", "args": ["-m", "server"]}}}
         r1 = test_client.post("/v1/mcp-servers/import", json=payload, headers=ws_headers)
         assert r1.json()["imported"] == 1
 
@@ -209,11 +205,7 @@ class TestMcpJsonRoundTrip:
         assert r2.json()["imported"] == 0
 
     def test_mcp_json_transport_inference_stdio(self, test_client: TestClient, ws_headers: dict) -> None:
-        payload: dict[str, Any] = {
-            "mcpServers": {
-                "infer-stdio": {"command": "python"}
-            }
-        }
+        payload: dict[str, Any] = {"mcpServers": {"infer-stdio": {"command": "python"}}}
         resp = test_client.post("/v1/mcp-servers/import", json=payload, headers=ws_headers)
         assert resp.status_code == 200
         assert resp.json()["imported"] == 1
@@ -223,11 +215,7 @@ class TestMcpJsonRoundTrip:
         assert servers["infer-stdio"]["transport"] == "stdio"
 
     def test_mcp_json_transport_inference_http(self, test_client: TestClient, ws_headers: dict) -> None:
-        payload: dict[str, Any] = {
-            "mcpServers": {
-                "infer-http": {"url": "https://mcp.example.com/infer", "type": "http"}
-            }
-        }
+        payload: dict[str, Any] = {"mcpServers": {"infer-http": {"url": "https://mcp.example.com/infer", "type": "http"}}}
         resp = test_client.post("/v1/mcp-servers/import", json=payload, headers=ws_headers)
         assert resp.status_code == 200
 
@@ -249,8 +237,9 @@ class TestScopePrecedence:
         user_id: str | None = None,
         source_mode: str = "server",
     ) -> Any:
-        from memorylayer_server.models.mcp_server import McpServer
         from datetime import UTC, datetime
+
+        from memorylayer_server.models.mcp_server import McpServer
 
         return McpServer(
             id=f"mcp_{name.replace('-', '')}",
@@ -681,9 +670,7 @@ class TestClaudeJsonSurgicalWrite:
             target = Path(f.name)
 
         try:
-            write_claude_json_servers(
-                "local", {"local-srv": {"command": "sh"}}, project_path="/proj", target_path=target
-            )
+            write_claude_json_servers("local", {"local-srv": {"command": "sh"}}, project_path="/proj", target_path=target)
             raw = json.loads(target.read_text())
             assert "user-srv" in raw["mcpServers"]
             assert "local-srv" in raw["projects"]["/proj"]["mcpServers"]

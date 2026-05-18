@@ -11,12 +11,11 @@ The provider serializes canonical ``LLMRequest`` to OpenAI-shape JSON,
 forwards it to ``/v1/chat/completions`` via the client, and
 re-materializes the response into ``LLMResponse`` / ``LLMStreamChunk``.
 """
+
 from __future__ import annotations
 
 import json as _json
 from collections.abc import AsyncIterator
-from logging import Logger
-from typing import Any, Optional
 
 from scitrera_app_framework import Variables, get_extension, get_logger
 
@@ -28,7 +27,7 @@ from ...config import (
 )
 from ...models.llm import LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
 from .._constants import EXT_AETHER_SERVICE_CONNECTION, EXT_EMBED_SERVER_CLIENT
-from ..document.embed_client import EmbedServerClient, TRANSPORT_AETHER, TRANSPORT_HTTP
+from ..document.embed_client import TRANSPORT_AETHER, TRANSPORT_HTTP, EmbedServerClient
 from .base import LLMProvider
 
 
@@ -57,8 +56,9 @@ def _message_to_openai_dict(msg: LLMMessage) -> dict:
     return out
 
 
-def _build_chat_payload(request: LLMRequest, resolved_model: str, *, stream: bool,
-                        max_tokens: int | None, temperature: float | None) -> dict:
+def _build_chat_payload(
+    request: LLMRequest, resolved_model: str, *, stream: bool, max_tokens: int | None, temperature: float | None
+) -> dict:
     """Assemble the OpenAI-shape POST body for ``/v1/chat/completions``."""
     payload: dict = {
         "model": resolved_model,
@@ -68,11 +68,7 @@ def _build_chat_payload(request: LLMRequest, resolved_model: str, *, stream: boo
         payload["stream"] = True
     if request.stop is not None:
         payload["stop"] = request.stop
-    effective_max = (
-        request.max_completion_tokens
-        if request.max_completion_tokens is not None
-        else max_tokens
-    )
+    effective_max = request.max_completion_tokens if request.max_completion_tokens is not None else max_tokens
     if effective_max is not None:
         payload["max_completion_tokens"] = effective_max
     if temperature is not None:
@@ -220,9 +216,12 @@ class EmbedServerLLMProvider(LLMProvider):
         # otherwise we lazily resolve the shared singleton via
         # ``EXT_EMBED_SERVER_CLIENT`` on first use.
         has_override = any(
-            x is not None for x in (
-                embed_server_url, embed_server_transport,
-                embed_server_aether_target, embed_server_timeout,
+            x is not None
+            for x in (
+                embed_server_url,
+                embed_server_transport,
+                embed_server_aether_target,
+                embed_server_timeout,
             )
         )
         self._dedicated_client: EmbedServerClient | None = None
@@ -238,25 +237,23 @@ class EmbedServerLLMProvider(LLMProvider):
                     )
             self._dedicated_client = EmbedServerClient(
                 base_url=embed_server_url or "http://localhost:61051",
-                timeout=float(
-                    embed_server_timeout
-                    if embed_server_timeout is not None
-                    else DEFAULT_MEMORYLAYER_EMBED_SERVER_TIMEOUT
-                ),
+                timeout=float(embed_server_timeout if embed_server_timeout is not None else DEFAULT_MEMORYLAYER_EMBED_SERVER_TIMEOUT),
                 logger=self.logger,
                 transport=transport,
                 aether_connection=aether_connection,
                 aether_target=embed_server_aether_target or DEFAULT_MEMORYLAYER_EMBED_AETHER_TARGET,
                 aether_stream_idle_timeout_ms=DEFAULT_MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS,
             )
-            self._dedicated_needs_connect = (transport == TRANSPORT_HTTP)
+            self._dedicated_needs_connect = transport == TRANSPORT_HTTP
         else:
             self._dedicated_needs_connect = False
 
         self.logger.info(
             "Initialized EmbedServerLLMProvider: model=%s, dedicated_client=%s, url=%s, transport=%s",
-            model, self._dedicated_client is not None,
-            embed_server_url, embed_server_transport,
+            model,
+            self._dedicated_client is not None,
+            embed_server_url,
+            embed_server_transport,
         )
 
     async def _get_client(self) -> EmbedServerClient:
@@ -270,8 +267,7 @@ class EmbedServerLLMProvider(LLMProvider):
         client = get_extension(EXT_EMBED_SERVER_CLIENT, self._v)
         if client is None:
             raise RuntimeError(
-                "EmbedServerLLMProvider requires either per-profile overrides or "
-                "the EXT_EMBED_SERVER_CLIENT extension to be registered."
+                "EmbedServerLLMProvider requires either per-profile overrides or the EXT_EMBED_SERVER_CLIENT extension to be registered."
             )
         # The shared client's plugin connects via ``async_ready``; nothing to do.
         return client
@@ -280,14 +276,18 @@ class EmbedServerLLMProvider(LLMProvider):
         max_tokens, temperature = self.resolve_params(request)
         resolved_model = request.model or self.model or "unknown"
         payload = _build_chat_payload(
-            request, resolved_model, stream=False,
-            max_tokens=max_tokens, temperature=temperature,
+            request,
+            resolved_model,
+            stream=False,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         client = await self._get_client()
         self.logger.debug(
             "embed_server LLM request: model=%s, messages=%d",
-            resolved_model, len(payload["messages"]),
+            resolved_model,
+            len(payload["messages"]),
         )
         data = await client.chat_completions(payload, stream=False)
         return _materialize_response(data, fallback_model=resolved_model)
@@ -296,8 +296,11 @@ class EmbedServerLLMProvider(LLMProvider):
         max_tokens, temperature = self.resolve_params(request)
         resolved_model = request.model or self.model or "unknown"
         payload = _build_chat_payload(
-            request, resolved_model, stream=True,
-            max_tokens=max_tokens, temperature=temperature,
+            request,
+            resolved_model,
+            stream=True,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         client = await self._get_client()

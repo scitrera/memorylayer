@@ -1,20 +1,19 @@
 """Health check endpoints for MemoryLayer Embed Server."""
 
 import logging
-from typing import Dict
 
-from fastapi import APIRouter, status, Depends
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 from scitrera_app_framework import Plugin, Variables
 
 from ..lifecycle.fastapi import get_logger, get_variables_dep
 from . import EXT_MULTI_API_ROUTERS
 
-router = APIRouter(tags=['health'])
+router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> dict[str, str]:
     """Basic health check endpoint."""
     return {"status": "healthy"}
 
@@ -31,7 +30,7 @@ async def readiness_check(
     }
 
     # Check transcription cascade
-    cascade = v.get('cascade_transcriber', default=None)
+    cascade = v.get("cascade_transcriber", default=None)
     if cascade:
         checks["services"]["transcription"] = {
             "status": "available",
@@ -41,7 +40,7 @@ async def readiness_check(
         checks["services"]["transcription"] = {"status": "not_configured"}
 
     # Check embedding service
-    dual_service = v.get('dual_embedding_service', default=None)
+    dual_service = v.get("dual_embedding_service", default=None)
     if dual_service:
         checks["services"]["embedding"] = {
             "single_vector": "available" if dual_service.has_single_vector else "not_configured",
@@ -53,7 +52,7 @@ async def readiness_check(
 
     # LLM routing service (optional; only present when
     # MEMORYLAYER_EMBED_LLM_ENABLED=true and profiles were configured).
-    llm_svc = v.get('llm_routing_service', default=None)
+    llm_svc = v.get("llm_routing_service", default=None)
     if llm_svc is not None:
         checks["services"]["llm"] = {
             "status": "available",
@@ -65,17 +64,13 @@ async def readiness_check(
 
     # Allow optional extensions (e.g. visual-tokenizer enterprise overlay)
     # to contribute health entries without coupling OSS to specific services.
-    for callable_ in v.get('health_check_callables', default=[]):
+    for callable_ in v.get("health_check_callables", default=[]):
         try:
             callable_(checks)
         except Exception as e:  # noqa: BLE001 - non-fatal, log and continue
             logger.warning("Health check extension failed: %s", e)
 
-    status_code = (
-        status.HTTP_200_OK
-        if checks["status"] == "ready"
-        else status.HTTP_503_SERVICE_UNAVAILABLE
-    )
+    status_code = status.HTTP_200_OK if checks["status"] == "ready" else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(content=checks, status_code=status_code)
 
@@ -105,16 +100,16 @@ async def load_check(
     Top-level ``utilization`` is the max across providers in [0, 1].
     Missing / not-configured providers are omitted.
     """
-    providers: Dict[str, Dict[str, float]] = {}
+    providers: dict[str, dict[str, float]] = {}
 
-    dual_service = v.get('dual_embedding_service', default=None)
+    dual_service = v.get("dual_embedding_service", default=None)
     if dual_service is not None:
-        multi = getattr(dual_service, '_multi_vector', None)
-        if multi is not None and hasattr(multi, 'get_load_snapshot'):
-            providers['colpali_multi_vector'] = multi.get_load_snapshot()
+        multi = getattr(dual_service, "_multi_vector", None)
+        if multi is not None and hasattr(multi, "get_load_snapshot"):
+            providers["colpali_multi_vector"] = multi.get_load_snapshot()
 
     # Merge LLM profile snapshots (one entry per profile, keyed ``llm_<name>``).
-    llm_svc = v.get('llm_routing_service', default=None)
+    llm_svc = v.get("llm_routing_service", default=None)
     if llm_svc is not None:
         try:
             providers.update(llm_svc.get_load_snapshot())
@@ -122,10 +117,10 @@ async def load_check(
             pass
 
     top = max(
-        (p.get('utilization', 0.0) for p in providers.values()),
+        (p.get("utilization", 0.0) for p in providers.values()),
         default=0.0,
     )
-    return JSONResponse(content={'providers': providers, 'utilization': top}, status_code=200)
+    return JSONResponse(content={"providers": providers, "utilization": top}, status_code=200)
 
 
 @router.get("/health/gpu")
@@ -133,7 +128,7 @@ async def gpu_health(
     v: Variables = Depends(get_variables_dep),
 ) -> JSONResponse:
     """GPU health check with memory usage information."""
-    gpu_monitor = v.get('gpu_monitor', default=None)
+    gpu_monitor = v.get("gpu_monitor", default=None)
     if gpu_monitor is None:
         return JSONResponse(
             content={"error": "GPU monitor not configured"},
@@ -141,11 +136,7 @@ async def gpu_health(
         )
 
     gpu_status = gpu_monitor.get_gpu_status()
-    status_code = (
-        status.HTTP_200_OK
-        if gpu_status.get("available", False)
-        else status.HTTP_503_SERVICE_UNAVAILABLE
-    )
+    status_code = status.HTTP_200_OK if gpu_status.get("available", False) else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(content=gpu_status, status_code=status_code)
 

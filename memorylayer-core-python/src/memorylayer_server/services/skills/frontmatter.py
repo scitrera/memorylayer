@@ -4,6 +4,7 @@ Parses the YAML-ish frontmatter block (between ``---`` fences) from a
 SKILL.md file and renders it back with stable key ordering. Uses only
 stdlib — no PyYAML dependency required.
 """
+
 from __future__ import annotations
 
 import re
@@ -61,9 +62,7 @@ def render_skill_md(frontmatter: dict, body: str) -> str:
     with any extra keys appended alphabetically.
     """
     lines = ["---"]
-    ordered_keys = _CANONICAL_KEY_ORDER + sorted(
-        k for k in frontmatter if k not in _CANONICAL_KEY_ORDER
-    )
+    ordered_keys = _CANONICAL_KEY_ORDER + sorted(k for k in frontmatter if k not in _CANONICAL_KEY_ORDER)
     for key in ordered_keys:
         if key not in frontmatter:
             continue
@@ -82,6 +81,7 @@ def render_skill_md(frontmatter: dict, body: str) -> str:
 # ---------------------------------------------------------------------------
 # Minimal YAML subset parser (key: value, no nesting, no lists)
 # ---------------------------------------------------------------------------
+
 
 def _parse_simple_yaml(text: str) -> dict:
     """Parse a flat YAML block (key: value pairs only).
@@ -107,9 +107,7 @@ def _parse_simple_yaml(text: str) -> dict:
 
 def _unquote(value: str) -> str:
     """Strip surrounding quotes from a YAML scalar value."""
-    if (value.startswith('"') and value.endswith('"')) or (
-        value.startswith("'") and value.endswith("'")
-    ):
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         return value[1:-1]
     return value
 
@@ -118,7 +116,7 @@ def _yaml_scalar(value: object) -> str:
     """Format a scalar value for YAML emission."""
     s = str(value)
     # Quote if it contains YAML-special characters
-    if any(c in s for c in (':', '#', '"', "'", '\n', '[')):
+    if any(c in s for c in (":", "#", '"', "'", "\n", "[")):
         escaped = s.replace('"', '\\"')
         return f'"{escaped}"'
     return s

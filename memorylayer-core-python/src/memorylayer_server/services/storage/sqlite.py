@@ -555,9 +555,7 @@ class SQLiteStorageBackend(StorageBackend):
         # fails silently if the column is already present in SQLite 3.37+; we catch
         # the OperationalError for older runtimes).
         try:
-            await self._connection.execute(
-                "ALTER TABLE chat_threads ADD COLUMN scope TEXT"
-            )
+            await self._connection.execute("ALTER TABLE chat_threads ADD COLUMN scope TEXT")
             await self._connection.commit()
         except Exception:
             pass  # Column already exists — expected on databases created after the schema update
@@ -693,18 +691,10 @@ class SQLiteStorageBackend(StorageBackend):
                 updated_at TEXT NOT NULL
             )
         """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_skills_workspace ON skills(workspace_id)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_skills_workspace_name ON skills(workspace_id, name)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_skills_workspace_user ON skills(workspace_id, user_id)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_skills_workspace ON skills(workspace_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_skills_workspace_name ON skills(workspace_id, name)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_skills_workspace_user ON skills(workspace_id, user_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)")
 
         # Skill files
         await self._connection.execute("""
@@ -722,9 +712,7 @@ class SQLiteStorageBackend(StorageBackend):
                 UNIQUE(skill_id, path)
             )
         """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_skill_files_skill ON skill_files(skill_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_skill_files_skill ON skill_files(skill_id)")
 
         # Knowledgebase articles
         await self._connection.execute("""
@@ -739,9 +727,7 @@ class SQLiteStorageBackend(StorageBackend):
                 PRIMARY KEY (workspace_id, article_id)
             )
         """)
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_kb_articles_workspace ON knowledgebase_articles(workspace_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_kb_articles_workspace ON knowledgebase_articles(workspace_id)")
 
         # Graph analyses
         await self._connection.execute("""
@@ -781,12 +767,8 @@ class SQLiteStorageBackend(StorageBackend):
         await self._connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_ws_user_name ON mcp_servers(workspace_id, user_id, name) WHERE user_id IS NOT NULL"
         )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name)"
-        )
-        await self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mcp_servers_tenant_ws ON mcp_servers(tenant_id, workspace_id)"
-        )
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_mcp_servers_tenant_ws ON mcp_servers(tenant_id, workspace_id)")
 
         await self._connection.commit()
 
@@ -2732,14 +2714,12 @@ class SQLiteStorageBackend(StorageBackend):
             created_at=parse_datetime_utc(row["created_at"]),
         )
 
-
     # ============================================
     # Document Operations
     # ============================================
 
     async def create_document(self, workspace_id: str, doc: "Document") -> "Document":
         """Store a new document record."""
-        from ...models.document import Document
 
         await self._connection.execute(
             """
@@ -2812,9 +2792,7 @@ class SQLiteStorageBackend(StorageBackend):
         where_clause = " AND ".join(where_parts)
 
         # Get total count
-        count_cursor = await self._connection.execute(
-            f"SELECT COUNT(*) FROM documents WHERE {where_clause}", params
-        )
+        count_cursor = await self._connection.execute(f"SELECT COUNT(*) FROM documents WHERE {where_clause}", params)
         count_row = await count_cursor.fetchone()
         total = count_row[0] if count_row else 0
 
@@ -2950,7 +2928,6 @@ class SQLiteStorageBackend(StorageBackend):
 
     async def create_page(self, workspace_id: str, document_id: str, page: "DocumentPage") -> "DocumentPage":
         """Store a document page."""
-        from ...models.document import DocumentPage
         from ...utils import generate_id
 
         page_id = page.id or generate_id("page")
@@ -3058,10 +3035,7 @@ class SQLiteStorageBackend(StorageBackend):
         """
         from ..embedding._maxsim import MultiVectorEmbedding, maxsim_score
 
-        sql = (
-            "SELECT * FROM document_pages "
-            "WHERE workspace_id = ? AND multivector IS NOT NULL"
-        )
+        sql = "SELECT * FROM document_pages WHERE workspace_id = ? AND multivector IS NOT NULL"
         params: list[object] = [workspace_id]
 
         if doc_ids:
@@ -3089,7 +3063,9 @@ class SQLiteStorageBackend(StorageBackend):
                 )
             except Exception:
                 self.logger.debug(
-                    "MaxSim scoring failed for page %s; skipping", page.id, exc_info=True,
+                    "MaxSim scoring failed for page %s; skipping",
+                    page.id,
+                    exc_info=True,
                 )
                 continue
             scored.append((page, score))
@@ -3478,7 +3454,6 @@ class SQLiteStorageBackend(StorageBackend):
             "generated_at": row["generated_at"],
         }
 
-
     # ============================================
     # Skill Operations
     # ============================================
@@ -3526,9 +3501,7 @@ class SQLiteStorageBackend(StorageBackend):
         row = await cursor.fetchone()
         return self._row_to_skill(row) if row else None
 
-    async def get_skill_by_name(
-        self, workspace_id: str, name: str, user_id: str | None = None
-    ) -> "Skill | None":
+    async def get_skill_by_name(self, workspace_id: str, name: str, user_id: str | None = None) -> "Skill | None":
         """Get skill by name within a workspace, optionally scoped to a user."""
         if user_id is not None:
             cursor = await self._connection.execute(
@@ -3748,7 +3721,6 @@ class SQLiteStorageBackend(StorageBackend):
             updated_at=parse_datetime_utc(row["updated_at"]),
         )
 
-
     # ============================================
     # MCP Server Operations
     # ============================================
@@ -3796,9 +3768,7 @@ class SQLiteStorageBackend(StorageBackend):
         row = await cursor.fetchone()
         return self._row_to_mcp_server(row) if row else None
 
-    async def get_mcp_server_by_name(
-        self, workspace_id: str, name: str, user_id: str | None = None
-    ) -> "McpServer | None":
+    async def get_mcp_server_by_name(self, workspace_id: str, name: str, user_id: str | None = None) -> "McpServer | None":
         """Get MCP server by name within a workspace, optionally scoped to a user."""
         if user_id is not None:
             cursor = await self._connection.execute(
@@ -3875,9 +3845,7 @@ class SQLiteStorageBackend(StorageBackend):
         rows = await cursor.fetchall()
         return [self._row_to_mcp_server(row) for row in rows]
 
-    async def update_mcp_server(
-        self, workspace_id: str, server_id: str, updates: dict
-    ) -> "McpServer | None":
+    async def update_mcp_server(self, workspace_id: str, server_id: str, updates: dict) -> "McpServer | None":
         """Update MCP server fields."""
         if not updates:
             return await self.get_mcp_server(workspace_id, server_id)

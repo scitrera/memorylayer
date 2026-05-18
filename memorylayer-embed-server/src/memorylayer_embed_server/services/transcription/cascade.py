@@ -4,10 +4,11 @@ from logging import Logger
 
 from scitrera_app_framework import Variables, get_logger
 
-from .base import TranscriptionProvider, PageTranscription
 from ...config import (
-    EMBED_SERVER_TRANSCRIPTION_SYSTEM_PROMPT, DEFAULT_EMBED_SERVER_TRANSCRIPTION_SYSTEM_PROMPT,
+    DEFAULT_EMBED_SERVER_TRANSCRIPTION_SYSTEM_PROMPT,
+    EMBED_SERVER_TRANSCRIPTION_SYSTEM_PROMPT,
 )
+from .base import PageTranscription, TranscriptionProvider
 
 
 class CascadeTranscriber:
@@ -19,17 +20,15 @@ class CascadeTranscriber:
     """
 
     def __init__(
-            self,
-            v: Variables = None,
-            providers: list[TranscriptionProvider] = None,
+        self,
+        v: Variables = None,
+        providers: list[TranscriptionProvider] = None,
     ):
         self.logger: Logger = get_logger(v, name=self.__class__.__name__)
         self.providers: list[TranscriptionProvider] = providers or []
         self._v = v
         self.logger.info(
-            "Initialized CascadeTranscriber with %d providers: %s",
-            len(self.providers),
-            [p.PROVIDER_NAME for p in self.providers]
+            "Initialized CascadeTranscriber with %d providers: %s", len(self.providers), [p.PROVIDER_NAME for p in self.providers]
         )
 
     def get_system_prompt(self, override: str = None) -> str:
@@ -44,11 +43,11 @@ class CascadeTranscriber:
         return DEFAULT_EMBED_SERVER_TRANSCRIPTION_SYSTEM_PROMPT
 
     async def transcribe_page(
-            self,
-            image_data: bytes,
-            page_index: int = 0,
-            system_prompt: str = None,
-            max_tokens: int = None,
+        self,
+        image_data: bytes,
+        page_index: int = 0,
+        system_prompt: str = None,
+        max_tokens: int = None,
     ) -> PageTranscription:
         """
         Transcribe a single page through the cascade.
@@ -60,10 +59,7 @@ class CascadeTranscriber:
         result = PageTranscription(page_index=page_index)
 
         for provider in self.providers:
-            self.logger.debug(
-                "Trying provider %s for page %d",
-                provider.PROVIDER_NAME, page_index
-            )
+            self.logger.debug("Trying provider %s for page %d", provider.PROVIDER_NAME, page_index)
 
             attempt = await provider.transcribe_page(
                 image_data=image_data,
@@ -78,15 +74,11 @@ class CascadeTranscriber:
                 result.model_used = attempt.model
                 result.provider_used = attempt.provider
                 self.logger.info(
-                    "Page %d transcribed by %s (%s) in %.1fms",
-                    page_index, attempt.provider, attempt.model, attempt.latency_ms
+                    "Page %d transcribed by %s (%s) in %.1fms", page_index, attempt.provider, attempt.model, attempt.latency_ms
                 )
                 break
             else:
-                self.logger.info(
-                    "Provider %s failed for page %d: %s",
-                    provider.PROVIDER_NAME, page_index, attempt.error
-                )
+                self.logger.info("Provider %s failed for page %d: %s", provider.PROVIDER_NAME, page_index, attempt.error)
 
         if not result.success:
             self.logger.warning("All providers failed for page %d", page_index)
@@ -95,10 +87,10 @@ class CascadeTranscriber:
         return result
 
     async def transcribe_pages(
-            self,
-            images: list[bytes],
-            system_prompt: str = None,
-            max_tokens: int = None,
+        self,
+        images: list[bytes],
+        system_prompt: str = None,
+        max_tokens: int = None,
     ) -> list[PageTranscription]:
         """
         Transcribe multiple pages sequentially through the cascade.
@@ -123,9 +115,7 @@ class CascadeTranscriber:
             try:
                 await provider.preload()
             except Exception as e:
-                self.logger.warning(
-                    "Failed to preload provider %s: %s",
-                    provider.PROVIDER_NAME, e
-                )
+                self.logger.warning("Failed to preload provider %s: %s", provider.PROVIDER_NAME, e)
                 import traceback
+
                 traceback.print_exc()

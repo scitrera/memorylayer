@@ -1,4 +1,5 @@
 """Unit tests for SQLite MCP server storage implementation."""
+
 import pytest
 
 from memorylayer_server.models.mcp_server import McpServer
@@ -154,9 +155,7 @@ class TestMcpServerCRUD:
         server = _make_stdio_server()
         await sqlite_backend.create_mcp_server(server)
 
-        updated = await sqlite_backend.update_mcp_server(
-            "ws_test", server.id, {"description": "Updated description"}
-        )
+        updated = await sqlite_backend.update_mcp_server("ws_test", server.id, {"description": "Updated description"})
         assert updated is not None
         assert updated.description == "Updated description"
 
@@ -214,18 +213,12 @@ class TestFindMcpServersByName:
         assert results == []
 
     async def test_find_no_match(self, sqlite_backend):
-        results = await sqlite_backend.find_mcp_servers_by_name(
-            "nonexistent-server", [{"workspace_id": "ws_test"}]
-        )
+        results = await sqlite_backend.find_mcp_servers_by_name("nonexistent-server", [{"workspace_id": "ws_test"}])
         assert results == []
 
     async def test_find_cross_workspace_scopes(self, sqlite_backend):
-        global_server = _make_stdio_server(
-            id=generate_id("mcp"), workspace_id="_global", user_id=None
-        )
-        user_server = _make_stdio_server(
-            id=generate_id("mcp"), workspace_id="_global_user", user_id="user_b"
-        )
+        global_server = _make_stdio_server(id=generate_id("mcp"), workspace_id="_global", user_id=None)
+        user_server = _make_stdio_server(id=generate_id("mcp"), workspace_id="_global_user", user_id="user_b")
         await sqlite_backend.create_mcp_server(global_server)
         await sqlite_backend.create_mcp_server(user_server)
 

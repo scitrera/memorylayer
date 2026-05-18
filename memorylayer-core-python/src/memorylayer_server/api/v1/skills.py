@@ -21,14 +21,14 @@ import io
 import json
 import logging
 import tarfile
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from scitrera_app_framework import Plugin, Variables
 
-from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
+from memorylayer_server.lifecycle.fastapi import get_logger
 
 from ...models.memory import MemoryType, RecallInput
 from ...models.skill import Skill, SkillCreateInput, SkillUpdateInput
@@ -40,7 +40,7 @@ from ...services.skills.frontmatter import render_skill_md
 from ...services.skills.resolution import RequestContext, SkillsResolutionService
 from ...services.skills.sync import compute_sync_action
 from .. import EXT_MULTI_API_ROUTERS
-from .deps import get_auth_service, get_authz_service, get_memory_service, get_skills_service, get_skills_resolution_service
+from .deps import get_auth_service, get_authz_service, get_memory_service, get_skills_resolution_service, get_skills_service
 from .schemas import ErrorResponse
 
 router = APIRouter(prefix="/v1/skills", tags=["skills"])
@@ -53,7 +53,7 @@ class SkillFileInfo(BaseModel):
     kind: str
     size_bytes: int
     content_hash: str
-    mime_type: Optional[str] = None
+    mime_type: str | None = None
 
 
 class SkillResponse(BaseModel):
@@ -70,19 +70,21 @@ class SkillFilesListResponse(BaseModel):
 
 
 class SkillFileUpsertRequest(BaseModel):
-    content_b64: Optional[str] = Field(None, description="Base64-encoded file content")
-    mime_type: Optional[str] = None
+    content_b64: str | None = Field(None, description="Base64-encoded file content")
+    mime_type: str | None = None
 
 
 class SkillResolveRequest(BaseModel):
-    name: Optional[str] = Field(None, description="Exact skill name — returns precedence winner")
-    query: Optional[str] = Field(None, description="Intent query — runs vector recall against skill memories")
-    scope_hint: Optional[str] = Field(None, description="Restrict resolution to a single scope: 'user', 'workspace', or 'global'")
-    workspace_id: Optional[str] = Field(None, description="Workspace to resolve against; defaults to the authenticated context's workspace.")
+    name: str | None = Field(None, description="Exact skill name — returns precedence winner")
+    query: str | None = Field(None, description="Intent query — runs vector recall against skill memories")
+    scope_hint: str | None = Field(None, description="Restrict resolution to a single scope: 'user', 'workspace', or 'global'")
+    workspace_id: str | None = Field(
+        None, description="Workspace to resolve against; defaults to the authenticated context's workspace."
+    )
 
 
 class SkillResolveResponse(BaseModel):
-    skill: Optional[Skill] = None
+    skill: Skill | None = None
     candidates: list[Skill] = Field(default_factory=list, description="Populated for query-based resolution")
 
 
@@ -141,9 +143,9 @@ async def create_skill(
 )
 async def list_skills(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None),
-    name: Optional[str] = Query(None),
-    enabled: Optional[bool] = Query(None),
+    workspace_id: str | None = Query(None),
+    name: str | None = Query(None),
+    enabled: bool | None = Query(None),
     include_shadowed: bool = Query(False, description="Return all skills including shadowed duplicates"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -265,7 +267,7 @@ async def resolve_skill(
 async def get_skill(
     http_request: Request,
     skill_id: str,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -301,7 +303,7 @@ async def get_skill(
 async def get_skill_manifest(
     http_request: Request,
     skill_id: str,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -349,7 +351,7 @@ async def get_skill_manifest(
 async def list_skill_files(
     http_request: Request,
     skill_id: str,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -398,7 +400,7 @@ async def get_skill_bundle(
     http_request: Request,
     skill_id: str,
     format: str = Query("ndjson", description="Bundle format: 'ndjson' or 'tar.gz'"),
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -475,7 +477,7 @@ async def get_skill_file(
     http_request: Request,
     skill_id: str,
     file_path: str,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -519,7 +521,7 @@ async def update_skill(
     http_request: Request,
     skill_id: str,
     request: SkillUpdateInput,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -559,7 +561,7 @@ async def upsert_skill_file(
     skill_id: str,
     file_path: str,
     request: SkillFileUpsertRequest,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -613,7 +615,7 @@ async def upsert_skill_file(
 async def delete_skill(
     http_request: Request,
     skill_id: str,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -639,7 +641,7 @@ async def delete_skill(
 class SkillSyncRequest(BaseModel):
     manifest_hash: str = Field("", description="SHA-256 of local SKILL.md")
     bundle_hash: str = Field("", description="SHA-256 of local bundle files")
-    workspace_id: Optional[str] = None
+    workspace_id: str | None = None
 
 
 class SkillSyncResponse(BaseModel):

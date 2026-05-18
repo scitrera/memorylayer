@@ -18,21 +18,20 @@ Access level hierarchy (matches aether3-go ``internal/acl/types.go``):
     50      SUPERADMIN  Reserved for system-level operations
     ======  =====  =================================================
 """
+
 import logging
-from typing import Optional
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from memorylayer_server.models.authz import AuthorizationDecision, AuthorizationContext
-from memorylayer_server.services.authorization.base import (
-    AuthorizationService,
-    AuthorizationServicePluginBase,
-)
-
+from memorylayer_server.models.authz import AuthorizationContext, AuthorizationDecision
 from memorylayer_server.services.authentication.aether import (
     META_ACCESS_LEVEL,
     META_GRANT_MAX_ACCESS_LEVEL,
+)
+from memorylayer_server.services.authorization.base import (
+    AuthorizationService,
+    AuthorizationServicePluginBase,
 )
 
 # ---------------------------------------------------------------------------
@@ -103,7 +102,7 @@ def _access_level_name(level: int) -> str:
     return names.get(level, "UNKNOWN")
 
 
-def _role_from_access_level(level: int) -> Optional[str]:
+def _role_from_access_level(level: int) -> str | None:
     """Map a numeric access level to a human-readable role name."""
     if level >= ACCESS_ADMIN:
         return "admin"
@@ -158,8 +157,7 @@ class AetherAuthorizationService(AuthorizationService):
 
         if granted_level >= required:
             self.logger.debug(
-                "ALLOW: resource=%s action=%s required=%s(%d) granted=%s(%d) "
-                "tenant=%s workspace=%s user=%s",
+                "ALLOW: resource=%s action=%s required=%s(%d) granted=%s(%d) tenant=%s workspace=%s user=%s",
                 context.resource,
                 context.action,
                 _access_level_name(required),
@@ -173,8 +171,7 @@ class AetherAuthorizationService(AuthorizationService):
             return AuthorizationDecision.ALLOW
 
         self.logger.warning(
-            "DENY: resource=%s action=%s required=%s(%d) granted=%s(%d) "
-            "tenant=%s workspace=%s user=%s",
+            "DENY: resource=%s action=%s required=%s(%d) granted=%s(%d) tenant=%s workspace=%s user=%s",
             context.resource,
             context.action,
             _access_level_name(required),
@@ -205,7 +202,7 @@ class AetherAuthorizationService(AuthorizationService):
         tenant_id: str,
         workspace_id: str,
         user_id: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Derive a role name from the access level.
 
         Since the actual access level is per-request (on the context
@@ -221,12 +218,14 @@ class AetherAuthorizationService(AuthorizationService):
 # Plugin
 # ---------------------------------------------------------------------------
 
+
 class AetherAuthorizationServicePlugin(AuthorizationServicePluginBase):
     """Enterprise plugin that enables Aether gateway authorization.
 
     Activated when ``MEMORYLAYER_AUTHORIZATION_SERVICE=aether``.
     """
-    PROVIDER_NAME = 'aether'
+
+    PROVIDER_NAME = "aether"
 
     def initialize(self, v: Variables, logger: logging.Logger) -> AetherAuthorizationService:
         return AetherAuthorizationService(v=v)
@@ -235,6 +234,7 @@ class AetherAuthorizationServicePlugin(AuthorizationServicePluginBase):
 # ---------------------------------------------------------------------------
 # Public helpers for use by other enterprise services
 # ---------------------------------------------------------------------------
+
 
 def get_required_access_level(resource: str, action: str) -> int:
     """Look up the minimum access level for a resource/action pair.

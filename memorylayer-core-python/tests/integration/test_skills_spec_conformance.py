@@ -14,8 +14,6 @@ Covers:
 from __future__ import annotations
 
 import base64
-import hashlib
-import json
 from pathlib import Path
 
 import pytest
@@ -260,9 +258,7 @@ class TestBundleFileKinds:
 
 
 class TestScopePrecedence:
-    def test_user_skill_wins_over_workspace_via_resolve(
-        self, test_client: TestClient, ws_headers: dict
-    ) -> None:
+    def test_user_skill_wins_over_workspace_via_resolve(self, test_client: TestClient, ws_headers: dict) -> None:
         # Create workspace-scoped skill
         ws_resp = test_client.post(
             "/v1/skills",
@@ -300,9 +296,7 @@ class TestScopePrecedence:
         )
         assert resolve_ws.status_code == 200
 
-    def test_global_skill_visible_when_no_workspace_match(
-        self, test_client: TestClient
-    ) -> None:
+    def test_global_skill_visible_when_no_workspace_match(self, test_client: TestClient) -> None:
         global_headers = {"X-Workspace-ID": "_global"}
         test_client.post(
             "/v1/skills",
@@ -322,9 +316,7 @@ class TestScopePrecedence:
         assert result is not None
         assert result["name"] == "global-only-skill"
 
-    def test_workspace_skill_not_visible_in_other_workspace(
-        self, test_client: TestClient, ws_headers: dict
-    ) -> None:
+    def test_workspace_skill_not_visible_in_other_workspace(self, test_client: TestClient, ws_headers: dict) -> None:
         test_client.post(
             "/v1/skills",
             json={"name": "ws-isolated-skill", "description": "WS isolated"},
@@ -364,9 +356,7 @@ class TestHybridMode:
         assert (FIXTURES_DIR / "references" / "REFERENCE.md").exists()
         assert (FIXTURES_DIR / "assets" / "icon.txt").exists()
 
-    def test_push_and_pull_round_trip(
-        self, test_client: TestClient, ws_headers: dict
-    ) -> None:
+    def test_push_and_pull_round_trip(self, test_client: TestClient, ws_headers: dict) -> None:
         from memorylayer_server.services.skills.frontmatter import parse_skill_md
 
         skill_md_text = (FIXTURES_DIR / "SKILL.md").read_text(encoding="utf-8")
@@ -417,9 +407,7 @@ class TestHybridMode:
         assert "assets/icon.txt" in file_paths
 
         # Verify file content round-trip
-        content_resp = test_client.get(
-            f"/v1/skills/{skill_id}/files/scripts/process.py", headers=ws_headers
-        )
+        content_resp = test_client.get(f"/v1/skills/{skill_id}/files/scripts/process.py", headers=ws_headers)
         assert content_resp.status_code == 200
         original = (FIXTURES_DIR / "scripts" / "process.py").read_bytes()
         assert content_resp.content == original
@@ -492,9 +480,7 @@ class TestSyncConformance:
 
 
 class TestMemoryMirror:
-    def test_memory_mirror_deleted_with_skill(
-        self, test_client: TestClient, ws_headers: dict
-    ) -> None:
+    def test_memory_mirror_deleted_with_skill(self, test_client: TestClient, ws_headers: dict) -> None:
         """Deleting a skill should not leave orphan memories in the workspace."""
         create_resp = test_client.post(
             "/v1/skills",
@@ -515,9 +501,7 @@ class TestMemoryMirror:
         get_resp = test_client.get(f"/v1/skills/{skill_id}", headers=ws_headers)
         assert get_resp.status_code == 404
 
-    def test_skill_memory_subtype_tagged(
-        self, test_client: TestClient, ws_headers: dict
-    ) -> None:
+    def test_skill_memory_subtype_tagged(self, test_client: TestClient, ws_headers: dict) -> None:
         """Skills are stored; the recall endpoint filters by subtype=skill without error."""
         create_resp = test_client.post(
             "/v1/skills",

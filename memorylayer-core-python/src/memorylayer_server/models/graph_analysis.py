@@ -3,7 +3,7 @@
 Models for community detection, centrality analysis, and graph statistics
 over the workspace association graph.
 """
-from typing import Any, Optional
+
 
 from pydantic import BaseModel, Field
 
@@ -17,7 +17,7 @@ class GraphSnapshot(BaseModel):
     """
 
     workspace_id: str
-    context_id: Optional[str] = None
+    context_id: str | None = None
     node_count: int = 0
     edge_count: int = 0
     includes_rpg: bool = False
@@ -33,15 +33,9 @@ class Community(BaseModel):
     id: int = Field(..., description="Community ID (0-indexed, sorted by size descending)")
     memory_ids: list[str] = Field(default_factory=list, description="Member memory IDs")
     size: int = Field(0, description="Number of members")
-    cohesion_score: float = Field(
-        0.0, description="Intra-community edge density (0.0-1.0)"
-    )
-    central_node_ids: list[str] = Field(
-        default_factory=list, description="Top-3 nodes by degree within community"
-    )
-    label: Optional[str] = Field(
-        None, description="LLM-generated topic label (set by KnowledgebaseService)"
-    )
+    cohesion_score: float = Field(0.0, description="Intra-community edge density (0.0-1.0)")
+    central_node_ids: list[str] = Field(default_factory=list, description="Top-3 nodes by degree within community")
+    label: str | None = Field(None, description="LLM-generated topic label (set by KnowledgebaseService)")
 
 
 class CentralNode(BaseModel):

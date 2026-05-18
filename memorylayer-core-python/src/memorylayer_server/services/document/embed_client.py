@@ -18,6 +18,7 @@ This client is authority-context-agnostic: requests are made under the
 host MemoryLayer service's direct authority. OBO scoping for embedding
 access is a follow-up; today every embedding call is service→service.
 """
+
 from __future__ import annotations
 
 import json as _json
@@ -25,25 +26,22 @@ from logging import Logger
 from typing import Any
 
 import httpx
+from scitrera_app_framework import Variables, get_extension
 
-from scitrera_app_framework import Variables, get_extension, get_logger
-from scitrera_app_framework.api import Plugin
-
-from . import EmbedServerClientPluginBase
-from .._constants import EXT_AETHER_SERVICE_CONNECTION
 from ...config import (
-    MEMORYLAYER_EMBED_SERVER_URL,
-    DEFAULT_MEMORYLAYER_EMBED_SERVER_URL,
-    MEMORYLAYER_EMBED_SERVER_TIMEOUT,
-    DEFAULT_MEMORYLAYER_EMBED_SERVER_TIMEOUT,
-    MEMORYLAYER_EMBED_TRANSPORT,
-    DEFAULT_MEMORYLAYER_EMBED_TRANSPORT,
-    MEMORYLAYER_EMBED_AETHER_TARGET,
-    DEFAULT_MEMORYLAYER_EMBED_AETHER_TARGET,
-    MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS,
     DEFAULT_MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS,
+    DEFAULT_MEMORYLAYER_EMBED_AETHER_TARGET,
+    DEFAULT_MEMORYLAYER_EMBED_SERVER_TIMEOUT,
+    DEFAULT_MEMORYLAYER_EMBED_SERVER_URL,
+    DEFAULT_MEMORYLAYER_EMBED_TRANSPORT,
+    MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS,
+    MEMORYLAYER_EMBED_AETHER_TARGET,
+    MEMORYLAYER_EMBED_SERVER_TIMEOUT,
+    MEMORYLAYER_EMBED_SERVER_URL,
+    MEMORYLAYER_EMBED_TRANSPORT,
 )
-
+from .._constants import EXT_AETHER_SERVICE_CONNECTION
+from . import EmbedServerClientPluginBase
 
 # Transport identifiers
 TRANSPORT_HTTP = "http"
@@ -92,7 +90,7 @@ class EmbedServerClient:
             aether_stream_idle_timeout_ms: Idle timeout for streaming RPCs
                 over Aether, passed to ``proxy_http_async``.
         """
-        self._base_url = base_url.rstrip('/')
+        self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
         self.logger = logger
@@ -101,15 +99,9 @@ class EmbedServerClient:
         self._aether_target = aether_target
         self._aether_stream_idle_timeout_ms = int(aether_stream_idle_timeout_ms)
         if transport not in (TRANSPORT_HTTP, TRANSPORT_AETHER):
-            raise ValueError(
-                f"Unsupported embed transport: {transport!r} "
-                f"(must be {TRANSPORT_HTTP!r} or {TRANSPORT_AETHER!r})"
-            )
+            raise ValueError(f"Unsupported embed transport: {transport!r} (must be {TRANSPORT_HTTP!r} or {TRANSPORT_AETHER!r})")
         if transport == TRANSPORT_AETHER and aether_connection is None:
-            raise ValueError(
-                "transport='aether' requires aether_connection (an "
-                "AetherServiceConnection with a live .client)"
-            )
+            raise ValueError("transport='aether' requires aether_connection (an AetherServiceConnection with a live .client)")
 
     async def connect(self) -> None:
         """Initialize the underlying transport.
@@ -336,15 +328,10 @@ class EmbedServerClient:
         """Get multi-vector embeddings for texts via ColPali."""
         payload = {"input": texts, "input_type": input_type}
 
-        self.logger.debug(
-            "Embedding %d texts (multi-vector, type=%s)", len(texts), input_type
-        )
+        self.logger.debug("Embedding %d texts (multi-vector, type=%s)", len(texts), input_type)
         data = await self._request_json("POST", "/v1/embeddings/multi", payload)
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
-        return [
-            {"vectors": item["vectors"], "num_vectors": item["num_vectors"]}
-            for item in sorted_data
-        ]
+        return [{"vectors": item["vectors"], "num_vectors": item["num_vectors"]} for item in sorted_data]
 
     async def embed_images_multivector(self, images_b64: list[str]) -> list[dict]:
         """Get multi-vector embeddings from images via ColPali."""
@@ -353,10 +340,7 @@ class EmbedServerClient:
         self.logger.debug("Embedding %d images (multi-vector)", len(images_b64))
         data = await self._request_json("POST", "/v1/embeddings/images", payload)
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
-        return [
-            {"vectors": item["vectors"], "num_vectors": item["num_vectors"]}
-            for item in sorted_data
-        ]
+        return [{"vectors": item["vectors"], "num_vectors": item["num_vectors"]} for item in sorted_data]
 
     async def score_maxsim(
         self,
@@ -395,9 +379,7 @@ class EmbedServerHTTPError(Exception):
             detail = body.decode("utf-8", errors="replace")
         except Exception:  # pragma: no cover - defensive
             detail = "<undecodable body>"
-        super().__init__(
-            f"embed server returned {status_code} for {target}{path}: {detail!r}"
-        )
+        super().__init__(f"embed server returned {status_code} for {target}{path}: {detail!r}")
 
 
 class EmbedServerClientPlugin(EmbedServerClientPluginBase):
@@ -410,7 +392,8 @@ class EmbedServerClientPlugin(EmbedServerClientPluginBase):
     ``async_ready`` calls ``client.connect()`` so the underlying
     ``httpx.AsyncClient`` is ready before any provider tries to use it.
     """
-    PROVIDER_NAME = 'default'
+
+    PROVIDER_NAME = "default"
 
     async def async_ready(self, v: Variables, logger: Logger, value: object | None) -> None:
         if value is None:
@@ -425,10 +408,12 @@ class EmbedServerClientPlugin(EmbedServerClientPluginBase):
             MEMORYLAYER_EMBED_SERVER_URL,
             default=DEFAULT_MEMORYLAYER_EMBED_SERVER_URL,
         )
-        timeout = float(v.environ(
-            MEMORYLAYER_EMBED_SERVER_TIMEOUT,
-            default=str(DEFAULT_MEMORYLAYER_EMBED_SERVER_TIMEOUT),
-        ))
+        timeout = float(
+            v.environ(
+                MEMORYLAYER_EMBED_SERVER_TIMEOUT,
+                default=str(DEFAULT_MEMORYLAYER_EMBED_SERVER_TIMEOUT),
+            )
+        )
         transport = v.environ(
             MEMORYLAYER_EMBED_TRANSPORT,
             default=DEFAULT_MEMORYLAYER_EMBED_TRANSPORT,
@@ -449,14 +434,15 @@ class EmbedServerClientPlugin(EmbedServerClientPluginBase):
                 default=DEFAULT_MEMORYLAYER_EMBED_AETHER_TARGET,
             )
 
-        aether_stream_idle_ms = int(v.environ(
-            MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS,
-            default=str(DEFAULT_MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS),
-        ))
+        aether_stream_idle_ms = int(
+            v.environ(
+                MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS,
+                default=str(DEFAULT_MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS),
+            )
+        )
 
         logger.info(
-            "Initializing embed server client: transport=%s, url=%s, "
-            "aether_target=%s, timeout=%.0fs",
+            "Initializing embed server client: transport=%s, url=%s, aether_target=%s, timeout=%.0fs",
             transport,
             base_url if transport == TRANSPORT_HTTP else "<aether>",
             aether_target if transport == TRANSPORT_AETHER else "<n/a>",

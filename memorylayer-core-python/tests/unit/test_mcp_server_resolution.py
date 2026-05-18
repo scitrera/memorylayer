@@ -1,4 +1,5 @@
 """Unit tests for McpServerResolutionService — 4-tier precedence."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -21,7 +22,7 @@ def _server(name: str, workspace_id: str, user_id=None, source_mode="server", of
     now = datetime.now(UTC) + timedelta(seconds=offset_secs)
     # Determine transport-required fields
     return McpServer(
-        id=f"mcp_{name[:8].ljust(8,'0')}0000",
+        id=f"mcp_{name[:8].ljust(8, '0')}0000",
         workspace_id=workspace_id,
         user_id=user_id,
         name=name,

@@ -1,7 +1,8 @@
 """Chat message history implementation using MemoryLayer as the backend."""
 
 import logging
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import httpx
 from langchain_core.chat_history import BaseChatMessageHistory
@@ -13,7 +14,6 @@ from langchain_core.messages import (
     messages_from_dict,
     messages_to_dict,
 )
-
 from memorylayer import SyncMemoryLayerClient
 
 logger = logging.getLogger(__name__)
@@ -173,6 +173,7 @@ class MemoryLayerChatMessageHistory(BaseChatMessageHistory):
         try:
             # Search for memories with this session's tag
             from memorylayer import RecallMode, SearchTolerance
+
             result = self._client.recall(
                 query=f"chat history for session {self.session_id}",
                 tags=[f"session:{self.session_id}", "chat_message"],
@@ -252,6 +253,7 @@ class MemoryLayerChatMessageHistory(BaseChatMessageHistory):
             # Store as episodic memory using the sync client
             try:
                 from memorylayer import MemoryType
+
                 self._client.remember(
                     content=content,
                     type=MemoryType.EPISODIC,
@@ -277,6 +279,7 @@ class MemoryLayerChatMessageHistory(BaseChatMessageHistory):
         try:
             # First, get all memories for this session
             from memorylayer import RecallMode, SearchTolerance
+
             result = self._client.recall(
                 query=f"chat history for session {self.session_id}",
                 tags=[f"session:{self.session_id}", "chat_message"],

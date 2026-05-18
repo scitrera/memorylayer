@@ -1,7 +1,6 @@
 """Graph Analysis Service — Base interface."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from ...models.graph_analysis import (
     Bridge,
@@ -20,7 +19,7 @@ class GraphAnalysisService(ABC):
     async def build_workspace_graph(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
         include_rpg: bool = False,
     ) -> GraphSnapshot:
         """Build a graph snapshot for the workspace and return metadata."""
@@ -30,7 +29,7 @@ class GraphAnalysisService(ABC):
     async def detect_communities(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> list[Community]:
         """Detect communities (clusters) within the workspace graph."""
         pass
@@ -39,7 +38,7 @@ class GraphAnalysisService(ABC):
     async def compute_centrality(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> list[CentralNode]:
         """Compute degree and betweenness centrality for all nodes."""
         pass
@@ -48,7 +47,7 @@ class GraphAnalysisService(ABC):
     async def get_bridges(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> list[Bridge]:
         """Find edges that bridge different communities."""
         pass
@@ -57,7 +56,7 @@ class GraphAnalysisService(ABC):
     async def get_statistics(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> GraphStats:
         """Compute aggregate graph statistics for the workspace."""
         pass
@@ -66,7 +65,7 @@ class GraphAnalysisService(ABC):
     async def analyze(
         self,
         workspace_id: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
         include_rpg: bool = False,
     ) -> GraphAnalysis:
         """Run full graph analysis (snapshot + communities + centrality + bridges + stats)."""

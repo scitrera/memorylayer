@@ -40,12 +40,9 @@ def basic_summary_example():
 
     # Simulate a multi-turn conversation
     conversations = [
-        ("What programming languages do you recommend?",
-         "For beginners, I recommend Python for its readability."),
-        ("Why Python specifically?",
-         "Python has simple syntax and a large ecosystem of libraries."),
-        ("What about web development?",
-         "For web dev, JavaScript/TypeScript are essential."),
+        ("What programming languages do you recommend?", "For beginners, I recommend Python for its readability."),
+        ("Why Python specifically?", "Python has simple syntax and a large ecosystem of libraries."),
+        ("What about web development?", "For web dev, JavaScript/TypeScript are essential."),
     ]
 
     for user_input, ai_response in conversations:
@@ -85,10 +82,7 @@ def custom_prompt_example():
     # Simulate a technical discussion
     memory.save_context(
         inputs={"input": "Should we use PostgreSQL or MySQL for the new project?"},
-        outputs={
-            "output": "PostgreSQL is better for complex queries and JSON support. "
-            "Let's go with PostgreSQL."
-        },
+        outputs={"output": "PostgreSQL is better for complex queries and JSON support. Let's go with PostgreSQL."},
     )
 
     memory.save_context(
@@ -117,10 +111,7 @@ def message_format_example():
 
     memory.save_context(
         inputs={"input": "I need help debugging a race condition"},
-        outputs={
-            "output": "Race conditions can be tricky. Try adding locks or "
-            "using thread-safe data structures."
-        },
+        outputs={"output": "Race conditions can be tricky. Try adding locks or using thread-safe data structures."},
     )
 
     result = memory.load_memory_variables({})
@@ -194,10 +185,7 @@ def include_sources_example():
 
     memory.save_context(
         inputs={"input": "Tell me about your API rate limits"},
-        outputs={
-            "output": "Our API has a rate limit of 100 requests per minute. "
-            "Enterprise plans have higher limits."
-        },
+        outputs={"output": "Our API has a rate limit of 100 requests per minute. Enterprise plans have higher limits."},
     )
 
     summary = memory.load_memory_variables({})

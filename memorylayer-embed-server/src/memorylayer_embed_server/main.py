@@ -7,4 +7,4 @@ from memorylayer_embed_server.lifecycle.fastapi import fastapi_app_factory, get_
 
 app = fastapi_app_factory(v=None)
 
-__all__ = ('app', 'get_logger', 'get_variables_dep')
+__all__ = ("app", "get_logger", "get_variables_dep")

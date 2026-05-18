@@ -12,12 +12,12 @@ import logging
 import re
 
 import markdown
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from scitrera_app_framework import Plugin, Variables, get_extension
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
-from ...services._constants import EXT_AUTHORIZATION_SERVICE, EXT_KNOWLEDGEBASE_SERVICE, EXT_STORAGE_BACKEND
+from ...services._constants import EXT_STORAGE_BACKEND
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
 from .. import EXT_MULTI_API_ROUTERS
@@ -31,6 +31,7 @@ _md = markdown.Markdown(extensions=["tables", "fenced_code", "toc"])
 
 def _md_to_html(text: str) -> str:
     """Convert markdown to HTML, resolving [[wikilinks]] first."""
+
     # Convert [[target|display]] and [[target]] to HTML links
     def _replace_wikilink(m):
         inner = m.group(1)
@@ -250,6 +251,7 @@ _WORKSPACE_LIST_TEMPLATE = """\
 # Routes
 # ------------------------------------------------------------------ #
 
+
 @router.get("/kb", response_class=HTMLResponse)
 async def kb_workspace_list(
     request: Request,
@@ -375,7 +377,7 @@ async def kb_viewer(
                     '<div class="empty-state">'
                     "<h2>No knowledgebase generated yet</h2>"
                     "<p>Generate one via the API:</p>"
-                    '<p><code>POST /v1/knowledgebase/generate</code></p>'
+                    "<p><code>POST /v1/knowledgebase/generate</code></p>"
                     "</div>"
                 ),
             ),
@@ -413,6 +415,7 @@ async def kb_viewer(
 # ------------------------------------------------------------------ #
 # Plugin registration
 # ------------------------------------------------------------------ #
+
 
 class KBViewerPlugin(Plugin):
     """Plugin to register the KB web viewer route."""

@@ -15,7 +15,6 @@ from ...models.memory import OSS_KNOWN_SUBTYPES
 from .._constants import EXT_MULTI_ONTOLOGY_CONTRIBUTORS
 from .base import (
     BASE_ONTOLOGY,
-    FeatureRequiresUpgradeError,
     OntologyService,
     OntologyServicePluginBase,
 )
@@ -70,9 +69,7 @@ class DefaultOntologyService(OntologyService):
             raise ValueError(f"Relationship type '{type_name}' metadata must be a dict, got {type(meta).__name__}")
         missing = [f for f in _REQUIRED_META_FIELDS if f not in meta]
         if missing:
-            raise ValueError(
-                f"Relationship type '{type_name}' is missing required metadata field(s): {', '.join(missing)}"
-            )
+            raise ValueError(f"Relationship type '{type_name}' is missing required metadata field(s): {', '.join(missing)}")
 
     def _load_persistent(self) -> None:
         """Persistence load seam for a future SQL implementation."""
@@ -134,9 +131,7 @@ class DefaultOntologyService(OntologyService):
         ontology = self.get_merged_ontology(tenant_id, workspace_id)
         known_categories = {info.get("category") for info in ontology.values()}
         if category not in known_categories:
-            raise ValueError(
-                f"Invalid category: {category}. Valid categories: {', '.join(sorted(c for c in known_categories if c))}"
-            )
+            raise ValueError(f"Invalid category: {category}. Valid categories: {', '.join(sorted(c for c in known_categories if c))}")
         return sorted(rel_type for rel_type, info in ontology.items() if info.get("category") == category)
 
     def list_categories(self, tenant_id: str, workspace_id: str | None = None) -> list[str]:
@@ -144,10 +139,7 @@ class DefaultOntologyService(OntologyService):
         return sorted({info["category"] for info in ontology.values() if info.get("category")})
 
     def list_contributors(self) -> list[dict]:
-        entries: list[dict] = [
-            {"type_name": k, "kind": "relationship", "source": v}
-            for k, v in self._contribution_sources.items()
-        ]
+        entries: list[dict] = [{"type_name": k, "kind": "relationship", "source": v} for k, v in self._contribution_sources.items()]
         for (memory_type, subtype), source in self._subtype_sources.items():
             entries.append(
                 {
@@ -204,15 +196,11 @@ class DefaultOntologyService(OntologyService):
             if not isinstance(memory_type, str) or not memory_type:
                 raise ValueError(f"Subtype contribution memory_type must be a non-empty string, got {memory_type!r}")
             if not isinstance(values, (set, frozenset, list, tuple)):
-                raise ValueError(
-                    f"Subtype contribution for memory_type '{memory_type}' must be an iterable of strings"
-                )
+                raise ValueError(f"Subtype contribution for memory_type '{memory_type}' must be an iterable of strings")
             normalized = set()
             for value in values:
                 if not isinstance(value, str) or not value:
-                    raise ValueError(
-                        f"Subtype contribution for memory_type '{memory_type}' must contain non-empty strings"
-                    )
+                    raise ValueError(f"Subtype contribution for memory_type '{memory_type}' must contain non-empty strings")
                 normalized.add(value)
 
             oss_known = self._oss_known_subtypes_for(memory_type)
@@ -254,9 +242,7 @@ class DefaultOntologyService(OntologyService):
         tenant_id: str = "_default",
         workspace_id: str | None = None,
     ) -> bool:
-        return subtype in self._oss_known_subtypes_for(memory_type) or subtype in self._contributed_subtypes_for(
-            memory_type
-        )
+        return subtype in self._oss_known_subtypes_for(memory_type) or subtype in self._contributed_subtypes_for(memory_type)
 
     # ------------------------------------------------------------------
     # Push (extend) and create (persisted) APIs
@@ -309,10 +295,7 @@ class DefaultOntologyService(OntologyService):
             self._validate_meta(type_name, meta)
 
         if not DefaultOntologyService._persistence_warning_emitted:
-            self.logger.warning(
-                "Custom ontology persistence is in-memory; data will be lost on restart. "
-                "SQL persistence is a follow-up."
-            )
+            self.logger.warning("Custom ontology persistence is in-memory; data will be lost on restart. SQL persistence is a follow-up.")
             DefaultOntologyService._persistence_warning_emitted = True
 
         key = (tenant_id, workspace_id)

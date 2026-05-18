@@ -13,6 +13,7 @@ hermetic. The behaviours we care about:
   ``messages`` payload to ``/v1/embeddings`` (vLLM's VLM extension).
 * ``shutdown`` is a no-op when no subprocess has been started.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -181,9 +182,11 @@ class _StubMultimodalHttp:
         self.calls.append((path, json))
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
-        resp.json = MagicMock(return_value={
-            "data": [{"embedding": list(self.payload_embedding), "index": 0}],
-        })
+        resp.json = MagicMock(
+            return_value={
+                "data": [{"embedding": list(self.payload_embedding), "index": 0}],
+            }
+        )
         return resp
 
     async def aclose(self):
@@ -251,18 +254,20 @@ def test_image_to_data_url_accepts_existing_data_url():
     """A pre-encoded data URL passes through unchanged."""
     same = "data:image/png;base64,AAAA"
     from memorylayer_embed_server.services.embedding.vllm_subprocess import (
-        VLLMSubprocessEmbeddingProvider as _P,
+        VLLMSubprocessEmbeddingProvider as Provider,
     )
-    assert _P._image_to_data_url(same) == same
+
+    assert Provider._image_to_data_url(same) == same
 
 
 def test_image_to_data_url_passes_through_http_url():
     """HTTP/HTTPS URLs are forwarded so vllm can fetch them server-side."""
     from memorylayer_embed_server.services.embedding.vllm_subprocess import (
-        VLLMSubprocessEmbeddingProvider as _P,
+        VLLMSubprocessEmbeddingProvider as Provider,
     )
+
     url = "https://example.com/cat.png"
-    assert _P._image_to_data_url(url) == url
+    assert Provider._image_to_data_url(url) == url
 
 
 # ---------------------------------------------------------------------------

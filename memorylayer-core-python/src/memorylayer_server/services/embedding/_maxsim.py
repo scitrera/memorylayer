@@ -7,6 +7,7 @@ when the heavy ML providers were retired in favour of the
 to score multi-vector embeddings client-side (e.g. on the retrieval
 hot path) do not require any GPU/torch dependency.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

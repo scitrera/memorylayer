@@ -8,25 +8,44 @@ import logging
 from logging import Logger
 
 from scitrera_app_framework import (
-    Variables, get_variables, get_logger, init_framework_desktop,
-    async_plugins_ready, async_plugins_stopping, ext_parse_bool,
+    Variables,
+    async_plugins_ready,
+    async_plugins_stopping,
+    ext_parse_bool,
+    get_logger,
+    get_variables,
+    init_framework_desktop,
 )
 
 from .config import (
-    EMBED_SERVER_TRANSCRIPTION_ENABLED, DEFAULT_EMBED_SERVER_TRANSCRIPTION_ENABLED,
-    EMBED_SERVER_GLM_OCR_MODEL, DEFAULT_EMBED_SERVER_GLM_OCR_MODEL,
-    EMBED_SERVER_GLM_OCR_MAX_TOKENS, DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS,
-    EMBED_SERVER_DEEPSEEK_OCR_MODEL, DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL,
-    EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
-    EMBED_SERVER_GEMINI_MODEL, DEFAULT_EMBED_SERVER_GEMINI_MODEL,
-    EMBED_SERVER_GEMINI_MAX_TOKENS, DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS,
-    EMBED_SERVER_USE_MOCK_PROVIDERS, DEFAULT_EMBED_SERVER_USE_MOCK_PROVIDERS,
-    EMBED_SERVER_USE_MULTI_FOR_SINGLE, DEFAULT_EMBED_SERVER_USE_MULTI_FOR_SINGLE,
-    EMBED_SERVER_SINGLE_VECTOR_PROVIDER, DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER,
-    EMBED_SERVER_LLM_ENABLED, DEFAULT_EMBED_SERVER_LLM_ENABLED,
-    EMBED_SERVER_LLM_PROFILES, DEFAULT_EMBED_SERVER_LLM_PROFILES,
-    EMBED_SERVER_LLM_DEFAULT_PROFILE, DEFAULT_EMBED_SERVER_LLM_DEFAULT_PROFILE,
-    EMBED_SERVER_LLM_PORT_RANGE, DEFAULT_EMBED_SERVER_LLM_PORT_RANGE,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL,
+    DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_GEMINI_MODEL,
+    DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_GLM_OCR_MODEL,
+    DEFAULT_EMBED_SERVER_LLM_DEFAULT_PROFILE,
+    DEFAULT_EMBED_SERVER_LLM_ENABLED,
+    DEFAULT_EMBED_SERVER_LLM_PORT_RANGE,
+    DEFAULT_EMBED_SERVER_LLM_PROFILES,
+    DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER,
+    DEFAULT_EMBED_SERVER_TRANSCRIPTION_ENABLED,
+    DEFAULT_EMBED_SERVER_USE_MOCK_PROVIDERS,
+    DEFAULT_EMBED_SERVER_USE_MULTI_FOR_SINGLE,
+    EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
+    EMBED_SERVER_DEEPSEEK_OCR_MODEL,
+    EMBED_SERVER_GEMINI_MAX_TOKENS,
+    EMBED_SERVER_GEMINI_MODEL,
+    EMBED_SERVER_GLM_OCR_MAX_TOKENS,
+    EMBED_SERVER_GLM_OCR_MODEL,
+    EMBED_SERVER_LLM_DEFAULT_PROFILE,
+    EMBED_SERVER_LLM_ENABLED,
+    EMBED_SERVER_LLM_PORT_RANGE,
+    EMBED_SERVER_LLM_PROFILES,
+    EMBED_SERVER_SINGLE_VECTOR_PROVIDER,
+    EMBED_SERVER_TRANSCRIPTION_ENABLED,
+    EMBED_SERVER_USE_MOCK_PROVIDERS,
+    EMBED_SERVER_USE_MULTI_FOR_SINGLE,
 )
 
 
@@ -34,11 +53,12 @@ from .config import (
 def preconfigure(v: Variables = None) -> (Variables, dict):
     """Pre-configure the framework and register plugins."""
     from scitrera_app_framework import register_package_plugins
-    from . import api, services, lifecycle  # noqa: F401
+
+    from . import api, lifecycle, services  # noqa: F401
 
     # init framework
     v: Variables = init_framework_desktop(
-        'memorylayer-embed-server',
+        "memorylayer-embed-server",
         base_plugins=False,
         stateful_chdir=False,  # no stateful root needed (stateless server)
         async_auto_enabled=False,
@@ -46,25 +66,25 @@ def preconfigure(v: Variables = None) -> (Variables, dict):
     )
 
     # suppress noisy loggers
-    logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
-    logging.getLogger('httpx').setLevel(logging.WARNING)
-    logging.getLogger('httpcore.http11').setLevel(logging.WARNING)
-    logging.getLogger('httpcore.connection').setLevel(logging.WARNING)
+    logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+    logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 
     # avoid duplicate invocations
-    if v.get('__preconfigure_complete__', default=False):
+    if v.get("__preconfigure_complete__", default=False):
         return v, services
 
     logger = get_logger(v)
 
     # register plugins
-    logger.debug('Registering embed server services')
+    logger.debug("Registering embed server services")
     register_package_plugins(services.__package__, v, recursive=True)
 
-    logger.debug('Registering lifecycle components')
+    logger.debug("Registering lifecycle components")
     register_package_plugins(lifecycle.__package__, v, recursive=True)
 
-    logger.debug('Registering API routes')
+    logger.debug("Registering API routes")
     register_package_plugins(api.__package__, v, recursive=True)
 
     # Reuse the OSS server's pluggable observability stack:
@@ -74,28 +94,30 @@ def preconfigure(v: Variables = None) -> (Variables, dict):
     # MEMORYLAYER_OTEL_ENABLED) so the import is safe even when the
     # ``[observability]`` extra is not installed.
     try:
-        register_package_plugins('memorylayer_server.services.metrics', v, recursive=True)
-        logger.debug('Registered OSS metrics service plugins')
+        register_package_plugins("memorylayer_server.services.metrics", v, recursive=True)
+        logger.debug("Registered OSS metrics service plugins")
     except Exception as e:  # noqa: BLE001 - non-fatal
-        logger.warning('Failed to register OSS metrics plugins: %s', e)
+        logger.warning("Failed to register OSS metrics plugins: %s", e)
     try:
         from memorylayer_server.lifecycle import otel as _otel_mod  # noqa: F401
+
         register_package_plugins(_otel_mod.__name__, v, recursive=False)
-        logger.debug('Registered OSS OTel init plugin')
+        logger.debug("Registered OSS OTel init plugin")
     except Exception as e:  # noqa: BLE001 - non-fatal
-        logger.warning('Failed to register OSS OTel plugin: %s', e)
+        logger.warning("Failed to register OSS OTel plugin: %s", e)
 
     # Optional enterprise plugin overlay (e.g. visual-tokenizer). Discovered
     # via the standard plugin scanner so any add-on package that ships
     # plugins under its top-level namespace gets wired up automatically.
     try:
         import memorylayer_embed_server_enterprise as _ent_pkg
-        register_package_plugins(_ent_pkg.__name__, v, recursive=True)
-        logger.info('Loaded enterprise embed-server extensions from %s', _ent_pkg.__name__)
-    except ImportError:
-        logger.debug('memorylayer_embed_server_enterprise not installed; skipping')
 
-    v.set('__preconfigure_complete__', True)
+        register_package_plugins(_ent_pkg.__name__, v, recursive=True)
+        logger.info("Loaded enterprise embed-server extensions from %s", _ent_pkg.__name__)
+    except ImportError:
+        logger.debug("memorylayer_embed_server_enterprise not installed; skipping")
+
+    v.set("__preconfigure_complete__", True)
     return v, services
 
 
@@ -107,6 +129,7 @@ async def initialize_services(v: Variables = None) -> Variables:
 
     logger.debug("Initializing services")
     from scitrera_app_framework.core.plugins import init_all_plugins
+
     init_all_plugins(v, async_enabled=False)
     await async_plugins_ready(v)
 
@@ -143,8 +166,9 @@ async def initialize_services(v: Variables = None) -> Variables:
 
     # Set up GPU monitor
     from .services.gpu import GPUStatusMonitor
+
     gpu_monitor = GPUStatusMonitor(v=v)
-    v.set('gpu_monitor', gpu_monitor)
+    v.set("gpu_monitor", gpu_monitor)
     logger.info("GPU monitor initialized")
 
     return v
@@ -159,6 +183,7 @@ def _setup_transcription_cascade(v: Variables, logger: Logger):
     # GLM-OCR (primary - local GPU via HuggingFace Transformers)
     try:
         from .services.transcription.glm_ocr import GLMOCRProvider
+
         glm_provider = GLMOCRProvider(
             v=v,
             model_name=v.environ(EMBED_SERVER_GLM_OCR_MODEL, default=DEFAULT_EMBED_SERVER_GLM_OCR_MODEL),
@@ -172,6 +197,7 @@ def _setup_transcription_cascade(v: Variables, logger: Logger):
     # DeepSeek-OCR-2 (secondary - local GPU via HuggingFace Transformers)
     try:
         from .services.transcription.deepseek_ocr import DeepSeekOCRProvider
+
         deepseek_provider = DeepSeekOCRProvider(
             v=v,
             model_name=v.environ(EMBED_SERVER_DEEPSEEK_OCR_MODEL, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL),
@@ -185,6 +211,7 @@ def _setup_transcription_cascade(v: Variables, logger: Logger):
     # Gemini Flash (fallback - external API)
     try:
         from .services.transcription.gemini import GeminiProvider
+
         gemini_provider = GeminiProvider(
             v=v,
             model_name=v.environ(EMBED_SERVER_GEMINI_MODEL, default=DEFAULT_EMBED_SERVER_GEMINI_MODEL),
@@ -196,7 +223,7 @@ def _setup_transcription_cascade(v: Variables, logger: Logger):
         logger.warning("Gemini provider unavailable (google-genai not installed): %s", e)
 
     cascade = CascadeTranscriber(v=v, providers=providers)
-    v.set('cascade_transcriber', cascade)
+    v.set("cascade_transcriber", cascade)
     logger.info("Transcription cascade configured with %d providers", len(providers))
 
 
@@ -223,7 +250,7 @@ def _setup_dual_embedding_service(v: Variables, logger: Logger):
         .lower()
     )
     # ``colpali`` is sugar for the multi-for-single flag — fold them.
-    if single_provider_kind == 'colpali':
+    if single_provider_kind == "colpali":
         use_multi_for_single = True
 
     single_vector = None
@@ -236,6 +263,7 @@ def _setup_dual_embedding_service(v: Variables, logger: Logger):
             MockMultiVectorProvider,
             MockSingleVectorProvider,
         )
+
         single_vector = MockSingleVectorProvider(v=v)
         multi_vector = MockMultiVectorProvider(v=v)
         logger.info("Mock embedding providers configured (EMBED_SERVER_USE_MOCK_PROVIDERS=true)")
@@ -251,6 +279,7 @@ def _setup_dual_embedding_service(v: Variables, logger: Logger):
         # package so torch / colpali-engine stay out of the OSS main server.
         try:
             from memorylayer_embed_server.services.embedding.colpali import ColPaliEmbeddingProviderPlugin
+
             colpali_plugin = ColPaliEmbeddingProviderPlugin()
             multi_vector = colpali_plugin.initialize(v, logger)
             logger.info("Multi-vector (ColPali) provider configured")
@@ -264,17 +293,14 @@ def _setup_dual_embedding_service(v: Variables, logger: Logger):
     # exposes ``.embed()`` (mean-pooled from its multi-vector output).
     if use_multi_for_single and single_vector is None and multi_vector is not None:
         single_vector = multi_vector
-        logger.info(
-            "EMBED_SERVER_USE_MULTI_FOR_SINGLE=true: reusing multi-vector "
-            "provider as single-vector (mean-pooled)"
-        )
+        logger.info("EMBED_SERVER_USE_MULTI_FOR_SINGLE=true: reusing multi-vector provider as single-vector (mean-pooled)")
 
     dual_service = DualEmbeddingService(
         v=v,
         single_vector_provider=single_vector,
         multi_vector_provider=multi_vector,
     )
-    v.set('dual_embedding_service', dual_service)
+    v.set("dual_embedding_service", dual_service)
     logger.info("Dual embedding service configured")
 
 
@@ -287,9 +313,10 @@ def _init_single_vector_provider(v: Variables, logger: Logger, kind: str):
     and Google live in memorylayer-server) and bypasses framework-level
     plugin selection — the kind here is the dispatch key.
     """
-    if kind in ('vllm', '', 'default'):
+    if kind in ("vllm", "", "default"):
         try:
             from memorylayer_embed_server.services.embedding.vllm import VLLMEmbeddingProviderPlugin
+
             provider = VLLMEmbeddingProviderPlugin().initialize(v, logger)
             logger.info("Single-vector (vLLM in-process) provider configured")
             return provider
@@ -299,11 +326,12 @@ def _init_single_vector_provider(v: Variables, logger: Logger, kind: str):
             logger.warning("Failed to initialize vLLM embedding provider: %s", e)
         return None
 
-    if kind == 'vllm_subprocess':
+    if kind == "vllm_subprocess":
         try:
             from memorylayer_embed_server.services.embedding.vllm_subprocess import (
                 VLLMSubprocessEmbeddingProviderPlugin,
             )
+
             provider = VLLMSubprocessEmbeddingProviderPlugin().initialize(v, logger)
             logger.info("Single-vector (vLLM subprocess) provider configured")
             return provider
@@ -313,45 +341,49 @@ def _init_single_vector_provider(v: Variables, logger: Logger, kind: str):
             logger.warning("Failed to initialize vLLM subprocess provider: %s", e)
         return None
 
-    if kind == 'openai':
+    if kind == "openai":
         try:
             from memorylayer_server.services.embedding.openai import OpenAIEmbeddingProviderPlugin
+
             provider = OpenAIEmbeddingProviderPlugin().initialize(v, logger)
             logger.info("Single-vector (OpenAI / OpenAI-compat) provider configured")
             return provider
         except ImportError as e:
             logger.warning(
-                "OpenAI embedding provider unavailable (install the `openai` "
-                "extra on memorylayer-server): %s", e,
+                "OpenAI embedding provider unavailable (install the `openai` extra on memorylayer-server): %s",
+                e,
             )
         except Exception as e:
             logger.warning("Failed to initialize OpenAI embedding provider: %s", e)
         return None
 
-    if kind == 'google':
+    if kind == "google":
         try:
             from memorylayer_server.services.embedding.google import GoogleEmbeddingProviderPlugin
+
             provider = GoogleEmbeddingProviderPlugin().initialize(v, logger)
             logger.info("Single-vector (Google GenAI) provider configured")
             return provider
         except ImportError as e:
             logger.warning(
-                "Google embedding provider unavailable (install the `google` "
-                "extra on memorylayer-server): %s", e,
+                "Google embedding provider unavailable (install the `google` extra on memorylayer-server): %s",
+                e,
             )
         except Exception as e:
             logger.warning("Failed to initialize Google embedding provider: %s", e)
         return None
 
-    if kind == 'mock':
+    if kind == "mock":
         from .services.embedding.mock_providers import MockSingleVectorProvider
+
         logger.info("Single-vector (mock) provider configured")
         return MockSingleVectorProvider(v=v)
 
     logger.warning(
         "Unknown EMBED_SERVER_SINGLE_VECTOR_PROVIDER value: %r — "
         "no single-vector provider will be configured. Valid values: "
-        "vllm, vllm_subprocess, openai, google, colpali, mock.", kind,
+        "vllm, vllm_subprocess, openai, google, colpali, mock.",
+        kind,
     )
     return None
 
@@ -372,11 +404,10 @@ def _setup_llm_service(v: Variables, logger: Logger):
         EMBED_SERVER_LLM_PROFILES,
         default=DEFAULT_EMBED_SERVER_LLM_PROFILES,
     )
-    profile_names = [p.strip() for p in profiles_env.split(',') if p.strip()]
+    profile_names = [p.strip() for p in profiles_env.split(",") if p.strip()]
     if not profile_names:
         logger.warning(
-            "MEMORYLAYER_EMBED_LLM_ENABLED=true but MEMORYLAYER_EMBED_LLM_PROFILES is "
-            "empty — no LLM profiles will be configured."
+            "MEMORYLAYER_EMBED_LLM_ENABLED=true but MEMORYLAYER_EMBED_LLM_PROFILES is empty — no LLM profiles will be configured."
         )
         return
 
@@ -387,14 +418,15 @@ def _setup_llm_service(v: Variables, logger: Logger):
         default=DEFAULT_EMBED_SERVER_LLM_PORT_RANGE,
     )
     try:
-        low_str, high_str = port_range_str.split('-', 1)
+        low_str, high_str = port_range_str.split("-", 1)
         port_low, port_high = int(low_str), int(high_str)
     except (ValueError, AttributeError):
         logger.warning(
             "Invalid MEMORYLAYER_EMBED_LLM_PORT_RANGE=%r; falling back to %r",
-            port_range_str, DEFAULT_EMBED_SERVER_LLM_PORT_RANGE,
+            port_range_str,
+            DEFAULT_EMBED_SERVER_LLM_PORT_RANGE,
         )
-        low_str, high_str = DEFAULT_EMBED_SERVER_LLM_PORT_RANGE.split('-', 1)
+        low_str, high_str = DEFAULT_EMBED_SERVER_LLM_PORT_RANGE.split("-", 1)
         port_low, port_high = int(low_str), int(high_str)
 
     profiles: dict = {}
@@ -414,15 +446,16 @@ def _setup_llm_service(v: Variables, logger: Logger):
                 # an infinite loop.
                 port_low = max(port_low + 1, candidate + 1)
             if port is None:
-                raise RuntimeError(
-                    f"could not find free port in range {port_range_str} for profile {name}"
-                )
+                raise RuntimeError(f"could not find free port in range {port_range_str} for profile {name}")
             used_ports.add(port)
             provider = build_provider_from_env(v, logger, profile_name=name, port=port)
             profiles[name] = provider
             logger.info(
                 "LLM profile configured: name=%s, model=%s, port=%d, aliases=%s",
-                name, provider.model_name, port, provider.aliases,
+                name,
+                provider.model_name,
+                port,
+                provider.aliases,
             )
         except Exception as e:  # noqa: BLE001 - log and skip the bad profile
             logger.warning("Failed to configure LLM profile %r: %s", name, e)
@@ -431,15 +464,18 @@ def _setup_llm_service(v: Variables, logger: Logger):
         logger.warning("No LLM profiles were configured successfully")
         return
 
-    default_profile = v.environ(
-        EMBED_SERVER_LLM_DEFAULT_PROFILE,
-        default=DEFAULT_EMBED_SERVER_LLM_DEFAULT_PROFILE,
-    ).strip() or None
+    default_profile = (
+        v.environ(
+            EMBED_SERVER_LLM_DEFAULT_PROFILE,
+            default=DEFAULT_EMBED_SERVER_LLM_DEFAULT_PROFILE,
+        ).strip()
+        or None
+    )
     if default_profile and default_profile not in profiles:
         logger.warning(
-            "MEMORYLAYER_EMBED_LLM_DEFAULT_PROFILE=%r is not in declared profiles %s; "
-            "default-fallback will be disabled.",
-            default_profile, list(profiles),
+            "MEMORYLAYER_EMBED_LLM_DEFAULT_PROFILE=%r is not in declared profiles %s; default-fallback will be disabled.",
+            default_profile,
+            list(profiles),
         )
         default_profile = None
 
@@ -448,10 +484,11 @@ def _setup_llm_service(v: Variables, logger: Logger):
         default_profile=default_profile,
         logger=logger,
     )
-    v.set('llm_routing_service', svc)
+    v.set("llm_routing_service", svc)
     logger.info(
         "LLM routing service configured: profiles=%s, default=%r",
-        list(profiles), default_profile,
+        list(profiles),
+        default_profile,
     )
 
 
@@ -465,7 +502,7 @@ async def shutdown_services(v: Variables = None) -> None:
 
     # Shut LLM subprocesses down first — they hold GPU memory and child
     # processes that need explicit teardown (process-group SIGTERM/KILL).
-    llm_svc = v.get('llm_routing_service', default=None)
+    llm_svc = v.get("llm_routing_service", default=None)
     if llm_svc is not None:
         try:
             await llm_svc.shutdown()
@@ -475,10 +512,10 @@ async def shutdown_services(v: Variables = None) -> None:
     # If a vLLM subprocess was started by the embed-server, stop it before
     # the framework tears the rest of the plugins down so we don't leak
     # GPU memory or orphan a child process.
-    dual_service = v.get('dual_embedding_service', default=None)
+    dual_service = v.get("dual_embedding_service", default=None)
     if dual_service is not None:
-        single = getattr(dual_service, '_single_vector', None)
-        if single is not None and hasattr(single, 'shutdown') and getattr(single, '_process', None) is not None:
+        single = getattr(dual_service, "_single_vector", None)
+        if single is not None and hasattr(single, "shutdown") and getattr(single, "_process", None) is not None:
             try:
                 await single.shutdown()
             except Exception as e:  # noqa: BLE001 - best-effort cleanup
@@ -487,4 +524,5 @@ async def shutdown_services(v: Variables = None) -> None:
     await async_plugins_stopping(v)
 
     from scitrera_app_framework.core.plugins import shutdown_all_plugins
+
     shutdown_all_plugins(v)

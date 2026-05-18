@@ -1,4 +1,5 @@
 """Unit tests for Skill and SkillFile domain models."""
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,36 +12,43 @@ from memorylayer_server.models.skill import (
     validate_skill_name,
 )
 
-
 # --- validate_skill_name ---
 
-@pytest.mark.parametrize("name", [
-    "pdf-processing",
-    "my-skill",
-    "a",
-    "abc123",
-    "extract-tables-from-pdfs",
-])
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "pdf-processing",
+        "my-skill",
+        "a",
+        "abc123",
+        "extract-tables-from-pdfs",
+    ],
+)
 def test_valid_skill_names(name):
     assert validate_skill_name(name) == name
 
 
-@pytest.mark.parametrize("name,exc_fragment", [
-    ("PDF", "lowercase"),
-    ("-pdf", "hyphen"),
-    ("pdf-", "hyphen"),
-    ("pdf--proc", "consecutive"),
-    ("", "empty"),
-    ("a" * 65, "64 chars"),
-    ("has space", "lowercase"),
-    ("has_underscore", "lowercase"),
-])
+@pytest.mark.parametrize(
+    "name,exc_fragment",
+    [
+        ("PDF", "lowercase"),
+        ("-pdf", "hyphen"),
+        ("pdf-", "hyphen"),
+        ("pdf--proc", "consecutive"),
+        ("", "empty"),
+        ("a" * 65, "64 chars"),
+        ("has space", "lowercase"),
+        ("has_underscore", "lowercase"),
+    ],
+)
 def test_invalid_skill_names(name, exc_fragment):
     with pytest.raises(ValueError, match=exc_fragment):
         validate_skill_name(name)
 
 
 # --- Skill model ---
+
 
 def make_skill(**overrides):
     defaults = dict(
@@ -94,6 +102,7 @@ def test_skill_source_mode_literal():
 
 # --- SkillFile model ---
 
+
 def test_skill_file_basic():
     sf = SkillFile(
         id="sklf_aabbccddeeff",
@@ -123,6 +132,7 @@ def test_skill_file_kind_literal():
 
 # --- SkillCreateInput ---
 
+
 def test_skill_create_input_valid():
     inp = SkillCreateInput(name="my-skill", description="A useful skill")
     assert inp.version == "0.1.0"
@@ -135,6 +145,7 @@ def test_skill_create_input_invalid_name():
 
 
 # --- SkillUpdateInput ---
+
 
 def test_skill_update_input_all_optional():
     inp = SkillUpdateInput()
@@ -149,6 +160,7 @@ def test_skill_update_input_validates_description():
 
 # --- SkillFileInput ---
 
+
 def test_skill_file_input():
     inp = SkillFileInput(path="references/REFERENCE.md", content=b"# ref")
     assert inp.mime_type is None
@@ -156,7 +168,9 @@ def test_skill_file_input():
 
 # --- OSS_KNOWN_SUBTYPES includes skill subtypes ---
 
+
 def test_oss_known_subtypes_has_skill():
     from memorylayer_server.models.memory import OSS_KNOWN_SUBTYPES
+
     assert "skill" in OSS_KNOWN_SUBTYPES["*"]
     assert "skill_reference" in OSS_KNOWN_SUBTYPES["*"]

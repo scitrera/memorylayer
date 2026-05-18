@@ -7,11 +7,13 @@ from scitrera_app_framework import Plugin, Variables
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
 from ...models.embedding import (
-    MultiVectorEmbeddingRequest, MultiVectorEmbeddingResponse, MultiVectorData,
+    MultiVectorData,
+    MultiVectorEmbeddingRequest,
+    MultiVectorEmbeddingResponse,
 )
 from .. import EXT_MULTI_API_ROUTERS
 
-router = APIRouter(prefix="/v1", tags=['embeddings-multi'])
+router = APIRouter(prefix="/v1", tags=["embeddings-multi"])
 
 
 @router.post("/embeddings/multi", response_model=MultiVectorEmbeddingResponse)
@@ -26,7 +28,7 @@ async def create_multi_embeddings(
     Returns multiple vectors per input, suitable for MaxSim scoring
     and late interaction retrieval.
     """
-    dual_service = v.get('dual_embedding_service', default=None)
+    dual_service = v.get("dual_embedding_service", default=None)
     if dual_service is None or not dual_service.has_multi_vector:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -1,4 +1,5 @@
 """Unit tests for McpServerService with a mock storage backend."""
+
 from __future__ import annotations
 
 import pytest
@@ -30,8 +31,7 @@ class MockStorage:
                     return s
         return None
 
-    async def list_mcp_servers(self, workspace_id, user_id=None, name=None,
-                                transport=None, enabled=None, limit=100, offset=0):
+    async def list_mcp_servers(self, workspace_id, user_id=None, name=None, transport=None, enabled=None, limit=100, offset=0):
         results = [s for s in self._servers.values() if s.workspace_id == workspace_id]
         if user_id is not None:
             results = [s for s in results if s.user_id == user_id]
@@ -41,7 +41,7 @@ class MockStorage:
             results = [s for s in results if s.transport == transport]
         if enabled is not None:
             results = [s for s in results if s.enabled == enabled]
-        return results[offset: offset + limit]
+        return results[offset : offset + limit]
 
     async def update_mcp_server(self, workspace_id, server_id, updates):
         s = self._servers.get(server_id)

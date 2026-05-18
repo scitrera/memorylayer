@@ -14,13 +14,13 @@ Endpoints:
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from scitrera_app_framework import Plugin, Variables
 
-from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
+from memorylayer_server.lifecycle.fastapi import get_logger
 
 from ...models.mcp_server import McpServer, McpServerCreateInput, McpServerUpdateInput
 from ...services.authentication import AuthenticationService
@@ -67,9 +67,9 @@ class McpServerListResponse(BaseModel):
 
 
 class McpServerImportRequest(BaseModel):
-    mcpServers: dict[str, Any] = Field(..., description="Map of server name -> server config (standard .mcp.json shape)")
-    workspace_id: Optional[str] = Field(None, description="Target workspace (overrides header)")
-    user_id: Optional[str] = Field(None, description="User scope override")
+    mcpServers: dict[str, Any] = Field(..., description="Map of server name -> server config (standard .mcp.json shape)")  # noqa: N815
+    workspace_id: str | None = Field(None, description="Target workspace (overrides header)")
+    user_id: str | None = Field(None, description="User scope override")
     source_mode: str = Field("server", description="server | filesystem | mirrored")
 
 
@@ -81,20 +81,22 @@ class McpServerImportResponse(BaseModel):
 
 
 class McpServerResolveRequest(BaseModel):
-    name: Optional[str] = Field(None, description="Exact server name — returns precedence winner")
-    query: Optional[str] = Field(None, description="Intent query — runs vector recall against server memories")
-    transport: Optional[str] = Field(None, description="Filter by transport")
-    workspace_id: Optional[str] = Field(None, description="Workspace to operate against; defaults to the authenticated context's workspace.")
+    name: str | None = Field(None, description="Exact server name — returns precedence winner")
+    query: str | None = Field(None, description="Intent query — runs vector recall against server memories")
+    transport: str | None = Field(None, description="Filter by transport")
+    workspace_id: str | None = Field(
+        None, description="Workspace to operate against; defaults to the authenticated context's workspace."
+    )
 
 
 class McpServerResolveResponse(BaseModel):
-    mcp_server: Optional[McpServer] = None
+    mcp_server: McpServer | None = None
     candidates: list[McpServer] = Field(default_factory=list)
 
 
 class McpServerSyncRequest(BaseModel):
     manifest_hash: str = Field("", description="SHA-256 of local config")
-    workspace_id: Optional[str] = None
+    workspace_id: str | None = None
 
 
 class McpServerSyncResponse(BaseModel):
@@ -159,10 +161,10 @@ async def create_mcp_server(
 )
 async def list_mcp_servers(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None),
-    name: Optional[str] = Query(None),
-    transport: Optional[str] = Query(None),
-    enabled: Optional[bool] = Query(None),
+    workspace_id: str | None = Query(None),
+    name: str | None = Query(None),
+    transport: str | None = Query(None),
+    enabled: bool | None = Query(None),
     include_shadowed: bool = Query(False, description="Return all servers including shadowed duplicates"),
     reveal_secrets: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
@@ -261,11 +263,13 @@ async def resolve_mcp_server(
         # We fetch the memory service directly from the extension registry rather than
         # via DI because this endpoint accepts both name and query modes; memory is only
         # required for the query path and is an optional deployment dependency.
-        from ...services.memory import MemoryService, EXT_MEMORY_SERVICE
-        memory_service: Optional[MemoryService] = None
-        memory_service_error: Optional[Exception] = None
+        from ...services.memory import EXT_MEMORY_SERVICE, MemoryService
+
+        memory_service: MemoryService | None = None
+        memory_service_error: Exception | None = None
         try:
             from scitrera_app_framework import get_extension
+
             memory_service = get_extension(EXT_MEMORY_SERVICE)
         except Exception as e:
             memory_service_error = e
@@ -278,6 +282,7 @@ async def resolve_mcp_server(
             raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=detail)
 
         from ...models.memory import MemoryType, RecallInput
+
         recall_result = await memory_service.recall(
             workspace_id=workspace_id,
             input=RecallInput(
@@ -359,6 +364,7 @@ async def import_mcp_servers(
                 existing = await mcp_service.get_mcp_server_by_name(workspace_id, inp.name)
                 if existing:
                     from ...models.mcp_server import McpServerUpdateInput
+
                     update = McpServerUpdateInput(
                         description=inp.description,
                         command=inp.command,
@@ -402,7 +408,7 @@ async def import_mcp_servers(
 )
 async def export_mcp_servers(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     reveal_secrets: bool = Query(False),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
@@ -440,7 +446,7 @@ async def export_mcp_servers(
 async def get_mcp_server(
     http_request: Request,
     server_id: str,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     reveal_secrets: bool = Query(False),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
@@ -479,7 +485,7 @@ async def update_mcp_server(
     http_request: Request,
     server_id: str,
     request: McpServerUpdateInput,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     reveal_secrets: bool = Query(False),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
@@ -518,7 +524,7 @@ async def update_mcp_server(
 async def delete_mcp_server(
     http_request: Request,
     server_id: str,
-    workspace_id: Optional[str] = Query(None),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     mcp_service: McpServerService = Depends(get_mcp_servers_service),

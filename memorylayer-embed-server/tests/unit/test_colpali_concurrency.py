@@ -10,6 +10,7 @@ Skipped at module load if ``colpali_engine`` is not importable (the
 module-level import would fail on ``_load_*`` helpers otherwise — but
 those are lazy, so the file imports without colpali_engine).
 """
+
 from __future__ import annotations
 
 import asyncio

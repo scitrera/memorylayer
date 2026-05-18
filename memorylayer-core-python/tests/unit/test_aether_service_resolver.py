@@ -34,6 +34,7 @@ Out of scope here:
 - Live Aether gateway / dev compose wiring — Phase 4 defers the
   live-gateway smoke check to a manual verification step.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -41,7 +42,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from memorylayer_server.services.aether_service import AetherServiceConnection
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -90,9 +90,7 @@ def _make_service_connection(mock_variables, **overrides) -> AetherServiceConnec
 class TestGetAuthorityResolver:
     """Resolver-getter contract for ``AetherServiceConnection``."""
 
-    def test_get_authority_resolver_returns_resolver_bound_to_client(
-        self, mock_variables, mock_aether_client
-    ):
+    def test_get_authority_resolver_returns_resolver_bound_to_client(self, mock_variables, mock_aether_client):
         """Resolver's ``_client`` attribute is the same object the connection holds."""
         svc = _make_service_connection(mock_variables)
         # Bypass connect() — the getter only requires a non-None _client.
@@ -104,9 +102,7 @@ class TestGetAuthorityResolver:
         # (see sdk/python-client/scitrera_aether_client/authority.py __init__).
         assert resolver._client is mock_aether_client
 
-    def test_get_authority_resolver_is_idempotent(
-        self, mock_variables, mock_aether_client
-    ):
+    def test_get_authority_resolver_is_idempotent(self, mock_variables, mock_aether_client):
         """A second call returns the same instance — single shared LRU cache."""
         svc = _make_service_connection(mock_variables)
         svc._client = mock_aether_client
@@ -124,9 +120,7 @@ class TestGetAuthorityResolver:
         with pytest.raises(RuntimeError, match="connect"):
             svc.get_authority_resolver()
 
-    def test_resolver_ttl_respects_constructor_arg(
-        self, mock_variables, mock_aether_client
-    ):
+    def test_resolver_ttl_respects_constructor_arg(self, mock_variables, mock_aether_client):
         """``resolver_cache_ttl_s=5`` is forwarded to the resolver's ``_max_ttl_s``."""
         svc = _make_service_connection(mock_variables, resolver_cache_ttl_s=5)
         svc._client = mock_aether_client
@@ -136,9 +130,7 @@ class TestGetAuthorityResolver:
         # AsyncAuthorityResolver converts int → float on construction.
         assert resolver._max_ttl_s == 5.0
 
-    def test_resolver_max_entries_respects_constructor_arg(
-        self, mock_variables, mock_aether_client
-    ):
+    def test_resolver_max_entries_respects_constructor_arg(self, mock_variables, mock_aether_client):
         """``resolver_max_entries=42`` is forwarded to the resolver's ``_max_entries``."""
         svc = _make_service_connection(mock_variables, resolver_max_entries=42)
         svc._client = mock_aether_client
@@ -147,9 +139,7 @@ class TestGetAuthorityResolver:
 
         assert resolver._max_entries == 42
 
-    def test_disconnect_drops_resolver_so_reconnect_yields_fresh_instance(
-        self, mock_variables, mock_aether_client
-    ):
+    def test_disconnect_drops_resolver_so_reconnect_yields_fresh_instance(self, mock_variables, mock_aether_client):
         """After a simulated disconnect+reconnect a fresh resolver is returned.
 
         Cached entries are bound to the old client identity; keeping them

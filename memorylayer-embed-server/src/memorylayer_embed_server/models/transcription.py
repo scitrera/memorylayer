@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class TranscriptionRequest(BaseModel):
     """Request to transcribe page images to markdown."""
+
     images: list[str] = Field(..., description="List of base64-encoded page images")
     system_prompt: str | None = Field(None, description="Optional custom system prompt override")
     max_tokens: int | None = Field(None, description="Optional max tokens override")
@@ -12,6 +13,7 @@ class TranscriptionRequest(BaseModel):
 
 class ModelAttempt(BaseModel):
     """Record of a single model attempt during cascade."""
+
     model: str
     provider: str
     success: bool
@@ -24,6 +26,7 @@ class ModelAttempt(BaseModel):
 
 class TranscriptionResult(BaseModel):
     """Result for a single page transcription."""
+
     page_index: int
     content: str
     success: bool = True
@@ -34,6 +37,7 @@ class TranscriptionResult(BaseModel):
 
 class TranscriptionStats(BaseModel):
     """Aggregate statistics for a transcription request."""
+
     total_pages: int
     successful_pages: int
     failed_pages: int
@@ -44,5 +48,6 @@ class TranscriptionStats(BaseModel):
 
 class TranscriptionResponse(BaseModel):
     """Response from transcription endpoint."""
+
     results: list[TranscriptionResult]
     stats: TranscriptionStats

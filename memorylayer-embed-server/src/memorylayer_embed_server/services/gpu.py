@@ -21,6 +21,7 @@ class GPUStatusMonitor:
         if self._torch_available is None:
             try:
                 import torch  # noqa: F401
+
                 self._torch_available = True
             except ImportError:
                 self._torch_available = False
@@ -61,15 +62,17 @@ class GPUStatusMonitor:
                 mem_info = torch.cuda.mem_get_info(i)
                 free_mem, total_mem = mem_info
 
-                devices.append({
-                    "index": i,
-                    "name": props.name,
-                    "total_memory_mb": round(total_mem / (1024 * 1024)),
-                    "free_memory_mb": round(free_mem / (1024 * 1024)),
-                    "used_memory_mb": round((total_mem - free_mem) / (1024 * 1024)),
-                    "utilization_pct": round((1 - free_mem / total_mem) * 100, 1) if total_mem > 0 else 0,
-                    "compute_capability": f"{props.major}.{props.minor}",
-                })
+                devices.append(
+                    {
+                        "index": i,
+                        "name": props.name,
+                        "total_memory_mb": round(total_mem / (1024 * 1024)),
+                        "free_memory_mb": round(free_mem / (1024 * 1024)),
+                        "used_memory_mb": round((total_mem - free_mem) / (1024 * 1024)),
+                        "utilization_pct": round((1 - free_mem / total_mem) * 100, 1) if total_mem > 0 else 0,
+                        "compute_capability": f"{props.major}.{props.minor}",
+                    }
+                )
 
             return {
                 "available": True,

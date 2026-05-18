@@ -14,12 +14,14 @@ import time
 from PIL import Image
 from scitrera_app_framework import Variables
 
-from .base import (
-    TranscriptionProvider, TranscriptionAttempt, clean_transcription_output,
-)
 from ...config import (
-    EMBED_SERVER_DEEPSEEK_OCR_MODEL, DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL,
-    EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL,
+)
+from .base import (
+    TranscriptionAttempt,
+    TranscriptionProvider,
+    clean_transcription_output,
 )
 
 
@@ -35,20 +37,17 @@ class DeepSeekOCRProvider(TranscriptionProvider):
     PROVIDER_NAME = "deepseek-ocr"
 
     def __init__(
-            self,
-            v: Variables = None,
-            model_name: str = DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL,
-            max_tokens: int = DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
+        self,
+        v: Variables = None,
+        model_name: str = DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL,
+        max_tokens: int = DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
     ):
         super().__init__(v)
         self.model_name = model_name
         self.default_max_tokens = max_tokens
         self._tokenizer = None
         self._model = None
-        self.logger.info(
-            "Initialized DeepSeekOCRProvider with model: %s, max_tokens: %d",
-            model_name, max_tokens
-        )
+        self.logger.info("Initialized DeepSeekOCRProvider with model: %s, max_tokens: %d", model_name, max_tokens)
 
     def _load_model(self):
         """Lazy load the model and tokenizer."""
@@ -59,15 +58,16 @@ class DeepSeekOCRProvider(TranscriptionProvider):
             self.logger.info("Loading DeepSeek-OCR-2 model: %s", model_name)
 
             def _init():
-                from transformers import AutoTokenizer, AutoModel
+                from transformers import AutoModel, AutoTokenizer
 
                 tokenizer = AutoTokenizer.from_pretrained(
-                    model_name, trust_remote_code=True,
+                    model_name,
+                    trust_remote_code=True,
                 )
                 model = AutoModel.from_pretrained(
                     model_name,
                     use_mla=True,
-                    _attn_implementation='flash_attention_2',
+                    _attn_implementation="flash_attention_2",
                     trust_remote_code=True,
                     use_safetensors=True,
                 )
@@ -78,6 +78,7 @@ class DeepSeekOCRProvider(TranscriptionProvider):
             def _patch_and_init():
                 """Patch missing imports for newer transformers versions."""
                 import sys
+
                 # LlamaFlashAttention2 was removed in newer transformers
                 llama_mod = sys.modules.get("transformers.models.llama.modeling_llama")
                 if llama_mod and not hasattr(llama_mod, "LlamaFlashAttention2"):
@@ -102,10 +103,10 @@ class DeepSeekOCRProvider(TranscriptionProvider):
         await asyncio.to_thread(self._load_model)
 
     async def transcribe_page(
-            self,
-            image_data: bytes,
-            system_prompt: str,
-            max_tokens: int = None,
+        self,
+        image_data: bytes,
+        system_prompt: str,
+        max_tokens: int = None,
     ) -> TranscriptionAttempt:
         """Transcribe a page image using local DeepSeek-OCR-2 model inference.
 

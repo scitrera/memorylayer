@@ -4,9 +4,10 @@ Implements the USER > WORKSPACE > TENANT > GLOBAL scope ordering with
 source_mode tie-breaking (server > mirrored > filesystem) described in
 the agentskills plan.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ...models.skill import Skill
@@ -29,7 +30,7 @@ _MODE_RANK: dict[str, int] = {
 }
 
 
-def _scope_rank(skill: "Skill", ctx_workspace_id: str, ctx_user_id: Optional[str]) -> int:
+def _scope_rank(skill: Skill, ctx_workspace_id: str, ctx_user_id: str | None) -> int:
     """Return the scope rank of a skill given the request context."""
     if skill.user_id and skill.user_id == ctx_user_id:
         return _SCOPE_RANK["user"]
@@ -40,7 +41,7 @@ def _scope_rank(skill: "Skill", ctx_workspace_id: str, ctx_user_id: Optional[str
     return _SCOPE_RANK["tenant"]
 
 
-def _scope_name(skill: "Skill", ctx_workspace_id: str, ctx_user_id: Optional[str]) -> str:
+def _scope_name(skill: Skill, ctx_workspace_id: str, ctx_user_id: str | None) -> str:
     """Return the string scope name of a skill given the request context."""
     if skill.user_id and skill.user_id == ctx_user_id:
         return "user"
@@ -51,7 +52,7 @@ def _scope_name(skill: "Skill", ctx_workspace_id: str, ctx_user_id: Optional[str
     return "tenant"
 
 
-def _mode_rank(skill: "Skill") -> int:
+def _mode_rank(skill: Skill) -> int:
     return _MODE_RANK.get(skill.source_mode, 99)
 
 
@@ -67,7 +68,7 @@ class RequestContext:
     def __init__(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         tenant_id: str = "",
     ) -> None:
         self.workspace_id = workspace_id
@@ -85,7 +86,7 @@ class SkillsResolutionService:
     RBAC-filtered visibility without changing resolution logic.
     """
 
-    def __init__(self, storage: "StorageBackend") -> None:
+    def __init__(self, storage: StorageBackend) -> None:
         self._storage = storage
 
     def visible_scopes_for(self, ctx: RequestContext) -> list[dict]:
@@ -104,8 +105,8 @@ class SkillsResolutionService:
         self,
         name: str,
         ctx: RequestContext,
-        scope_hint: Optional[str] = None,
-    ) -> "Optional[Skill]":
+        scope_hint: str | None = None,
+    ) -> Skill | None:
         """Return the precedence-winning skill for the given name + context.
 
         Args:
@@ -128,10 +129,10 @@ class SkillsResolutionService:
 
     def apply_shadowing(
         self,
-        skills: "list[Skill]",
+        skills: list[Skill],
         ctx: RequestContext,
-        scope_hint: Optional[str] = None,
-    ) -> "list[Skill]":
+        scope_hint: str | None = None,
+    ) -> list[Skill]:
         """Given a list of skills, return only the precedence winner per name.
 
         Used by GET /v1/skills when ``include_shadowed=false`` (default).
@@ -143,7 +144,7 @@ class SkillsResolutionService:
                 scope before selecting the winner.  Same values as
                 :meth:`resolve`.
         """
-        by_name: dict[str, list["Skill"]] = {}
+        by_name: dict[str, list[Skill]] = {}
         for s in skills:
             by_name.setdefault(s.name, []).append(s)
 
@@ -160,19 +161,19 @@ class SkillsResolutionService:
 
     def _filter_by_scope(
         self,
-        candidates: "list[Skill]",
+        candidates: list[Skill],
         ctx: RequestContext,
         scope_hint: str,
-    ) -> "list[Skill]":
+    ) -> list[Skill]:
         """Return only candidates whose effective scope matches ``scope_hint``."""
         target = scope_hint.lower()
         return [s for s in candidates if _scope_name(s, ctx.workspace_id, ctx.user_id) == target]
 
     def _rank(
         self,
-        candidates: "list[Skill]",
+        candidates: list[Skill],
         ctx: RequestContext,
-    ) -> "list[Skill]":
+    ) -> list[Skill]:
         """Sort candidates by (scope_rank, mode_rank, -updated_at) ascending."""
         return sorted(
             candidates,

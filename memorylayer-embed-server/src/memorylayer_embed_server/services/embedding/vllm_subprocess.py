@@ -24,20 +24,19 @@ Subprocess lifecycle (spawn / health-poll / SIGTERM-then-SIGKILL) is
 delegated to :class:`memorylayer_embed_server.services._vllm_runner.VLLMSubprocessRunner`,
 which is shared with the LLM-side ``vllm_subprocess`` provider.
 """
+
 from __future__ import annotations
 
 import asyncio
 from logging import Logger
 from pathlib import Path
-from typing import Optional, Union
-
-from scitrera_app_framework import Variables, get_logger
 
 from memorylayer_server.config import MEMORYLAYER_EMBEDDING_DIMENSIONS, MEMORYLAYER_EMBEDDING_MODEL
 from memorylayer_server.services.embedding.base import (
     EmbeddingProviderPluginBase,
     MultimodalEmbeddingProvider,
 )
+from scitrera_app_framework import Variables, get_logger
 
 from .._vllm_runner import VLLMSubprocessRunner
 
@@ -57,19 +56,18 @@ from .vllm import (
     MEMORYLAYER_EMBEDDING_VLLM_MODEL,
 )
 
-
 # Subprocess-specific env vars.
-MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_HOST = 'MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_HOST'
-MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_PORT = 'MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_PORT'
-MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC = 'MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC'
-MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD = 'MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD'
+MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_HOST = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_HOST"
+MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_PORT = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_PORT"
+MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC"
+MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD"
 
-DEFAULT_VLLM_SUBPROCESS_HOST = '127.0.0.1'
+DEFAULT_VLLM_SUBPROCESS_HOST = "127.0.0.1"
 DEFAULT_VLLM_SUBPROCESS_PORT = 18000
 DEFAULT_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC = 600.0  # cold model load can take minutes
-DEFAULT_VLLM_SUBPROCESS_CMD = 'vllm'  # binary on PATH; allow override (e.g. full path)
+DEFAULT_VLLM_SUBPROCESS_CMD = "vllm"  # binary on PATH; allow override (e.g. full path)
 
-PROVIDER_NAME_VLLM_SUBPROCESS = 'vllm_subprocess'
+PROVIDER_NAME_VLLM_SUBPROCESS = "vllm_subprocess"
 
 
 class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
@@ -133,8 +131,13 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
             "Initialized VLLMSubprocessEmbeddingProvider: model=%s, dtype=%s, "
             "host=%s, port=%d, gpu_memory_utilization=%.2f, enforce_eager=%s, "
             "startup_timeout_sec=%.0f",
-            model_name, dtype, host, port, gpu_memory_utilization,
-            enforce_eager, startup_timeout_sec,
+            model_name,
+            dtype,
+            host,
+            port,
+            gpu_memory_utilization,
+            enforce_eager,
+            startup_timeout_sec,
         )
 
     # ------------------------------------------------------------------
@@ -192,7 +195,8 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
     async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
         client = await self._ensure_started()
         response = await client.embeddings.create(
-            input=texts, model=self.model_name,
+            input=texts,
+            model=self.model_name,
         )
         # OpenAI client preserves request order.
         out: list[list[float]] = []
@@ -218,7 +222,8 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
         # connection pool is shared across calls.
         if self._mm_http is None:
             self._mm_http = httpx.AsyncClient(
-                base_url=self._runner.base_url, timeout=300.0,
+                base_url=self._runner.base_url,
+                timeout=300.0,
             )
         await self._ensure_started()
         resp = await self._mm_http.post(
@@ -230,15 +235,13 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
         try:
             embedding = list(data["data"][0]["embedding"])
         except (KeyError, IndexError, TypeError) as e:
-            raise RuntimeError(
-                f"unexpected vllm /v1/embeddings response shape: {data!r}"
-            ) from e
+            raise RuntimeError(f"unexpected vllm /v1/embeddings response shape: {data!r}") from e
         if len(embedding) > self.output_dimensions:
             embedding = embedding[: self.output_dimensions]
         return embedding
 
     @staticmethod
-    def _image_to_data_url(image: Union[str, bytes, Path]) -> str:
+    def _image_to_data_url(image: str | bytes | Path) -> str:
         """Coerce supported image inputs to an ``image_url`` value.
 
         Accepted: pre-encoded ``data:`` URLs (pass through), ``http(s)://``
@@ -275,17 +278,19 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
     @classmethod
     def _build_chat_messages(
         cls,
-        text: Optional[str],
-        image: Optional[Union[str, bytes, Path]],
+        text: str | None,
+        image: str | bytes | Path | None,
     ) -> list[dict]:
         content: list[dict] = []
         if text:
             content.append({"type": "text", "text": text})
         if image is not None:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": cls._image_to_data_url(image)},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": cls._image_to_data_url(image)},
+                }
+            )
         return [{"role": "user", "content": content}]
 
     async def embed(self, text: str) -> list[float]:
@@ -299,7 +304,7 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
         self.logger.debug("vllm-subprocess embed_batch(): %d texts", len(texts))
         return await self._embed_texts(texts)
 
-    async def embed_image(self, image: Union[str, bytes, Path]) -> list[float]:
+    async def embed_image(self, image: str | bytes | Path) -> list[float]:
         """Image-only embedding via vLLM's chat-style ``/v1/embeddings`` payload.
 
         Requires a vision-language embedding model on the subprocess side
@@ -312,8 +317,8 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
 
     async def embed_multimodal(
         self,
-        text: Optional[str] = None,
-        image: Optional[Union[str, bytes, Path]] = None,
+        text: str | None = None,
+        image: str | bytes | Path | None = None,
     ) -> list[float]:
         """Combined text + image embedding via vLLM's chat-style payload."""
         if image is None and text is None:

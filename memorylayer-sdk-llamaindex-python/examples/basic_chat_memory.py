@@ -32,7 +32,7 @@ def basic_chat_memory_example():
     chat_store = MemoryLayerChatStore(
         base_url="http://localhost:61001",
         api_key="your-api-key",  # Replace with your API key
-        workspace_id="ws_demo",   # Replace with your workspace ID
+        workspace_id="ws_demo",  # Replace with your workspace ID
     )
 
     # Create ChatMemoryBuffer with the chat store
@@ -88,15 +88,11 @@ def multi_session_example():
 
     # Alice's conversation
     alice_memory.put(ChatMessage(role=MessageRole.USER, content="What's the weather like?"))
-    alice_memory.put(
-        ChatMessage(role=MessageRole.ASSISTANT, content="I don't have real-time weather data.")
-    )
+    alice_memory.put(ChatMessage(role=MessageRole.ASSISTANT, content="I don't have real-time weather data."))
 
     # Bob's conversation (completely separate)
     bob_memory.put(ChatMessage(role=MessageRole.USER, content="Help me with Python code."))
-    bob_memory.put(
-        ChatMessage(role=MessageRole.ASSISTANT, content="I'd be happy to help with Python!")
-    )
+    bob_memory.put(ChatMessage(role=MessageRole.ASSISTANT, content="I'd be happy to help with Python!"))
 
     # Verify isolation
     print("Alice's history:")
@@ -177,9 +173,7 @@ def direct_store_operations_example():
     print(f"Set {len(messages)} messages for key '{key}'")
 
     # Add a single message
-    chat_store.add_message(
-        key, ChatMessage(role=MessageRole.USER, content="What time is it?")
-    )
+    chat_store.add_message(key, ChatMessage(role=MessageRole.USER, content="What time is it?"))
     print("Added one more message")
 
     # Get all messages
@@ -223,9 +217,7 @@ async def async_operations_example():
     print("Set messages asynchronously")
 
     # Add message asynchronously
-    await chat_store.async_add_message(
-        key, ChatMessage(role=MessageRole.USER, content="Async follow-up")
-    )
+    await chat_store.async_add_message(key, ChatMessage(role=MessageRole.USER, content="Async follow-up"))
 
     # Get messages asynchronously
     retrieved = await chat_store.aget_messages(key)

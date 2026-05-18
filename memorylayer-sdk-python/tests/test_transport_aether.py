@@ -13,17 +13,17 @@ Out of scope:
   client.py docstring on ``_ensure_client``.
 - Sync client (``SyncMemoryLayerClient``) — async-first per Phase 5 scope.
 """
+
 from __future__ import annotations
 
 import json as _json
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from memorylayer._transport import AetherTransportResponse
 from memorylayer.client import MemoryLayerClient
-from memorylayer._transport import AetherTransport, AetherTransportResponse
 
 
 def _fake_proxy_response(
@@ -65,6 +65,7 @@ def test_unknown_transport_string_raises_on_aenter():
             pass
 
     import asyncio
+
     with pytest.raises(ValueError, match="Unknown transport"):
         asyncio.get_event_loop().run_until_complete(_enter())
 
@@ -77,12 +78,15 @@ def test_unknown_transport_string_raises_on_aenter():
 @pytest.mark.asyncio
 async def test_aether_transport_routes_through_proxy_http_async(monkeypatch):
     """Standard request goes via proxy_http_async with the configured target."""
-    fake_proxy = AsyncMock(return_value=_fake_proxy_response(
-        status_code=200,
-        body=_json.dumps({"id": "mem_1", "content": "hi"}).encode("utf-8"),
-    ))
+    fake_proxy = AsyncMock(
+        return_value=_fake_proxy_response(
+            status_code=200,
+            body=_json.dumps({"id": "mem_1", "content": "hi"}).encode("utf-8"),
+        )
+    )
 
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     fake_aether = MagicMock(name="AsyncServiceClient")
@@ -121,17 +125,14 @@ async def test_aether_transport_obo_via_authorization_field(monkeypatch):
     The terminator's _mint_auth_headers reads the structured field, not the
     headers, so this is the canonical OBO surface.
     """
-    fake_proxy = AsyncMock(return_value=_fake_proxy_response(
-        body=_json.dumps({"results": []}).encode("utf-8")
-    ))
+    fake_proxy = AsyncMock(return_value=_fake_proxy_response(body=_json.dumps({"results": []}).encode("utf-8")))
 
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     fake_aether = MagicMock(name="AsyncAgentClient")
-    async with MemoryLayerClient(
-        transport="aether", aether_client=fake_aether, api_key="k"
-    ) as client:
+    async with MemoryLayerClient(transport="aether", aether_client=fake_aether, api_key="k") as client:
         async with client.acting_for("g_abc", subject=("user", "alice")) as proxy:
             await proxy.recall("preferences")
 
@@ -146,9 +147,7 @@ async def test_aether_transport_obo_via_authorization_field(monkeypatch):
     # them since the structured field is the authoritative surface.
     forwarded_hdrs = call.kwargs["headers"]
     for k in forwarded_hdrs:
-        assert not k.lower().startswith("x-aether-"), (
-            f"X-Aether-* header leaked through structured-OBO path: {k!r}"
-        )
+        assert not k.lower().startswith("x-aether-"), f"X-Aether-* header leaked through structured-OBO path: {k!r}"
 
 
 @pytest.mark.asyncio
@@ -157,6 +156,7 @@ async def test_aether_transport_custom_target_honoured(monkeypatch):
     fake_proxy = AsyncMock(return_value=_fake_proxy_response(body=b'{"ok": true}'))
 
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     async with MemoryLayerClient(
@@ -182,14 +182,13 @@ async def test_aether_transport_aclose_does_not_close_shared_client(monkeypatch)
     fake_proxy = AsyncMock(return_value=_fake_proxy_response())
 
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     fake_aether = MagicMock(name="AsyncServiceClient")
     fake_aether.aclose = AsyncMock()
 
-    async with MemoryLayerClient(
-        transport="aether", aether_client=fake_aether
-    ) as client:
+    async with MemoryLayerClient(transport="aether", aether_client=fake_aether) as client:
         # Drive the transport directly — we're testing the transport layer,
         # not the SDK methods' response parsing.
         await client._transport.request("POST", "/memories", json={"content": "hi"})
@@ -230,12 +229,11 @@ async def test_aether_transport_content_bytes_round_trip(monkeypatch):
     """``content=<bytes>`` is forwarded as-is, no JSON encoding applied."""
     fake_proxy = AsyncMock(return_value=_fake_proxy_response(body=b'{"imported": 0}'))
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     ndjson = b'{"a":1}\n{"b":2}\n'
-    async with MemoryLayerClient(
-        transport="aether", aether_client=MagicMock()
-    ) as client:
+    async with MemoryLayerClient(transport="aether", aether_client=MagicMock()) as client:
         await client._transport.request(
             "POST",
             "/workspaces/ws_1/import",
@@ -254,13 +252,12 @@ async def test_aether_transport_content_string_is_utf8_encoded(monkeypatch):
     """``content=<str>`` is utf-8 encoded before shipping."""
     fake_proxy = AsyncMock(return_value=_fake_proxy_response())
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     ndjson_str = '{"a":"\u00e9"}\n'  # UTF-8 multibyte char
     async with MemoryLayerClient(transport="aether", aether_client=MagicMock()) as client:
-        await client._transport.request(
-            "POST", "/x", content=ndjson_str, headers={"Content-Type": "text/plain"}
-        )
+        await client._transport.request("POST", "/x", content=ndjson_str, headers={"Content-Type": "text/plain"})
 
     assert fake_proxy.await_args.kwargs["body"] == ndjson_str.encode("utf-8")
 
@@ -270,13 +267,12 @@ async def test_aether_transport_rejects_both_json_and_content(monkeypatch):
     """Passing both ``json`` and ``content`` is a programming error."""
     fake_proxy = AsyncMock(return_value=_fake_proxy_response())
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     async with MemoryLayerClient(transport="aether", aether_client=MagicMock()) as client:
         with pytest.raises(ValueError, match="json or content, not both"):
-            await client._transport.request(
-                "POST", "/x", json={"a": 1}, content=b"hi"
-            )
+            await client._transport.request("POST", "/x", json={"a": 1}, content=b"hi")
 
 
 def test_encode_multipart_produces_well_formed_body():
@@ -309,10 +305,9 @@ def test_encode_multipart_produces_well_formed_body():
 @pytest.mark.asyncio
 async def test_aether_transport_carries_multipart_unchanged(monkeypatch):
     """Multipart body produced by ``_encode_multipart`` reaches proxy_http_async unchanged."""
-    fake_proxy = AsyncMock(return_value=_fake_proxy_response(
-        body=_json.dumps({"document": {}, "job": {}}).encode("utf-8")
-    ))
+    fake_proxy = AsyncMock(return_value=_fake_proxy_response(body=_json.dumps({"document": {}, "job": {}}).encode("utf-8")))
     import scitrera_aether_client.proxy as proxy_mod
+
     monkeypatch.setattr(proxy_mod, "proxy_http_async", fake_proxy)
 
     body, content_type = MemoryLayerClient._encode_multipart(
@@ -322,7 +317,9 @@ async def test_aether_transport_carries_multipart_unchanged(monkeypatch):
 
     async with MemoryLayerClient(transport="aether", aether_client=MagicMock()) as client:
         await client._transport.request(
-            "POST", "/documents", content=body,
+            "POST",
+            "/documents",
+            content=body,
             headers={"content-type": content_type},
         )
 

@@ -1,7 +1,6 @@
 """MemoryLayer Embed Server CLI."""
 
 import click
-
 from scitrera_app_framework import get_variables
 
 
@@ -20,9 +19,12 @@ def cli(verbose: bool):
 def serve(host: str, port: int):
     """Start the embed server."""
     import uvicorn
+
     from memorylayer_embed_server.config import (
-        EMBED_SERVER_HOST, EMBED_SERVER_PORT,
-        DEFAULT_EMBED_SERVER_HOST, DEFAULT_EMBED_SERVER_PORT,
+        DEFAULT_EMBED_SERVER_HOST,
+        DEFAULT_EMBED_SERVER_PORT,
+        EMBED_SERVER_HOST,
+        EMBED_SERVER_PORT,
     )
     from memorylayer_embed_server.dependencies import preconfigure
     from memorylayer_embed_server.lifecycle.fastapi import fastapi_app_factory
@@ -43,6 +45,7 @@ def serve(host: str, port: int):
 def version():
     """Show version information."""
     from memorylayer_embed_server import __version__
+
     click.echo(f"memorylayer-embed-server v{__version__}")
 
 

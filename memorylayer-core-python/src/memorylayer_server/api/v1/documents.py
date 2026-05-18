@@ -16,7 +16,7 @@ Endpoints:
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
@@ -58,18 +58,18 @@ class DocumentResponse(BaseModel):
     document_type: str
     content_hash: str
     size_bytes: int
-    mime_type: Optional[str] = None
+    mime_type: str | None = None
     status: str
     target_context_id: str
     page_count: int
     chunk_count: int
     memory_ids: list[str]
     deduplicated_count: int
-    error_message: Optional[str] = None
+    error_message: str | None = None
     metadata: dict[str, Any]
     created_at: Any
-    processing_started_at: Optional[Any] = None
-    processing_completed_at: Optional[Any] = None
+    processing_started_at: Any | None = None
+    processing_completed_at: Any | None = None
 
 
 class DocumentListResponse(BaseModel):
@@ -94,8 +94,8 @@ class IngestionJobResponse(BaseModel):
     errors: list[dict[str, Any]]
     metadata: dict[str, Any]
     created_at: Any
-    started_at: Optional[Any] = None
-    completed_at: Optional[Any] = None
+    started_at: Any | None = None
+    completed_at: Any | None = None
 
 
 class IngestionJobListResponse(BaseModel):
@@ -110,15 +110,15 @@ class IngestionJobListResponse(BaseModel):
 class DocumentPageResponse(BaseModel):
     """Response model for a document page."""
 
-    id: Optional[str] = None
+    id: str | None = None
     document_id: str
     workspace_id: str
     page_no: int
-    transcript: Optional[str] = None
-    transcript_model: Optional[str] = None
+    transcript: str | None = None
+    transcript_model: str | None = None
     metadata: dict[str, Any]
-    created_at: Optional[Any] = None
-    relevance_score: Optional[float] = None
+    created_at: Any | None = None
+    relevance_score: float | None = None
 
 
 class DocumentPageListResponse(BaseModel):
@@ -133,9 +133,7 @@ class PageSearchRequest(BaseModel):
 
     query: str = Field(..., description="Natural language search query")
     limit: int = Field(10, ge=1, le=100, description="Maximum results to return")
-    doc_ids: Optional[list[str]] = Field(
-        None, description="Optional list of document IDs to restrict search"
-    )
+    doc_ids: list[str] | None = Field(None, description="Optional list of document IDs to restrict search")
 
 
 class PageSearchResponse(BaseModel):
@@ -157,9 +155,7 @@ class DocumentMemoriesResponse(BaseModel):
 class ReprocessRequest(BaseModel):
     """Request model for reprocessing a document."""
 
-    extraction_options: Optional[dict[str, Any]] = Field(
-        None, description="Extraction options overrides"
-    )
+    extraction_options: dict[str, Any] | None = Field(None, description="Extraction options overrides")
 
 
 class DeleteDocumentResponse(BaseModel):
@@ -247,11 +243,11 @@ def _page_to_response(page: DocumentPage) -> DocumentPageResponse:
 async def upload_document(
     http_request: Request,
     file: UploadFile = File(..., description="Document file to ingest"),
-    document_type: Optional[str] = Form(None, description="Override detected document type"),
-    target_context_id: Optional[str] = Form(None, description="Target context for extracted memories"),
-    chunk_size: Optional[int] = Form(None, description="Max chunk size in characters"),
-    importance: Optional[float] = Form(None, description="Default importance for extracted memories"),
-    retain_original: Optional[bool] = Form(None, description="Retain raw content in storage"),
+    document_type: str | None = Form(None, description="Override detected document type"),
+    target_context_id: str | None = Form(None, description="Target context for extracted memories"),
+    chunk_size: int | None = Form(None, description="Max chunk size in characters"),
+    importance: float | None = Form(None, description="Default importance for extracted memories"),
+    retain_original: bool | None = Form(None, description="Retain raw content in storage"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     document_service: DocumentService = Depends(get_document_service),
@@ -284,6 +280,7 @@ async def upload_document(
         # Include MIME type detection hint
         if mime_type and not document_type:
             from ...services.document.parsers import detect_document_type
+
             detected = detect_document_type(filename, mime_type)
             document_type = detected.value
 
@@ -328,8 +325,8 @@ async def upload_document(
 )
 async def list_documents(
     http_request: Request,
-    doc_status: Optional[str] = Query(None, alias="status", description="Filter by document status"),
-    document_type: Optional[str] = Query(None, description="Filter by document type"),
+    doc_status: str | None = Query(None, alias="status", description="Filter by document status"),
+    document_type: str | None = Query(None, description="Filter by document type"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     auth_service: AuthenticationService = Depends(get_auth_service),
@@ -373,7 +370,7 @@ async def list_documents(
 )
 async def list_jobs(
     http_request: Request,
-    job_status: Optional[str] = Query(None, alias="status", description="Filter by job status"),
+    job_status: str | None = Query(None, alias="status", description="Filter by job status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     auth_service: AuthenticationService = Depends(get_auth_service),
@@ -511,7 +508,10 @@ async def search_document_pages(
     try:
         ctx = await auth_service.build_context(http_request, None)
         await authz_service.require_authorization(
-            ctx, "documents", "read", workspace_id=ctx.workspace_id,
+            ctx,
+            "documents",
+            "read",
+            workspace_id=ctx.workspace_id,
         )
 
         embed_client = get_extension(EXT_EMBED_SERVER_CLIENT, v)
@@ -539,7 +539,8 @@ async def search_document_pages(
             )
         except NotImplementedError as nie:
             logger.info(
-                "Page search not supported by active storage backend: %s", nie,
+                "Page search not supported by active storage backend: %s",
+                nie,
             )
             raise HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -670,9 +671,7 @@ async def get_document_memories(
         raise
     except Exception as e:
         logger.error("Failed to get memories for document %s: %s", document_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get document memories"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get document memories")
 
 
 @router.get(

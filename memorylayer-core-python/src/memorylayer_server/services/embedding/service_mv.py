@@ -1,6 +1,6 @@
 from logging import Logger
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from scitrera_app_framework import Variables
 
@@ -17,16 +17,13 @@ from ._maxsim import MultiVectorEmbedding, maxsim_score
 
 
 class EmbeddingServiceMV(EmbeddingService):
-
-    def __init__(self, v: Variables = None, provider: EmbeddingProvider = None, cache: Optional[Any] = None):
+    def __init__(self, v: Variables = None, provider: EmbeddingProvider = None, cache: Any | None = None):
         super().__init__(v, provider, cache)
         # Multi-vector capability is duck-typed: any provider that exposes
         # the ColPali-style multivector method set is considered capable.
         # The canonical multivector-capable provider today is
         # EmbedServerEmbeddingProvider (delegates to memorylayer-embed-server).
-        self._is_multivector = isinstance(provider, MultimodalEmbeddingProvider) and hasattr(
-            provider, "embed_text_multivector"
-        )
+        self._is_multivector = isinstance(provider, MultimodalEmbeddingProvider) and hasattr(provider, "embed_text_multivector")
 
     @property
     def is_multivector(self) -> bool:
@@ -44,7 +41,7 @@ class EmbeddingServiceMV(EmbeddingService):
 
     async def embed_image_multivector(
         self,
-        image: Union[str, bytes, Path],
+        image: str | bytes | Path,
     ) -> MultiVectorEmbedding:
         """Generate multi-vector embedding for image (multivector-capable provider only)."""
         if not self._is_multivector:
@@ -63,7 +60,7 @@ class EmbeddingServiceMV(EmbeddingService):
 
     async def embed_images_batch_multivector(
         self,
-        images: list[Union[str, bytes, Path]],
+        images: list[str | bytes | Path],
         batch_size: int = 4,
     ) -> list[MultiVectorEmbedding]:
         """Generate multi-vector embeddings for multiple images efficiently."""

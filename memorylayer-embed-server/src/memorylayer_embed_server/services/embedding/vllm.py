@@ -2,25 +2,23 @@ import asyncio
 import uuid
 from logging import Logger
 from pathlib import Path
-from typing import Optional, Any, Union
 
-from scitrera_app_framework import Variables as Variables, get_logger
-
-from memorylayer_server.config import MEMORYLAYER_EMBEDDING_MODEL, MEMORYLAYER_EMBEDDING_DIMENSIONS
-from memorylayer_server.services.embedding.base import MultimodalEmbeddingProvider, EmbeddingProviderPluginBase
+from memorylayer_server.config import MEMORYLAYER_EMBEDDING_DIMENSIONS, MEMORYLAYER_EMBEDDING_MODEL
+from memorylayer_server.services.embedding.base import EmbeddingProviderPluginBase, MultimodalEmbeddingProvider
+from scitrera_app_framework import Variables as Variables
 
 # Provider name as string (enum lives in OSS; enterprise uses string directly)
 PROVIDER_NAME_VLLM = "vllm"
 
-MEMORYLAYER_EMBEDDING_VLLM_MODEL = 'MEMORYLAYER_EMBEDDING_VLLM_MODEL'
-MEMORYLAYER_EMBEDDING_VLLM_DTYPE = 'MEMORYLAYER_EMBEDDING_VLLM_DTYPE'
-MEMORYLAYER_EMBEDDING_VLLM_MAX_LENGTH = 'MEMORYLAYER_EMBEDDING_VLLM_MAX_LENGTH'
-MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL = 'MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL'
-MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER = 'MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER'
+MEMORYLAYER_EMBEDDING_VLLM_MODEL = "MEMORYLAYER_EMBEDDING_VLLM_MODEL"
+MEMORYLAYER_EMBEDDING_VLLM_DTYPE = "MEMORYLAYER_EMBEDDING_VLLM_DTYPE"
+MEMORYLAYER_EMBEDDING_VLLM_MAX_LENGTH = "MEMORYLAYER_EMBEDDING_VLLM_MAX_LENGTH"
+MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL = "MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL"
+MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER = "MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER"
 
-DEFAULT_EMBEDDING_MODEL = 'Qwen/Qwen3-VL-Embedding-2B'
+DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-VL-Embedding-2B"
 DEFAULT_EMBEDDING_DIMENSIONS = 2048
-DEFAULT_DTYPE = 'bfloat16'
+DEFAULT_DTYPE = "bfloat16"
 DEFAULT_MAX_LENGTH = 32768
 # vLLM's stock default is 0.92 which is catastrophic on unified-memory
 # systems (DGX Spark, Jetson, integrated GPUs) and on shared GPUs where
@@ -47,14 +45,14 @@ class VLLMEmbeddingProvider(MultimodalEmbeddingProvider):
     """
 
     def __init__(
-            self,
-            v: Variables = None,
-            model_name: str = "Qwen/Qwen3-VL-Embedding-2B",
-            dtype: str = "bfloat16",
-            max_model_len: int = 32768,
-            output_dimensions: int = 2048,
-            gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION,
-            enforce_eager: bool = DEFAULT_ENFORCE_EAGER,
+        self,
+        v: Variables = None,
+        model_name: str = "Qwen/Qwen3-VL-Embedding-2B",
+        dtype: str = "bfloat16",
+        max_model_len: int = 32768,
+        output_dimensions: int = 2048,
+        gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION,
+        enforce_eager: bool = DEFAULT_ENFORCE_EAGER,
     ):
         super().__init__(v, output_dimensions=output_dimensions)
         self.model_name = model_name
@@ -67,9 +65,11 @@ class VLLMEmbeddingProvider(MultimodalEmbeddingProvider):
         self._engine_lock = asyncio.Lock()
         self._dimensions = output_dimensions
         self.logger.info(
-            "Initialized VLLMEmbeddingProvider with model: %s, dtype: %s, "
-            "gpu_memory_utilization: %.2f, enforce_eager: %s",
-            model_name, dtype, gpu_memory_utilization, enforce_eager,
+            "Initialized VLLMEmbeddingProvider with model: %s, dtype: %s, gpu_memory_utilization: %.2f, enforce_eager: %s",
+            model_name,
+            dtype,
+            gpu_memory_utilization,
+            enforce_eager,
         )
 
     async def _get_engine(self):
@@ -89,12 +89,13 @@ class VLLMEmbeddingProvider(MultimodalEmbeddingProvider):
             if self._engine is not None:  # second waiter
                 return self._engine
 
-            from vllm.v1.engine.async_llm import AsyncLLM
             from vllm.engine.arg_utils import AsyncEngineArgs
+            from vllm.v1.engine.async_llm import AsyncLLM
 
             self.logger.info(
                 "Loading vLLM AsyncLLM engine: model=%s, gpu_mem_util=%.2f",
-                self.model_name, self.gpu_memory_utilization,
+                self.model_name,
+                self.gpu_memory_utilization,
             )
 
             common = dict(
@@ -130,7 +131,9 @@ class VLLMEmbeddingProvider(MultimodalEmbeddingProvider):
         params = PoolingParams(task="embed")
         final_output = None
         async for output in engine.encode(
-            prompt, params, request_id=str(uuid.uuid4()),
+            prompt,
+            params,
+            request_id=str(uuid.uuid4()),
         ):
             final_output = output
         if final_output is None:
@@ -167,13 +170,14 @@ class VLLMEmbeddingProvider(MultimodalEmbeddingProvider):
         return await asyncio.gather(*[self._encode_one(t) for t in texts])
 
     def _build_multimodal_prompt(
-            self,
-            text: Optional[str],
-            image: Optional[Union[str, bytes, Path]],
+        self,
+        text: str | None,
+        image: str | bytes | Path | None,
     ) -> dict:
         """Build the vLLM multimodal prompt dict for an image (+optional text)."""
-        from PIL import Image
         import io
+
+        from PIL import Image
 
         image_bytes = self.load_image_bytes(image)
         pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -182,7 +186,7 @@ class VLLMEmbeddingProvider(MultimodalEmbeddingProvider):
             "multi_modal_data": {"image": pil_image},
         }
 
-    async def embed_image(self, image: Union[str, bytes, Path]) -> list[float]:
+    async def embed_image(self, image: str | bytes | Path) -> list[float]:
         """Image embedding via vLLM multimodal input (Qwen3-VL-Embedding-2B).
 
         Reuses the same multimodal prompt-dict shape as the legacy sync
@@ -194,9 +198,9 @@ class VLLMEmbeddingProvider(MultimodalEmbeddingProvider):
         return await self._encode_one(prompt)
 
     async def embed_multimodal(
-            self,
-            text: Optional[str] = None,
-            image: Optional[Union[str, bytes, Path]] = None,
+        self,
+        text: str | None = None,
+        image: str | bytes | Path | None = None,
     ) -> list[float]:
         """Combined text + image embedding via vLLM."""
         if image is None and text is None:

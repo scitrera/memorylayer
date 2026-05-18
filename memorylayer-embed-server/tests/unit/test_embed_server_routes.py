@@ -9,6 +9,7 @@ These tests do **not** import torch or download any model. They cover
 the routing surface (request validation, status codes, response shapes)
 and prove that the mock-provider integration test image will work.
 """
+
 from __future__ import annotations
 
 import base64
@@ -18,18 +19,17 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from memorylayer_embed_server.api.v1.embeddings import router as embeddings_router
-from memorylayer_embed_server.api.v1.embeddings_multi import router as embeddings_multi_router
-from memorylayer_embed_server.api.v1.embeddings_images import router as embeddings_images_router
-from memorylayer_embed_server.api.v1.score import router as score_router
 from memorylayer_embed_server.api.health import router as health_router
+from memorylayer_embed_server.api.v1.embeddings import router as embeddings_router
+from memorylayer_embed_server.api.v1.embeddings_images import router as embeddings_images_router
+from memorylayer_embed_server.api.v1.embeddings_multi import router as embeddings_multi_router
+from memorylayer_embed_server.api.v1.score import router as score_router
 from memorylayer_embed_server.lifecycle.fastapi import get_logger, get_variables_dep
 from memorylayer_embed_server.services.embedding.dual_service import DualEmbeddingService
 from memorylayer_embed_server.services.embedding.mock_providers import (
     MockMultiVectorProvider,
     MockSingleVectorProvider,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -43,7 +43,9 @@ def dual_service() -> DualEmbeddingService:
         v=None,
         single_vector_provider=MockSingleVectorProvider(v=None, dimensions=64),
         multi_vector_provider=MockMultiVectorProvider(
-            v=None, dimensions=32, num_tokens=4,
+            v=None,
+            dimensions=32,
+            num_tokens=4,
         ),
     )
 
@@ -51,6 +53,7 @@ def dual_service() -> DualEmbeddingService:
 @pytest.fixture
 def app_factory(dual_service):
     """Build a FastAPI app pre-wired with the routers and a stub Variables."""
+
     def _make_app(with_dual_service: bool = True) -> FastAPI:
         app = FastAPI()
         app.include_router(embeddings_router)
@@ -62,13 +65,13 @@ def app_factory(dual_service):
         v = MagicMock(name="Variables")
 
         def _v_get(key, default=None):
-            if key == 'dual_embedding_service':
+            if key == "dual_embedding_service":
                 return dual_service if with_dual_service else None
-            if key == 'cascade_transcriber':
+            if key == "cascade_transcriber":
                 return None
-            if key == 'gpu_monitor':
+            if key == "gpu_monitor":
                 return None
-            if key == 'health_check_callables':
+            if key == "health_check_callables":
                 return []
             return default
 
@@ -79,6 +82,7 @@ def app_factory(dual_service):
 
         async def _override_logger(request=None):
             import logging
+
             return logging.getLogger("embed-server-tests")
 
         app.dependency_overrides[get_variables_dep] = _override_v
@@ -231,8 +235,8 @@ def test_score_maxsim_orders_descending(client):
     """High-similarity doc must rank above low-similarity doc."""
     query_vectors = [[1.0, 0.0], [0.0, 1.0]]
     document_vectors = [
-        [[1.0, 0.0], [0.0, 1.0]],   # identical to query → high score
-        [[-1.0, 0.0], [0.0, -1.0]], # anti-correlated → low score
+        [[1.0, 0.0], [0.0, 1.0]],  # identical to query → high score
+        [[-1.0, 0.0], [0.0, -1.0]],  # anti-correlated → low score
     ]
     resp = client.post(
         "/v1/score",

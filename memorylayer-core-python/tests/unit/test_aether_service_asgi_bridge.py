@@ -31,16 +31,15 @@ Out of scope here:
   limitation (Phase 2a explicitly excluded indefinite streaming).
 - Live Aether gateway / dev compose infrastructure.
 """
+
 from __future__ import annotations
 
 import json
 
-import pytest
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-
-from memorylayer_server.services.aether_service.asgi_bridge import asgi_dispatch
 from scitrera_aether_client.proxy_terminator import MintedRequest
 
+from memorylayer_server.services.aether_service.asgi_bridge import asgi_dispatch
 
 # ---------------------------------------------------------------------------
 # Mini FastAPI app shared across tests

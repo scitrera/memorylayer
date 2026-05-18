@@ -10,6 +10,7 @@ This provider is the canonical replacement for the retired in-process
 providers ``local`` (sentence-transformers), ``colpali``
 (colpali-engine), and ``qwen3-vl`` (qwen-vl-utils).
 """
+
 from __future__ import annotations
 
 import base64
@@ -20,12 +21,12 @@ from scitrera_app_framework import Variables, get_extension
 
 from ...config import (
     DEFAULT_EMBEDDING_DIMENSIONS_EMBED_SERVER,
-    EmbeddingProviderType,
     MEMORYLAYER_EMBEDDING_DIMENSIONS,
+    EmbeddingProviderType,
 )
 from .._constants import EXT_EMBED_SERVER_CLIENT
 from ._maxsim import MultiVectorEmbedding
-from .base import MultimodalEmbeddingProvider, EmbeddingProviderPluginBase
+from .base import EmbeddingProviderPluginBase, MultimodalEmbeddingProvider
 
 
 class EmbedServerEmbeddingProvider(MultimodalEmbeddingProvider):

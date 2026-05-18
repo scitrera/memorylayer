@@ -2,6 +2,7 @@ from ...config import DEFAULT_MEMORYLAYER_ONTOLOGY_SERVICE, MEMORYLAYER_ONTOLOGY
 from .._constants import EXT_ONTOLOGY_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
+
 class FeatureRequiresUpgradeError(Exception):
     """Raised when a feature requires enterprise upgrade."""
 

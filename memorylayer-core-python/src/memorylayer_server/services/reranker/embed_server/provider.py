@@ -7,6 +7,7 @@ running any model in-process.
 Replaces the retired in-process providers ``local`` (sentence-transformers
 CrossEncoder) and ``qwen3-vl`` (qwen-vl-utils reranker).
 """
+
 from __future__ import annotations
 
 from logging import Logger
@@ -69,12 +70,8 @@ class EmbedServerRerankerProvider(RerankerProvider):
         effective_query = f"{instruction} {query}" if instruction else query
 
         client = await self._ensure_connected()
-        query_mv = await client.embed_texts_multivector(
-            [effective_query], input_type="query"
-        )
-        doc_mv = await client.embed_texts_multivector(
-            documents, input_type="document"
-        )
+        query_mv = await client.embed_texts_multivector([effective_query], input_type="query")
+        doc_mv = await client.embed_texts_multivector(documents, input_type="document")
 
         scores_payload = await client.score_maxsim(
             query_vectors=query_mv[0]["vectors"],

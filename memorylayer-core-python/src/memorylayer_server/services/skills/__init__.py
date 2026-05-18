@@ -2,9 +2,9 @@
 
 from scitrera_app_framework import Variables, get_extension
 
+from ...config import DEFAULT_MEMORYLAYER_SKILLS_PROVIDER, MEMORYLAYER_SKILLS_PROVIDER
 from .._constants import EXT_SKILLS_SERVICE, EXT_STORAGE_BACKEND
 from .._plugin_factory import make_service_plugin_base
-from ...config import DEFAULT_MEMORYLAYER_SKILLS_PROVIDER, MEMORYLAYER_SKILLS_PROVIDER
 from .base import SkillsService
 
 SkillsServicePluginBase = make_service_plugin_base(

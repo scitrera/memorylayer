@@ -12,7 +12,7 @@ Utility Functions:
 import asyncio
 import logging
 import threading
-from typing import Any, Optional
+from typing import Any
 
 from llama_index.core.base.llms.types import TextBlock
 from llama_index.core.llms import ChatMessage, MessageRole
@@ -126,8 +126,8 @@ def chat_message_to_memory_payload(
     tag_prefix: str = CHAT_KEY_TAG_PREFIX,
     memory_type: str = "episodic",
     importance: float = 0.5,
-    additional_tags: Optional[list[str]] = None,
-    additional_metadata: Optional[dict[str, Any]] = None,
+    additional_tags: list[str] | None = None,
+    additional_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Convert a LlamaIndex ChatMessage to a MemoryLayer memory payload.
@@ -188,10 +188,7 @@ def chat_message_to_memory_payload(
         "message_index": index,
         "role": message_role_to_string(message.role),
         "additional_kwargs": message.additional_kwargs or {},
-        "blocks": [
-            block.model_dump() if hasattr(block, "model_dump") else str(block)
-            for block in (message.blocks or [])
-        ],
+        "blocks": [block.model_dump() if hasattr(block, "model_dump") else str(block) for block in (message.blocks or [])],
     }
     if additional_metadata:
         metadata.update(additional_metadata)
@@ -292,7 +289,7 @@ def get_message_index(memory: dict[str, Any] | Memory) -> int:
     return memory.get("metadata", {}).get("message_index", 0)
 
 
-def get_chat_key(memory: dict[str, Any] | Memory) -> Optional[str]:
+def get_chat_key(memory: dict[str, Any] | Memory) -> str | None:
     """
     Extract the chat key from a MemoryLayer memory.
 
@@ -307,7 +304,7 @@ def get_chat_key(memory: dict[str, Any] | Memory) -> Optional[str]:
     return memory.get("metadata", {}).get("chat_key")
 
 
-def string_to_memory_type(type_str: Optional[str]) -> Optional[MemoryType]:
+def string_to_memory_type(type_str: str | None) -> MemoryType | None:
     """
     Convert a string to MemoryType enum.
 
@@ -358,12 +355,12 @@ class MemoryLayerChatStore(BaseChatStore):
     """
 
     base_url: str = Field(default="http://localhost:61001", description="MemoryLayer API base URL")
-    api_key: Optional[str] = Field(default=None, description="API key for authentication")
-    workspace_id: Optional[str] = Field(default=None, description="Workspace ID")
+    api_key: str | None = Field(default=None, description="API key for authentication")
+    workspace_id: str | None = Field(default=None, description="Workspace ID")
     timeout: float = Field(default=30.0, description="Request timeout in seconds")
 
-    _sync_client: Optional[SyncMemoryLayerClient] = None
-    _async_client: Optional[MemoryLayerClient] = None
+    _sync_client: SyncMemoryLayerClient | None = None
+    _async_client: MemoryLayerClient | None = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -371,8 +368,8 @@ class MemoryLayerChatStore(BaseChatStore):
     def __init__(
         self,
         base_url: str = "http://localhost:61001",
-        api_key: Optional[str] = None,
-        workspace_id: Optional[str] = None,
+        api_key: str | None = None,
+        workspace_id: str | None = None,
         timeout: float = 30.0,
         **kwargs: Any,
     ) -> None:
@@ -432,7 +429,7 @@ class MemoryLayerChatStore(BaseChatStore):
         """Close any underlying asynchronous HTTP client resources."""
         if self._async_client is not None:
             # SDK client uses context manager, close via __aexit__
-            if hasattr(self._async_client, '_client') and self._async_client._client:
+            if hasattr(self._async_client, "_client") and self._async_client._client:
                 await self._async_client._client.aclose()
             self._async_client = None
 
@@ -467,9 +464,7 @@ class MemoryLayerChatStore(BaseChatStore):
         """Create a tag for identifying chat messages by key."""
         return f"{CHAT_KEY_TAG_PREFIX}{key}"
 
-    def _chat_message_to_memory_payload(
-        self, message: ChatMessage, key: str, index: int
-    ) -> dict[str, Any]:
+    def _chat_message_to_memory_payload(self, message: ChatMessage, key: str, index: int) -> dict[str, Any]:
         """
         Convert a ChatMessage to a MemoryLayer memory payload.
 
@@ -500,7 +495,6 @@ class MemoryLayerChatStore(BaseChatStore):
             ChatMessage instance
         """
         return memory_to_chat_message(memory)
-
 
     @classmethod
     def class_name(cls) -> str:
@@ -599,7 +593,7 @@ class MemoryLayerChatStore(BaseChatStore):
                 metadata=payload.get("metadata"),
             )
 
-    def delete_messages(self, key: str) -> Optional[list[ChatMessage]]:
+    def delete_messages(self, key: str) -> list[ChatMessage] | None:
         """
         Delete all messages for a key.
 
@@ -629,7 +623,7 @@ class MemoryLayerChatStore(BaseChatStore):
 
         return messages
 
-    def delete_message(self, key: str, idx: int) -> Optional[ChatMessage]:
+    def delete_message(self, key: str, idx: int) -> ChatMessage | None:
         """
         Delete a specific message by index.
 
@@ -667,7 +661,7 @@ class MemoryLayerChatStore(BaseChatStore):
 
         return deleted_message
 
-    def delete_last_message(self, key: str) -> Optional[ChatMessage]:
+    def delete_last_message(self, key: str) -> ChatMessage | None:
         """
         Delete the last message for a key.
 
@@ -803,7 +797,7 @@ class MemoryLayerChatStore(BaseChatStore):
                     metadata=payload.get("metadata"),
                 )
 
-    async def adelete_messages(self, key: str) -> Optional[list[ChatMessage]]:
+    async def adelete_messages(self, key: str) -> list[ChatMessage] | None:
         """
         Async version of delete_messages.
 
@@ -834,7 +828,7 @@ class MemoryLayerChatStore(BaseChatStore):
 
         return messages
 
-    async def adelete_message(self, key: str, idx: int) -> Optional[ChatMessage]:
+    async def adelete_message(self, key: str, idx: int) -> ChatMessage | None:
         """
         Async version of delete_message.
 
@@ -873,7 +867,7 @@ class MemoryLayerChatStore(BaseChatStore):
 
         return deleted_message
 
-    async def adelete_last_message(self, key: str) -> Optional[ChatMessage]:
+    async def adelete_last_message(self, key: str) -> ChatMessage | None:
         """
         Async version of delete_last_message.
 

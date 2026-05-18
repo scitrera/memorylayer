@@ -7,9 +7,11 @@ by calling register_encrypter() at startup.
 This keeps the OSS package free of proprietary dependencies while enabling
 at-rest encryption in Enterprise deployments.
 """
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 _encrypt_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 _decrypt_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None

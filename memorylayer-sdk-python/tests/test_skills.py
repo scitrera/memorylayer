@@ -7,7 +7,7 @@ import respx
 from httpx import Response
 
 from memorylayer import MemoryLayerClient
-from memorylayer.skills import SkillModel, SkillsAPI, SyncSkillsAPI, parse_skill_folder
+from memorylayer.skills import SkillModel, parse_skill_folder
 from memorylayer.sync_client import SyncMemoryLayerClient
 
 BASE_URL = "http://test.memorylayer.ai"
@@ -93,9 +93,7 @@ def test_parse_skill_folder_missing_skill_md(tmp_path):
 @pytest.mark.asyncio
 @respx.mock
 async def test_skills_list(async_client: MemoryLayerClient) -> None:
-    respx.get(f"{BASE_URL}/v1/skills").mock(
-        return_value=Response(200, json={"skills": [_SKILL_PAYLOAD]})
-    )
+    respx.get(f"{BASE_URL}/v1/skills").mock(return_value=Response(200, json={"skills": [_SKILL_PAYLOAD]}))
     async with async_client:
         skills = await async_client.skills.list()
     assert len(skills) == 1
@@ -106,9 +104,7 @@ async def test_skills_list(async_client: MemoryLayerClient) -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_skills_get(async_client: MemoryLayerClient) -> None:
-    respx.get(f"{BASE_URL}/v1/skills/skl_abc").mock(
-        return_value=Response(200, json={"skill": _SKILL_PAYLOAD})
-    )
+    respx.get(f"{BASE_URL}/v1/skills/skl_abc").mock(return_value=Response(200, json={"skill": _SKILL_PAYLOAD}))
     async with async_client:
         skill = await async_client.skills.get("skl_abc")
     assert skill.id == "skl_abc"
@@ -117,9 +113,7 @@ async def test_skills_get(async_client: MemoryLayerClient) -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_skills_save(async_client: MemoryLayerClient) -> None:
-    respx.post(f"{BASE_URL}/v1/skills").mock(
-        return_value=Response(200, json={"skill": _SKILL_PAYLOAD})
-    )
+    respx.post(f"{BASE_URL}/v1/skills").mock(return_value=Response(200, json={"skill": _SKILL_PAYLOAD}))
     async with async_client:
         skill = await async_client.skills.save(
             name="my-skill",
@@ -140,9 +134,7 @@ async def test_skills_delete(async_client: MemoryLayerClient) -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_skills_resolve_single(async_client: MemoryLayerClient) -> None:
-    respx.post(f"{BASE_URL}/v1/skills/resolve").mock(
-        return_value=Response(200, json={"skill": _SKILL_PAYLOAD})
-    )
+    respx.post(f"{BASE_URL}/v1/skills/resolve").mock(return_value=Response(200, json={"skill": _SKILL_PAYLOAD}))
     async with async_client:
         result = await async_client.skills.resolve(name="my-skill")
     assert isinstance(result, SkillModel)
@@ -152,15 +144,9 @@ async def test_skills_resolve_single(async_client: MemoryLayerClient) -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_skills_pull(async_client: MemoryLayerClient, tmp_path) -> None:
-    respx.post(f"{BASE_URL}/v1/skills/resolve").mock(
-        return_value=Response(200, json={"skill": _SKILL_PAYLOAD})
-    )
-    respx.get(f"{BASE_URL}/v1/skills/skl_abc/manifest").mock(
-        return_value=Response(200, text="---\nname: my-skill\n---\n# Body\n")
-    )
-    respx.get(f"{BASE_URL}/v1/skills/skl_abc/files").mock(
-        return_value=Response(200, json={"files": []})
-    )
+    respx.post(f"{BASE_URL}/v1/skills/resolve").mock(return_value=Response(200, json={"skill": _SKILL_PAYLOAD}))
+    respx.get(f"{BASE_URL}/v1/skills/skl_abc/manifest").mock(return_value=Response(200, text="---\nname: my-skill\n---\n# Body\n"))
+    respx.get(f"{BASE_URL}/v1/skills/skl_abc/files").mock(return_value=Response(200, json={"files": []}))
     async with async_client:
         skill_dir = await async_client.skills.pull("my-skill", tmp_path)
     assert skill_dir.exists()
@@ -174,9 +160,7 @@ async def test_skills_pull(async_client: MemoryLayerClient, tmp_path) -> None:
 
 @respx.mock
 def test_sync_skills_list(sync_client_obj: SyncMemoryLayerClient) -> None:
-    respx.get(f"{BASE_URL}/v1/skills").mock(
-        return_value=Response(200, json={"skills": [_SKILL_PAYLOAD]})
-    )
+    respx.get(f"{BASE_URL}/v1/skills").mock(return_value=Response(200, json={"skills": [_SKILL_PAYLOAD]}))
     with sync_client_obj:
         skills = sync_client_obj.skills.list()
     assert len(skills) == 1
@@ -185,9 +169,7 @@ def test_sync_skills_list(sync_client_obj: SyncMemoryLayerClient) -> None:
 
 @respx.mock
 def test_sync_skills_save(sync_client_obj: SyncMemoryLayerClient) -> None:
-    respx.post(f"{BASE_URL}/v1/skills").mock(
-        return_value=Response(200, json={"skill": _SKILL_PAYLOAD})
-    )
+    respx.post(f"{BASE_URL}/v1/skills").mock(return_value=Response(200, json={"skill": _SKILL_PAYLOAD}))
     with sync_client_obj:
         skill = sync_client_obj.skills.save(name="my-skill", description="A test skill")
     assert skill.name == "my-skill"
@@ -195,15 +177,9 @@ def test_sync_skills_save(sync_client_obj: SyncMemoryLayerClient) -> None:
 
 @respx.mock
 def test_sync_skills_pull(sync_client_obj: SyncMemoryLayerClient, tmp_path) -> None:
-    respx.post(f"{BASE_URL}/v1/skills/resolve").mock(
-        return_value=Response(200, json={"skill": _SKILL_PAYLOAD})
-    )
-    respx.get(f"{BASE_URL}/v1/skills/skl_abc/manifest").mock(
-        return_value=Response(200, text="---\nname: my-skill\n---\n# Body\n")
-    )
-    respx.get(f"{BASE_URL}/v1/skills/skl_abc/files").mock(
-        return_value=Response(200, json={"files": []})
-    )
+    respx.post(f"{BASE_URL}/v1/skills/resolve").mock(return_value=Response(200, json={"skill": _SKILL_PAYLOAD}))
+    respx.get(f"{BASE_URL}/v1/skills/skl_abc/manifest").mock(return_value=Response(200, text="---\nname: my-skill\n---\n# Body\n"))
+    respx.get(f"{BASE_URL}/v1/skills/skl_abc/files").mock(return_value=Response(200, json={"files": []}))
     with sync_client_obj:
         skill_dir = sync_client_obj.skills.pull("my-skill", tmp_path)
     assert skill_dir.exists()

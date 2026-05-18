@@ -24,12 +24,13 @@ Connection ownership
 is a no-op.  Callers are expected to construct + dispose of the connection
 themselves (cowork, embed-server's pattern, etc.).
 """
+
 from __future__ import annotations
 
 import json as _json
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import urlencode
-
 
 # Headers that ``acting_for()`` injects on the SDK side.  We intercept these
 # at the transport boundary and convert them into a structured proto field.
@@ -76,6 +77,7 @@ class AetherTransportResponse:
         # only a fallback for any path that calls raise_for_status directly.
         if 400 <= self.status_code < 600:
             import httpx
+
             raise httpx.HTTPStatusError(
                 f"{self.status_code} response from aether transport",
                 request=None,  # type: ignore[arg-type]
@@ -98,8 +100,7 @@ class AetherTransport:
     ) -> None:
         if aether_client is None:
             raise ValueError(
-                "AetherTransport requires aether_client (an AsyncAgentClient or "
-                "AsyncServiceClient with a live gateway connection)"
+                "AetherTransport requires aether_client (an AsyncAgentClient or AsyncServiceClient with a live gateway connection)"
             )
         self._aether_client = aether_client
         self._target = target
@@ -147,9 +148,7 @@ class AetherTransport:
         full_path = f"{self._base_path}{full_path}"
 
         if params:
-            stringified = {
-                str(k): str(v) for k, v in params.items() if v is not None
-            }
+            stringified = {str(k): str(v) for k, v in params.items() if v is not None}
             if stringified:
                 full_path = f"{full_path}?{urlencode(stringified)}"
 
@@ -200,6 +199,7 @@ class AetherTransport:
         # ``error`` (ProxyError).  We project to our compatibility shape.
         if response.HasField("error"):
             from ..exceptions import MemoryLayerError
+
             raise MemoryLayerError(
                 f"Aether proxy error: {response.error.message or 'unknown'}",
                 status_code=response.status_code or 502,

@@ -6,6 +6,7 @@ they read the OpenAI-shape request body, pick a target profile by the
 ``model`` field, and forward the request to that profile's ``vllm serve``
 subprocess via httpx (streaming SSE through when ``stream=true``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from scitrera_app_framework.api import Plugin, Variables
 
-from ...config import EMBED_SERVER_LLM_ENABLED, DEFAULT_EMBED_SERVER_LLM_ENABLED
+from ...config import DEFAULT_EMBED_SERVER_LLM_ENABLED, EMBED_SERVER_LLM_ENABLED
 from ...lifecycle.fastapi import get_variables_dep
 from ...services.llm.router import LLMRoutingService, UnknownModelError
 from .. import EXT_MULTI_API_ROUTERS

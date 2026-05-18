@@ -6,6 +6,7 @@ When the heavy in-process providers (``local``, ``colpali``,
 operators on stale configs fail fast with a clear migration message
 rather than silently ending up with no provider registered.
 """
+
 from __future__ import annotations
 
 import pytest

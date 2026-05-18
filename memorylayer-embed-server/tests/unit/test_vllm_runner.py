@@ -6,6 +6,7 @@ lifecycle (start / wait_for_health / shutdown) is exercised indirectly
 through the embedding-side ``test_vllm_subprocess.py`` and the LLM-side
 tests added in Phase C.
 """
+
 from __future__ import annotations
 
 import socket
@@ -105,7 +106,7 @@ def test_llm_argv_includes_served_model_names():
     assert "--served-model-name" in argv
     idx = argv.index("--served-model-name")
     # All three names follow the flag, in order.
-    assert argv[idx + 1: idx + 4] == ["qwen", "qwen-7b", "qwen-2.5"]
+    assert argv[idx + 1 : idx + 4] == ["qwen", "qwen-7b", "qwen-2.5"]
 
 
 def test_llm_argv_omits_served_model_name_flag_when_empty():
@@ -136,7 +137,7 @@ def test_argv_extra_args_appended_in_order():
     # The extras land contiguously somewhere in argv, in declared order.
     extras = ["--quantization", "fp8", "--seed", "42"]
     for i in range(len(argv) - len(extras) + 1):
-        if argv[i: i + len(extras)] == extras:
+        if argv[i : i + len(extras)] == extras:
             return
     pytest.fail(f"extra_args not appended contiguously: {argv}")
 

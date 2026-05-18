@@ -11,7 +11,6 @@ Endpoints:
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -63,8 +62,8 @@ class GraphStatsResponse(BaseModel):
 
 
 class GraphAnalysisRequest(BaseModel):
-    workspace_id: Optional[str] = Field(None, description="Workspace ID (overrides auth context)")
-    context_id: Optional[str] = Field(None, description="Context filter")
+    workspace_id: str | None = Field(None, description="Workspace ID (overrides auth context)")
+    context_id: str | None = Field(None, description="Context filter")
     include_rpg: bool = Field(False, description="Include RPG (code graph) nodes")
 
 
@@ -89,8 +88,8 @@ def get_graph_service(v: Variables = Depends(get_variables_dep)) -> GraphAnalysi
 )
 async def get_graph_snapshot(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
-    context_id: Optional[str] = Query(None, description="Context filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
+    context_id: str | None = Query(None, description="Context filter"),
     include_rpg: bool = Query(False, description="Include RPG nodes"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
@@ -103,9 +102,7 @@ async def get_graph_snapshot(
         workspace_id = workspace_id or ctx.workspace_id
         await authz_service.require_authorization(ctx, "graph", "read", workspace_id=workspace_id)
 
-        snapshot = await graph_service.build_workspace_graph(
-            workspace_id, context_id=context_id, include_rpg=include_rpg
-        )
+        snapshot = await graph_service.build_workspace_graph(workspace_id, context_id=context_id, include_rpg=include_rpg)
         return GraphSnapshotResponse(snapshot=snapshot)
 
     except HTTPException:
@@ -129,8 +126,8 @@ async def get_graph_snapshot(
 )
 async def get_communities(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
-    context_id: Optional[str] = Query(None, description="Context filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
+    context_id: str | None = Query(None, description="Context filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     graph_service: GraphAnalysisService = Depends(get_graph_service),
@@ -166,8 +163,8 @@ async def get_communities(
 )
 async def get_centrality(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
-    context_id: Optional[str] = Query(None, description="Context filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
+    context_id: str | None = Query(None, description="Context filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     graph_service: GraphAnalysisService = Depends(get_graph_service),
@@ -203,8 +200,8 @@ async def get_centrality(
 )
 async def get_bridges(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
-    context_id: Optional[str] = Query(None, description="Context filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
+    context_id: str | None = Query(None, description="Context filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     graph_service: GraphAnalysisService = Depends(get_graph_service),
@@ -240,8 +237,8 @@ async def get_bridges(
 )
 async def get_graph_stats(
     http_request: Request,
-    workspace_id: Optional[str] = Query(None, description="Workspace filter"),
-    context_id: Optional[str] = Query(None, description="Context filter"),
+    workspace_id: str | None = Query(None, description="Workspace filter"),
+    context_id: str | None = Query(None, description="Context filter"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     graph_service: GraphAnalysisService = Depends(get_graph_service),

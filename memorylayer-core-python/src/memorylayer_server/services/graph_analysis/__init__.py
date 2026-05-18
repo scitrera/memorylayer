@@ -2,9 +2,9 @@
 
 from scitrera_app_framework import Variables, get_extension
 
+from ...config import DEFAULT_MEMORYLAYER_GRAPH_ANALYSIS_PROVIDER, MEMORYLAYER_GRAPH_ANALYSIS_PROVIDER
 from .._constants import EXT_GRAPH_ANALYSIS_SERVICE, EXT_STORAGE_BACKEND
 from .._plugin_factory import make_service_plugin_base
-from ...config import DEFAULT_MEMORYLAYER_GRAPH_ANALYSIS_PROVIDER, MEMORYLAYER_GRAPH_ANALYSIS_PROVIDER
 from .base import GraphAnalysisService
 
 GraphAnalysisServicePluginBase = make_service_plugin_base(

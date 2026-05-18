@@ -1,4 +1,5 @@
 """Unit tests for MCP server domain models."""
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,8 +12,8 @@ from memorylayer_server.models.mcp_server import (
     validate_mcp_server_name,
 )
 
-
 # --- Name validation ---
+
 
 class TestValidateMcpServerName:
     def test_valid_simple(self):
@@ -61,6 +62,7 @@ class TestValidateMcpServerName:
 
 
 # --- McpServer model ---
+
 
 class TestMcpServer:
     def test_stdio_server_valid(self):
@@ -149,6 +151,7 @@ class TestMcpServer:
 
 # --- McpServerCreateInput ---
 
+
 class TestMcpServerCreateInput:
     def test_valid_stdio(self):
         inp = McpServerCreateInput(
@@ -181,6 +184,7 @@ class TestMcpServerCreateInput:
 
 
 # --- McpServerUpdateInput ---
+
 
 class TestMcpServerUpdateInput:
     def test_all_optional(self):
@@ -253,9 +257,5 @@ class TestMcpJsonDocument:
         assert inputs == []
 
     def test_explicit_transport_respected(self):
-        doc = McpJsonDocument(
-            mcpServers={
-                "my-sse": McpServerEntry(transport="sse", url="https://example.com/sse")
-            }
-        )
+        doc = McpJsonDocument(mcpServers={"my-sse": McpServerEntry(transport="sse", url="https://example.com/sse")})
         assert doc.mcpServers["my-sse"].transport == "sse"

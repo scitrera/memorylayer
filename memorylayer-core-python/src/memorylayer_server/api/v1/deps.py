@@ -12,14 +12,14 @@ from ...services.authorization import EXT_AUTHORIZATION_SERVICE, AuthorizationSe
 from ...services.cache import EXT_CACHE_SERVICE, CacheService
 from ...services.chat import EXT_CHAT_SERVICE, ChatService
 from ...services.inference import EXT_INFERENCE_SERVICE, DefaultInferenceService
-from ...services.memory import EXT_MEMORY_SERVICE, MemoryService
-from ...services.metrics import EXT_METRICS_SERVICE, MetricsService
 from ...services.mcp_servers import EXT_MCP_SERVERS_SERVICE, McpServerService
 from ...services.mcp_servers.resolution import McpServerResolutionService
-from ...services.skills import EXT_SKILLS_SERVICE, SkillsService
-from ...services.skills.resolution import SkillsResolutionService
+from ...services.memory import EXT_MEMORY_SERVICE, MemoryService
+from ...services.metrics import EXT_METRICS_SERVICE, MetricsService
 from ...services.reflect import EXT_REFLECT_SERVICE
 from ...services.session import EXT_SESSION_SERVICE, SessionService
+from ...services.skills import EXT_SKILLS_SERVICE, SkillsService
+from ...services.skills.resolution import SkillsResolutionService
 from ...services.tasks import EXT_TASK_SERVICE, TaskService
 from ...services.workspace import EXT_WORKSPACE_SERVICE, WorkspaceService
 from ...tasks.session_touch_handler import SESSION_TOUCH_HANDLER_TASK

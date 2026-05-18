@@ -38,8 +38,7 @@ def basic_chat_history_example():
     # Add messages to the history
     history.add_user_message("Hello! I'm interested in learning Python.")
     history.add_ai_message(
-        "Great choice! Python is an excellent language for beginners. "
-        "What aspects of Python are you most interested in learning?"
+        "Great choice! Python is an excellent language for beginners. What aspects of Python are you most interested in learning?"
     )
 
     # Retrieve all messages
@@ -85,8 +84,7 @@ def lcel_chain_example():
         [
             (
                 "system",
-                "You are a helpful assistant. Use the conversation history "
-                "to provide contextual responses.",
+                "You are a helpful assistant. Use the conversation history to provide contextual responses.",
             ),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{input}"),
@@ -175,10 +173,7 @@ def custom_tags_example():
     )
 
     history.add_user_message("I have a question about my enterprise billing")
-    history.add_ai_message(
-        "I'd be happy to help with your enterprise billing question. "
-        "What specific aspect would you like to discuss?"
-    )
+    history.add_ai_message("I'd be happy to help with your enterprise billing question. What specific aspect would you like to discuss?")
 
     print(f"Messages stored with custom tags: {len(history.messages)}")
 

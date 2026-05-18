@@ -1,7 +1,6 @@
 """Document service — base interface and plugin for document ingestion."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from ...config import DEFAULT_MEMORYLAYER_DOCUMENT_PROVIDER, MEMORYLAYER_DOCUMENT_PROVIDER
 from ...models.document import Document, DocumentStatus, IngestionJob
@@ -18,9 +17,9 @@ class DocumentService(ABC):
         workspace_id: str,
         file_data: bytes,
         filename: str,
-        document_type: Optional[str] = None,
-        extraction_options: Optional[dict] = None,
-        metadata: Optional[dict] = None,
+        document_type: str | None = None,
+        extraction_options: dict | None = None,
+        metadata: dict | None = None,
     ) -> tuple[Document, IngestionJob]:
         """Upload and queue a document for ingestion.
 
@@ -42,7 +41,7 @@ class DocumentService(ABC):
         pass
 
     @abstractmethod
-    async def get_document(self, workspace_id: str, doc_id: str) -> Optional[Document]:
+    async def get_document(self, workspace_id: str, doc_id: str) -> Document | None:
         """Get document by ID within a workspace."""
         pass
 
@@ -50,8 +49,8 @@ class DocumentService(ABC):
     async def list_documents(
         self,
         workspace_id: str,
-        status: Optional[str] = None,
-        document_type: Optional[str] = None,
+        status: str | None = None,
+        document_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Document], int]:
@@ -63,7 +62,7 @@ class DocumentService(ABC):
         self,
         workspace_id: str,
         doc_id: str,
-        extraction_options: Optional[dict] = None,
+        extraction_options: dict | None = None,
     ) -> tuple[Document, IngestionJob]:
         """Re-queue a document for extraction with optional new options.
 
@@ -82,14 +81,12 @@ class DocumentService(ABC):
         pass
 
     @abstractmethod
-    async def get_document_status(
-        self, workspace_id: str, doc_id: str
-    ) -> Optional[DocumentStatus]:
+    async def get_document_status(self, workspace_id: str, doc_id: str) -> DocumentStatus | None:
         """Get current processing status of a document."""
         pass
 
     @abstractmethod
-    async def get_job(self, workspace_id: str, job_id: str) -> Optional[IngestionJob]:
+    async def get_job(self, workspace_id: str, job_id: str) -> IngestionJob | None:
         """Get ingestion job by ID."""
         pass
 
@@ -97,7 +94,7 @@ class DocumentService(ABC):
     async def list_jobs(
         self,
         workspace_id: str,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[IngestionJob]:
@@ -105,9 +102,7 @@ class DocumentService(ABC):
         pass
 
     @abstractmethod
-    async def cancel_job(
-        self, workspace_id: str, job_id: str
-    ) -> Optional[IngestionJob]:
+    async def cancel_job(self, workspace_id: str, job_id: str) -> IngestionJob | None:
         """Cancel a queued or running ingestion job."""
         pass
 

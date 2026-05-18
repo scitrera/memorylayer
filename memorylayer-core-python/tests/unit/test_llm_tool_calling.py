@@ -11,8 +11,8 @@ translates them to its native SDK call. These tests assert:
   ``reasoning_effort`` to ``thinking_config`` budget tokens, extracts
   ``function_call`` parts into canonical tool_calls.
 """
-import json
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,10 +20,8 @@ import pytest
 from memorylayer_server.models.llm import (
     LLMMessage,
     LLMRequest,
-    LLMResponse,
     LLMRole,
 )
-
 
 _WEATHER_TOOL_OPENAI = {
     "type": "function",
@@ -138,14 +136,16 @@ class TestOpenAIToolCalling:
                 LLMMessage(
                     role=LLMRole.ASSISTANT,
                     content="",
-                    tool_calls=[{
-                        "id": "call_abc",
-                        "type": "function",
-                        "function": {
-                            "name": "get_weather",
-                            "arguments": '{"location": "Boston"}',
-                        },
-                    }],
+                    tool_calls=[
+                        {
+                            "id": "call_abc",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": '{"location": "Boston"}',
+                            },
+                        }
+                    ],
                 ),
                 LLMMessage(
                     role=LLMRole.TOOL,
@@ -172,7 +172,8 @@ class TestOpenAIToolCalling:
         message = MagicMock(content="ok", tool_calls=None)
         choice = MagicMock(message=message, finish_reason="stop")
         response = MagicMock(
-            choices=[choice], model="gpt-5-nano",
+            choices=[choice],
+            model="gpt-5-nano",
             usage=MagicMock(prompt_tokens=5, completion_tokens=1, total_tokens=6),
         )
         mock_client = AsyncMock()
@@ -277,24 +278,28 @@ class TestAnthropicToolCalling:
 
         # Tools translated.
         kwargs = mock_client.messages.create.call_args.kwargs
-        assert kwargs["tools"] == [{
-            "name": "get_weather",
-            "description": "Get the current weather for a location.",
-            "input_schema": _WEATHER_TOOL_OPENAI["function"]["parameters"],
-        }]
+        assert kwargs["tools"] == [
+            {
+                "name": "get_weather",
+                "description": "Get the current weather for a location.",
+                "input_schema": _WEATHER_TOOL_OPENAI["function"]["parameters"],
+            }
+        ]
         assert kwargs["tool_choice"] == {"type": "auto"}
         # reasoning_effort → thinking budget.
         assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 2048}
 
         # tool_use block extracted into canonical tool_calls.
-        assert result.tool_calls == [{
-            "id": "toolu_001",
-            "type": "function",
-            "function": {
-                "name": "get_weather",
-                "arguments": json.dumps({"location": "Boston"}),
-            },
-        }]
+        assert result.tool_calls == [
+            {
+                "id": "toolu_001",
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "arguments": json.dumps({"location": "Boston"}),
+                },
+            }
+        ]
         assert result.content == "Sure thing."
         assert result.finish_reason == "tool_calls"
 
@@ -310,26 +315,30 @@ class TestAnthropicToolCalling:
         mock_client.messages.create = AsyncMock(return_value=response)
         provider._client = mock_client
 
-        request = LLMRequest(messages=[
-            _user("Weather?"),
-            LLMMessage(
-                role=LLMRole.ASSISTANT,
-                content="",
-                tool_calls=[{
-                    "id": "toolu_001",
-                    "type": "function",
-                    "function": {
-                        "name": "get_weather",
-                        "arguments": '{"location": "Boston"}',
-                    },
-                }],
-            ),
-            LLMMessage(
-                role=LLMRole.TOOL,
-                content='{"temp_f": 65}',
-                tool_call_id="toolu_001",
-            ),
-        ])
+        request = LLMRequest(
+            messages=[
+                _user("Weather?"),
+                LLMMessage(
+                    role=LLMRole.ASSISTANT,
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "toolu_001",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": '{"location": "Boston"}',
+                            },
+                        }
+                    ],
+                ),
+                LLMMessage(
+                    role=LLMRole.TOOL,
+                    content='{"temp_f": 65}',
+                    tool_call_id="toolu_001",
+                ),
+            ]
+        )
         await provider.complete(request)
 
         sent_messages = mock_client.messages.create.call_args.kwargs["messages"]
@@ -426,7 +435,9 @@ class TestGoogleToolCalling:
         response = MagicMock()
         response.text = ""
         response.usage_metadata = MagicMock(
-            prompt_token_count=12, candidates_token_count=4, total_token_count=16,
+            prompt_token_count=12,
+            candidates_token_count=4,
+            total_token_count=16,
         )
         response.candidates = [candidate]
 
@@ -440,14 +451,16 @@ class TestGoogleToolCalling:
         request = LLMRequest(messages=[_user("Weather?")], tools=[_WEATHER_TOOL_OPENAI])
         result = await provider.complete(request)
 
-        assert result.tool_calls == [{
-            "id": "call_g_1",
-            "type": "function",
-            "function": {
-                "name": "get_weather",
-                "arguments": json.dumps({"location": "Boston"}),
-            },
-        }]
+        assert result.tool_calls == [
+            {
+                "id": "call_g_1",
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "arguments": json.dumps({"location": "Boston"}),
+                },
+            }
+        ]
         # If model emits tool_calls with otherwise STOP finish, we surface as tool_calls.
         assert result.finish_reason == "tool_calls"
 

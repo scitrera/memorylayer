@@ -1,10 +1,12 @@
 """SkillsService: CRUD business logic for agent skills."""
+
 from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any
 
 from ...models.memory import MemoryType, RememberInput
 from ...models.skill import Skill, SkillCreateInput, SkillFile, SkillUpdateInput
@@ -55,8 +57,8 @@ class SkillsService:
     def __init__(
         self,
         storage: StorageBackend,
-        memory_service: "Optional[MemoryService]" = None,
-        memory_indexer: Optional[Callable[[Skill], Any]] = None,
+        memory_service: MemoryService | None = None,
+        memory_indexer: Callable[[Skill], Any] | None = None,
     ) -> None:
         self._storage = storage
         self._memory_service = memory_service
@@ -71,7 +73,7 @@ class SkillsService:
         input: SkillCreateInput,
         workspace_id: str,
         tenant_id: str = "",
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> Skill:
         """Create a new skill, computing manifest hash."""
         now = datetime.now(UTC)
@@ -104,16 +106,16 @@ class SkillsService:
         self,
         workspace_id: str,
         skill_id: str,
-    ) -> Optional[Skill]:
+    ) -> Skill | None:
         """Get a skill by ID."""
         return await self._storage.get_skill(workspace_id, skill_id)
 
     async def list_skills(
         self,
         workspace_id: str,
-        user_id: Optional[str] = None,
-        name: Optional[str] = None,
-        enabled: Optional[bool] = None,
+        user_id: str | None = None,
+        name: str | None = None,
+        enabled: bool | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Skill]:
@@ -132,11 +134,9 @@ class SkillsService:
         workspace_id: str,
         skill_id: str,
         input: SkillUpdateInput,
-    ) -> Optional[Skill]:
+    ) -> Skill | None:
         """Apply partial updates to a skill, recomputing manifest_hash if content changed."""
-        updates: dict[str, Any] = {
-            k: v for k, v in input.model_dump(exclude_none=True).items()
-        }
+        updates: dict[str, Any] = {k: v for k, v in input.model_dump(exclude_none=True).items()}
         updates["updated_at"] = datetime.now(UTC)
 
         result = await self._storage.update_skill(workspace_id, skill_id, updates)
@@ -146,9 +146,7 @@ class SkillsService:
         # Recompute manifest hash after any content change
         new_hash = _compute_manifest_hash(result)
         if new_hash != result.manifest_hash:
-            result = await self._storage.update_skill(
-                workspace_id, skill_id, {"manifest_hash": new_hash}
-            )
+            result = await self._storage.update_skill(workspace_id, skill_id, {"manifest_hash": new_hash})
 
         await self._maybe_index(result)
         return result
@@ -169,8 +167,8 @@ class SkillsService:
         skill_id: str,
         path: str,
         content: bytes,
-        mime_type: Optional[str] = None,
-        workspace_id: Optional[str] = None,
+        mime_type: str | None = None,
+        workspace_id: str | None = None,
         index_references: bool = True,
     ) -> SkillFile:
         """Insert or update a file in a skill bundle, updating bundle_hash."""
@@ -219,7 +217,7 @@ class SkillsService:
 
         return result
 
-    async def get_file(self, skill_id: str, path: str) -> Optional[SkillFile]:
+    async def get_file(self, skill_id: str, path: str) -> SkillFile | None:
         """Get a single skill file by path."""
         return await self._storage.get_skill_file(skill_id, path)
 
@@ -231,7 +229,7 @@ class SkillsService:
         self,
         skill_id: str,
         path: str,
-        workspace_id: Optional[str] = None,
+        workspace_id: str | None = None,
     ) -> bool:
         """Delete a file from a skill bundle, updating bundle_hash and cleaning up reference memories."""
         result = await self._storage.delete_skill_file(skill_id, path)
@@ -247,7 +245,7 @@ class SkillsService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _maybe_index(self, skill: Optional[Skill]) -> None:
+    async def _maybe_index(self, skill: Skill | None) -> None:
         """Mirror skill as a procedural memory (upsert) and call legacy hook."""
         if not skill:
             return
@@ -321,7 +319,9 @@ class SkillsService:
         try:
             await self._delete_reference_memory(skill.workspace_id, skill.id, skill_file.path)
 
-            text_content = skill_file.content.decode("utf-8", errors="replace") if isinstance(skill_file.content, bytes) else str(skill_file.content)
+            text_content = (
+                skill_file.content.decode("utf-8", errors="replace") if isinstance(skill_file.content, bytes) else str(skill_file.content)
+            )
             content = f"[{skill.name}/{skill_file.path}]\n{text_content[:8000]}"
 
             await self._memory_service.remember(

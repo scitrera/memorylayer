@@ -2,9 +2,9 @@
 
 import logging
 
-from scitrera_app_framework import Variables, get_extension, get_logger
+from scitrera_app_framework import Variables, get_extension
 
-from .._constants import EXT_SKILLS_SERVICE, EXT_STORAGE_BACKEND
+from .._constants import EXT_STORAGE_BACKEND
 from ..storage import StorageBackend
 from . import SkillsServicePluginBase
 from .base import SkillsService

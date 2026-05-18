@@ -35,16 +35,13 @@ Out of scope (deferred, documented at module bottom):
 - Live-gateway smoke check — requires a real Aether gateway instance (dev
   compose). See the manual smoke checklist at the end of this file.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import List, Optional, Tuple
 
-import pytest
 from fastapi import FastAPI, Request, Response
-
-from memorylayer_server.services.aether_service.asgi_bridge import asgi_dispatch
 from scitrera_aether_client.authority import ResolvedAuthorityInfo
 from scitrera_aether_client.proto import aether_pb2
 from scitrera_aether_client.proxy_terminator import (
@@ -53,6 +50,7 @@ from scitrera_aether_client.proxy_terminator import (
     _get_terminator_dispatcher,
 )
 
+from memorylayer_server.services.aether_service.asgi_bridge import asgi_dispatch
 
 # ---------------------------------------------------------------------------
 # Minimal FastAPI app used as the backend across all tests
@@ -100,10 +98,11 @@ class _AsyncClientStub:
     def identity(self):
         """Return None — no service identity injected for these tests."""
         from scitrera_aether_client.client_async import BaseAsyncAetherClient
+
         return BaseAsyncAetherClient.identity.fget(self)
 
-    async def drain_upstream(self) -> List[aether_pb2.UpstreamMessage]:
-        out: List[aether_pb2.UpstreamMessage] = []
+    async def drain_upstream(self) -> list[aether_pb2.UpstreamMessage]:
+        out: list[aether_pb2.UpstreamMessage] = []
         while True:
             try:
                 out.append(self._request_queue.get_nowait())
@@ -124,9 +123,9 @@ class _StubResolver:
     without a live Aether gateway.
     """
 
-    def __init__(self, info: Optional[ResolvedAuthorityInfo] = None) -> None:
+    def __init__(self, info: ResolvedAuthorityInfo | None = None) -> None:
         self._info = info
-        self.calls: List[dict] = []
+        self.calls: list[dict] = []
 
     async def resolve(
         self,
@@ -134,9 +133,9 @@ class _StubResolver:
         subject_type: str,
         subject_id: str,
         *,
-        actor_type: Optional[str] = None,
-        actor_id: Optional[str] = None,
-    ) -> Optional[ResolvedAuthorityInfo]:
+        actor_type: str | None = None,
+        actor_id: str | None = None,
+    ) -> ResolvedAuthorityInfo | None:
         self.calls.append(
             {
                 "grant_id": grant_id,
@@ -150,7 +149,7 @@ class _StubResolver:
 def _good_resolver(
     subject_id: str = "user-a",
     max_access_level: int = 20,
-    workspace_scope: Tuple[str, ...] = ("ws-1", "ws-2"),
+    workspace_scope: tuple[str, ...] = ("ws-1", "ws-2"),
 ) -> _StubResolver:
     info = ResolvedAuthorityInfo(
         grant_id="g1",
@@ -177,9 +176,9 @@ def _build_request(
     request_id: str = "req-1",
     method: str = "GET",
     path: str = "/healthz",
-    headers: Optional[dict] = None,
+    headers: dict | None = None,
     body: bytes = b"",
-    authorization: Optional[aether_pb2.AuthorizationContext] = None,
+    authorization: aether_pb2.AuthorizationContext | None = None,
 ) -> aether_pb2.ProxyHttpRequest:
     req = aether_pb2.ProxyHttpRequest(
         request_id=request_id,
@@ -209,8 +208,8 @@ def _obo_authz(
 
 async def _make_terminator(
     client: _AsyncClientStub,
-    resolver: Optional[_StubResolver] = None,
-    allow_paths: Optional[List[str]] = None,
+    resolver: _StubResolver | None = None,
+    allow_paths: list[str] | None = None,
     obo_policy: str = "require_resolver",
 ) -> ProxyHttpTerminator:
     """Construct and start a ProxyHttpTerminator backed by ``_app`` via asgi_bridge."""
@@ -298,9 +297,7 @@ async def test_obo_mode_with_resolver_passes_extended_headers():
     and workspace-scope must all appear in the headers the handler reads.
     """
     client = _AsyncClientStub()
-    resolver = _good_resolver(
-        subject_id="user-a", max_access_level=20, workspace_scope=("ws-1", "ws-2")
-    )
+    resolver = _good_resolver(subject_id="user-a", max_access_level=20, workspace_scope=("ws-1", "ws-2"))
     term = await _make_terminator(client, resolver=resolver)
 
     dispatcher = _get_terminator_dispatcher(client)
@@ -374,9 +371,7 @@ async def test_path_filtering_denies_unlisted_path():
     to ``/admin/secret`` must be rejected before the handler runs.
     """
     client = _AsyncClientStub()
-    term = await _make_terminator(
-        client, allow_paths=["/healthz", "/v1/*"], obo_policy="allow_partial"
-    )
+    term = await _make_terminator(client, allow_paths=["/healthz", "/v1/*"], obo_policy="allow_partial")
 
     dispatcher = _get_terminator_dispatcher(client)
     req = _build_request("req-denied", method="GET", path="/admin/secret")

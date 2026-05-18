@@ -7,8 +7,12 @@ from scitrera_app_framework import Plugin, Variables
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
 from ...models.embedding import (
-    EmbeddingData, EmbeddingResponse, EmbeddingUsage,
-    ImageEmbeddingRequest, MultiVectorData, MultiVectorEmbeddingResponse,
+    EmbeddingData,
+    EmbeddingResponse,
+    EmbeddingUsage,
+    ImageEmbeddingRequest,
+    MultiVectorData,
+    MultiVectorEmbeddingResponse,
 )
 from .. import EXT_MULTI_API_ROUTERS
 
@@ -30,7 +34,7 @@ async def create_image_embeddings(
     - Multi-vector embeddings (mode='multi'): multiple vectors per image in
       ColPali late-interaction format, suitable for MaxSim scoring.
     """
-    dual_service = v.get('dual_embedding_service', default=None)
+    dual_service = v.get("dual_embedding_service", default=None)
 
     if not request.images:
         raise HTTPException(
@@ -51,9 +55,7 @@ async def create_image_embeddings(
                 detail="Multi-vector embedding service not configured",
             )
 
-        logger.debug(
-            "Generating multi-vector image embeddings for %d image(s)", len(request.images)
-        )
+        logger.debug("Generating multi-vector image embeddings for %d image(s)", len(request.images))
 
         try:
             multi_vecs = await dual_service.embed_images_batch_multivector(request.images)
@@ -86,9 +88,7 @@ async def create_image_embeddings(
                 detail="Embedding service not configured",
             )
 
-        logger.debug(
-            "Generating single-vector image embeddings for %d image(s)", len(request.images)
-        )
+        logger.debug("Generating single-vector image embeddings for %d image(s)", len(request.images))
 
         try:
             embeddings = []

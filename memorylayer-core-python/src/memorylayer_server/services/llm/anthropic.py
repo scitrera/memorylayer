@@ -45,11 +45,13 @@ def _translate_message_for_anthropic(msg: LLMMessage) -> dict:
     if role == "tool":
         return {
             "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": msg.tool_call_id,
-                "content": msg.content,
-            }],
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": msg.tool_call_id,
+                    "content": msg.content,
+                }
+            ],
         }
 
     if role == "assistant" and msg.tool_calls:
@@ -66,12 +68,14 @@ def _translate_message_for_anthropic(msg: LLMMessage) -> dict:
                     args = {}
             else:
                 args = args_field or {}
-            blocks.append({
-                "type": "tool_use",
-                "id": tc["id"],
-                "name": fn.get("name", ""),
-                "input": args,
-            })
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": fn.get("name", ""),
+                    "input": args,
+                }
+            )
         return {"role": "assistant", "content": blocks}
 
     return {"role": role, "content": msg.content}
@@ -83,14 +87,16 @@ def _translate_tools_for_anthropic(tools: list[dict]) -> list[dict]:
     for t in tools:
         if t.get("type") == "function" and "function" in t:
             fn = t["function"]
-            out.append({
-                "name": fn["name"],
-                "description": fn.get("description", ""),
-                "input_schema": fn.get(
-                    "parameters",
-                    {"type": "object", "properties": {}},
-                ),
-            })
+            out.append(
+                {
+                    "name": fn["name"],
+                    "description": fn.get("description", ""),
+                    "input_schema": fn.get(
+                        "parameters",
+                        {"type": "object", "properties": {}},
+                    ),
+                }
+            )
         else:
             out.append(t)
     return out
@@ -130,14 +136,16 @@ def _extract_anthropic_response(response):
             if block_type == "text":
                 texts.append(getattr(block, "text", "") or "")
             elif block_type == "tool_use":
-                tool_calls.append({
-                    "id": getattr(block, "id", ""),
-                    "type": "function",
-                    "function": {
-                        "name": getattr(block, "name", ""),
-                        "arguments": _json.dumps(getattr(block, "input", {}) or {}),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": getattr(block, "id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": getattr(block, "name", ""),
+                            "arguments": _json.dumps(getattr(block, "input", {}) or {}),
+                        },
+                    }
+                )
             elif block_type == "thinking":
                 thinking_texts.append(getattr(block, "thinking", "") or "")
     return (
@@ -211,11 +219,7 @@ class AnthropicLLMProvider(LLMProvider):
         model = request.model or self.model
         max_tokens, temperature = self.resolve_params(request)
 
-        effective_max = (
-            request.max_completion_tokens
-            if request.max_completion_tokens is not None
-            else max_tokens
-        )
+        effective_max = request.max_completion_tokens if request.max_completion_tokens is not None else max_tokens
 
         kwargs: dict = {"model": model, "messages": messages}
         if effective_max is not None:
@@ -247,7 +251,8 @@ class AnthropicLLMProvider(LLMProvider):
 
         self.logger.debug(
             "LLM request: model=%s, messages=%d, tools=%s",
-            kwargs["model"], len(kwargs["messages"]),
+            kwargs["model"],
+            len(kwargs["messages"]),
             (len(request.tools) if request.tools else 0),
         )
 

@@ -10,9 +10,9 @@ Endpoints:
 - DELETE /v1/tokens/{id}     -- Delete token
 - POST   /v1/tokens/{id}/revoke -- Revoke token
 """
-from datetime import datetime, timezone, timedelta
+
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -21,10 +21,9 @@ from scitrera_app_framework import Plugin, Variables, get_extension
 from memorylayer_server.api import EXT_MULTI_API_ROUTERS
 from memorylayer_server.api.v1.deps import get_auth_service, get_authz_service
 from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
-from memorylayer_server.services.authentication import AuthenticationService, AuthenticationError
-from memorylayer_server.services.authorization import AuthorizationService
-
 from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
+from memorylayer_server.services.authentication import AuthenticationError, AuthenticationService
+from memorylayer_server.services.authorization import AuthorizationService
 
 router = APIRouter(prefix="/v1/tokens", tags=["tokens"])
 
@@ -33,6 +32,7 @@ router = APIRouter(prefix="/v1/tokens", tags=["tokens"])
 # Request / Response schemas
 # ------------------------------------------------------------------ #
 
+
 class TokenCreateRequest(BaseModel):
     """Request body for creating an API token."""
 
@@ -40,7 +40,7 @@ class TokenCreateRequest(BaseModel):
     principal_type: str = "User"
     workspace_patterns: list[str] = ["*"]
     scopes: list[str] = ["*"]
-    expires_in_days: Optional[int] = None
+    expires_in_days: int | None = None
 
 
 class TokenResponse(BaseModel):
@@ -52,7 +52,7 @@ class TokenResponse(BaseModel):
     workspace_patterns: list[str]
     scopes: list[str]
     created_at: str
-    expires_at: Optional[str] = None
+    expires_at: str | None = None
     revoked: bool = False
 
 
@@ -78,6 +78,7 @@ class ErrorResponse(BaseModel):
 # Helpers
 # ------------------------------------------------------------------ #
 
+
 def _get_aether_client(v: Variables):
     """Return the shared Aether client from AetherServiceConnection."""
     agent_service = get_extension(EXT_AETHER_SERVICE_CONNECTION, v)
@@ -90,12 +91,12 @@ def _get_aether_client(v: Variables):
     return client
 
 
-def _ts_to_iso(ts: Union[int, str, None]) -> Optional[str]:
+def _ts_to_iso(ts: int | str | None) -> str | None:
     """Convert a unix timestamp (int) or string to an ISO 8601 string."""
     if ts is None or ts == 0 or ts == "":
         return None
     if isinstance(ts, int):
-        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(ts, tz=UTC).isoformat()
     return str(ts)
 
 
@@ -134,6 +135,7 @@ def _handle_grpc_error(exc: Exception, logger: Logger, operation: str) -> None:
 # ------------------------------------------------------------------ #
 # Endpoints
 # ------------------------------------------------------------------ #
+
 
 @router.get(
     "",
@@ -437,6 +439,7 @@ async def revoke_token(
 # ------------------------------------------------------------------ #
 # Plugin registration
 # ------------------------------------------------------------------ #
+
 
 class TokensAPIPlugin(Plugin):
     """Plugin to register token management API routes (gRPC-backed)."""

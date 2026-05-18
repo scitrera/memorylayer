@@ -5,6 +5,7 @@ Handles .mcp.json file format (Claude Code's multi-server config shape):
 
 ${VAR} placeholders are passed through verbatim — never expanded.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,10 +22,7 @@ def parse_mcp_json(text: str) -> list[McpServerCreateInput]:
     data = json.loads(text)
 
     if "mcpServers" not in data:
-        raise ValueError(
-            "Invalid .mcp.json: expected top-level 'mcpServers' key. "
-            "Got keys: " + ", ".join(data.keys())
-        )
+        raise ValueError("Invalid .mcp.json: expected top-level 'mcpServers' key. Got keys: " + ", ".join(data.keys()))
 
     doc = McpJsonDocument(**data)
     return doc.to_server_create_inputs()

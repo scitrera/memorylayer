@@ -11,11 +11,12 @@ precedence:
   3. Raise :class:`UnknownModelError` (the FastAPI route turns this
      into a 404).
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from .base import LLMProvider
 
@@ -23,12 +24,10 @@ from .base import LLMProvider
 class UnknownModelError(Exception):
     """Raised when ``LLMRoutingService.resolve`` can't find a target."""
 
-    def __init__(self, requested_model: Optional[str], available: list[str]) -> None:
+    def __init__(self, requested_model: str | None, available: list[str]) -> None:
         self.requested_model = requested_model
         self.available = available
-        super().__init__(
-            f"Unknown model: {requested_model!r}. Available models: {available}"
-        )
+        super().__init__(f"Unknown model: {requested_model!r}. Available models: {available}")
 
 
 class LLMRoutingService:
@@ -38,18 +37,15 @@ class LLMRoutingService:
         self,
         profiles: Mapping[str, LLMProvider],
         *,
-        default_profile: Optional[str] = None,
-        logger: Optional[logging.Logger] = None,
+        default_profile: str | None = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         self._profiles: dict[str, LLMProvider] = dict(profiles)
         self._default_profile = default_profile if default_profile else None
         self.logger = logger or logging.getLogger(__name__)
 
         if self._default_profile is not None and self._default_profile not in self._profiles:
-            raise ValueError(
-                f"default_profile={self._default_profile!r} is not a declared profile "
-                f"(declared: {list(self._profiles)})"
-            )
+            raise ValueError(f"default_profile={self._default_profile!r} is not a declared profile (declared: {list(self._profiles)})")
 
         # Build the alias map (lowercased keys).
         self._alias_to_profile: dict[str, str] = {}
@@ -67,7 +63,7 @@ class LLMRoutingService:
         return dict(self._profiles)
 
     @property
-    def default_profile(self) -> Optional[str]:
+    def default_profile(self) -> str | None:
         return self._default_profile
 
     def has_profile(self, profile: str) -> bool:
@@ -88,7 +84,7 @@ class LLMRoutingService:
     # Resolution
     # ------------------------------------------------------------------
 
-    def resolve(self, model: Optional[str]) -> LLMProvider:
+    def resolve(self, model: str | None) -> LLMProvider:
         if model:
             key = model.lower()
             profile_name = self._alias_to_profile.get(key)
@@ -110,7 +106,8 @@ class LLMRoutingService:
             except Exception as e:  # noqa: BLE001 - log + continue
                 self.logger.warning(
                     "LLM profile %s preload failed (will retry lazily on first request): %s",
-                    name, e,
+                    name,
+                    e,
                 )
 
     async def shutdown(self) -> None:

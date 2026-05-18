@@ -14,9 +14,10 @@ the SDK can issue requests via either:
 Both transports return objects matching the ``TransportResponse`` protocol
 so the rest of the client code does not branch.
 """
+
+from .aether import AetherTransport, AetherTransportResponse
 from .base import Transport, TransportResponse
 from .http import HttpTransport
-from .aether import AetherTransport, AetherTransportResponse
 
 __all__ = [
     "Transport",

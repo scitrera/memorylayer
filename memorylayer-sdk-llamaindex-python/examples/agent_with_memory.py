@@ -46,7 +46,7 @@ def simple_chat_engine_example():
     """
     # Import SimpleChatEngine
     try:
-        from llama_index.core.chat_engine import SimpleChatEngine
+        from llama_index.core.chat_engine import SimpleChatEngine  # noqa: F401
     except ImportError:
         print("SimpleChatEngine not available. Skipping example.")
         return
@@ -134,7 +134,7 @@ def function_agent_example():
     """
     # Try to import agent components
     try:
-        from llama_index.core.agent.workflow import FunctionAgent
+        from llama_index.core.agent.workflow import FunctionAgent  # noqa: F401
         from llama_index.core.tools import FunctionTool
     except ImportError:
         print("FunctionAgent not available. Showing memory setup pattern instead.")
@@ -344,8 +344,7 @@ def multi_turn_persistence_example():
     messages_session2 = [
         (
             MessageRole.ASSISTANT,
-            "Welcome back! Last time we discussed your hybrid recommendation "
-            "system starting with collaborative filtering. How's it going?",
+            "Welcome back! Last time we discussed your hybrid recommendation system starting with collaborative filtering. How's it going?",
         ),
         (MessageRole.USER, "I've implemented the basic matrix factorization. Need help with evaluation metrics."),
         (

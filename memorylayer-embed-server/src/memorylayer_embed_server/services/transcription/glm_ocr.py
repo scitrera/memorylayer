@@ -11,13 +11,15 @@ import time
 from PIL import Image
 from scitrera_app_framework import Variables
 
-from .base import (
-    TranscriptionProvider, TranscriptionAttempt, clean_transcription_output,
-    LENGTH_FINISH_REASONS,
-)
 from ...config import (
-    EMBED_SERVER_GLM_OCR_MODEL, DEFAULT_EMBED_SERVER_GLM_OCR_MODEL,
-    EMBED_SERVER_GLM_OCR_MAX_TOKENS, DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_GLM_OCR_MODEL,
+)
+from .base import (
+    LENGTH_FINISH_REASONS,
+    TranscriptionAttempt,
+    TranscriptionProvider,
+    clean_transcription_output,
 )
 
 
@@ -32,25 +34,22 @@ class GLMOCRProvider(TranscriptionProvider):
     PROVIDER_NAME = "glm-ocr"
 
     def __init__(
-            self,
-            v: Variables = None,
-            model_name: str = DEFAULT_EMBED_SERVER_GLM_OCR_MODEL,
-            max_tokens: int = DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS,
+        self,
+        v: Variables = None,
+        model_name: str = DEFAULT_EMBED_SERVER_GLM_OCR_MODEL,
+        max_tokens: int = DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS,
     ):
         super().__init__(v)
         self.model_name = model_name
         self.default_max_tokens = max_tokens
         self._processor = None
         self._model = None
-        self.logger.info(
-            "Initialized GLMOCRProvider with model: %s, max_tokens: %d",
-            model_name, max_tokens
-        )
+        self.logger.info("Initialized GLMOCRProvider with model: %s, max_tokens: %d", model_name, max_tokens)
 
     def _load_model(self):
         """Lazy load the model and processor."""
         if self._model is None:
-            from transformers import AutoProcessor, AutoModelForImageTextToText
+            from transformers import AutoModelForImageTextToText, AutoProcessor
 
             self.logger.info("Loading GLM-OCR processor: %s", self.model_name)
             self._processor = AutoProcessor.from_pretrained(self.model_name)
@@ -69,10 +68,10 @@ class GLMOCRProvider(TranscriptionProvider):
         await asyncio.to_thread(self._load_model)
 
     async def transcribe_page(
-            self,
-            image_data: bytes,
-            system_prompt: str,
-            max_tokens: int = None,
+        self,
+        image_data: bytes,
+        system_prompt: str,
+        max_tokens: int = None,
     ) -> TranscriptionAttempt:
         """Transcribe a page image using local GLM-OCR model inference."""
         max_tokens = max_tokens or self.default_max_tokens
@@ -132,10 +131,7 @@ class GLMOCRProvider(TranscriptionProvider):
 
             if attempt.finish_reason in LENGTH_FINISH_REASONS:
                 attempt.error = f"Token limit reached: {attempt.finish_reason}"
-                self.logger.info(
-                    "GLM-OCR token limit: finish_reason=%s, tokens=%d",
-                    attempt.finish_reason, completion_tokens
-                )
+                self.logger.info("GLM-OCR token limit: finish_reason=%s, tokens=%d", attempt.finish_reason, completion_tokens)
             else:
                 # Clean and validate content
                 content = clean_transcription_output(raw_content)

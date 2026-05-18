@@ -25,34 +25,33 @@ Configuration (environment variables)
 ``AETHER_TASKS_ENABLED``
     Master enable/disable toggle (default ``true``).
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from logging import Logger
-from typing import Callable, Awaitable, Optional
 from uuid import uuid4
 
-from scitrera_rt_data.serialization.msgpack import msgpack_serialize, msgpack_deserialize
+from scitrera_app_framework import Variables, ext_parse_bool, get_extension, get_logger
+from scitrera_rt_data.serialization.msgpack import msgpack_deserialize, msgpack_serialize
 
-from scitrera_app_framework import get_logger, get_extension, Variables, ext_parse_bool
-
+from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
 from memorylayer_server.services.tasks.base import (
+    EXT_STORAGE_BACKEND,
     TaskService,
     TaskServicePluginBase,
     TaskStatus,
-    EXT_STORAGE_BACKEND,
 )
-
-from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
 
 # ---------------------------------------------------------------------------
 # Payload deserialization
 # ---------------------------------------------------------------------------
 
 
-def _deserialize_task_payload(data: bytes) -> Optional[dict]:
+def _deserialize_task_payload(data: bytes) -> dict | None:
     """Deserialize a task payload, trying msgpack first then JSON.
 
     Tasks created by the ML server use msgpack; tasks created by the
@@ -83,11 +82,11 @@ _TASK_IMPLEMENTATION = "memorylayer"
 
 
 def _build_task_envelope(
-        task_id: str,
-        task_type: str,
-        payload: dict,
-        priority: int = 5,
-        auth_context: Optional[dict] = None,
+    task_id: str,
+    task_type: str,
+    payload: dict,
+    priority: int = 5,
+    auth_context: dict | None = None,
 ) -> dict:
     """Build the canonical JSON envelope for an Aether task message.
 
@@ -98,7 +97,7 @@ def _build_task_envelope(
         "task_type": task_type,
         "payload": payload,
         "auth_context": auth_context or {},
-        "scheduled_at": datetime.now(timezone.utc).isoformat(),
+        "scheduled_at": datetime.now(UTC).isoformat(),
         "priority": priority,
     }
 
@@ -121,10 +120,10 @@ class AetherTaskService(TaskService):
     """
 
     def __init__(
-            self,
-            v: Variables,
-            *,
-            tasks_enabled: bool = DEFAULT_AETHER_TASKS_ENABLED,
+        self,
+        v: Variables,
+        *,
+        tasks_enabled: bool = DEFAULT_AETHER_TASKS_ENABLED,
     ) -> None:
         self._v = v
         self._tasks_enabled = tasks_enabled
@@ -188,11 +187,11 @@ class AetherTaskService(TaskService):
     # ------------------------------------------------------------------
 
     async def schedule_task(
-            self,
-            task_type: str,
-            payload: dict,
-            delay_seconds: int = 0,
-            priority: int = 5,
+        self,
+        task_type: str,
+        payload: dict,
+        delay_seconds: int = 0,
+        priority: int = 5,
     ) -> str:
         """Schedule a one-shot task via Aether's task lifecycle.
 
@@ -221,10 +220,10 @@ class AetherTaskService(TaskService):
         return task_id
 
     async def schedule_recurring(
-            self,
-            task_type: str,
-            interval_seconds: int,
-            payload: dict,
+        self,
+        task_type: str,
+        interval_seconds: int,
+        payload: dict,
     ) -> str:
         """Register a recurring task schedule via Aether's workflow engine.
 
@@ -363,9 +362,9 @@ class AetherTaskService(TaskService):
         return TaskStatus.NOT_FOUND
 
     def register_handler(
-            self,
-            task_type: str,
-            handler: Callable[[Variables, dict], Awaitable[None]],
+        self,
+        task_type: str,
+        handler: Callable[[Variables, dict], Awaitable[None]],
     ) -> None:
         """Register a handler for a task type."""
         self._handlers[task_type] = handler
@@ -417,11 +416,11 @@ class AetherTaskService(TaskService):
             )
 
     async def _delayed_create(
-            self,
-            task_id: str,
-            task_type: str,
-            payload: dict,
-            delay_seconds: int,
+        self,
+        task_id: str,
+        task_type: str,
+        payload: dict,
+        delay_seconds: int,
     ) -> None:
         """Wait *delay_seconds* then create the aether task."""
         try:
@@ -448,7 +447,7 @@ class AetherTaskService(TaskService):
         """
         raw_task_type: str = assignment.task_type or ""
         prefix = "memorylayer-task."
-        task_type = raw_task_type[len(prefix):] if raw_task_type.startswith(prefix) else raw_task_type
+        task_type = raw_task_type[len(prefix) :] if raw_task_type.startswith(prefix) else raw_task_type
 
         aether_task_id: str = assignment.task_id or ""
         ml_task_id: str = assignment.metadata.get("task_id", aether_task_id or "<unknown>")

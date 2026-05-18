@@ -13,6 +13,7 @@ This module also exposes :func:`find_free_port`, a tiny helper that
 auto-assigns each LLM profile a loopback port at boot so operators don't
 have to.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,8 +23,7 @@ import shutil
 import signal
 import socket
 import time
-from typing import Optional, Sequence
-
+from collections.abc import Sequence
 
 __all__ = ["VLLMSubprocessRunner", "find_free_port"]
 
@@ -59,15 +59,15 @@ class VLLMSubprocessRunner:
         host: str,
         port: int,
         dtype: str = "auto",
-        max_model_len: Optional[int] = None,
+        max_model_len: int | None = None,
         gpu_memory_utilization: float = 0.25,
         enforce_eager: bool = False,
         tensor_parallel_size: int = 1,
-        served_model_names: Optional[Sequence[str]] = None,
-        extra_args: Optional[Sequence[str]] = None,
+        served_model_names: Sequence[str] | None = None,
+        extra_args: Sequence[str] | None = None,
         cmd: str = "vllm",
         startup_timeout_sec: float = 600.0,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         if role not in _VALID_ROLES:
             raise ValueError(f"role must be one of {_VALID_ROLES}, got {role!r}")
@@ -86,8 +86,8 @@ class VLLMSubprocessRunner:
         self.startup_timeout_sec = float(startup_timeout_sec)
         self.logger = logger or logging.getLogger(__name__)
 
-        self._process: Optional[asyncio.subprocess.Process] = None
-        self._stderr_task: Optional[asyncio.Task] = None
+        self._process: asyncio.subprocess.Process | None = None
+        self._stderr_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # URLs / state
@@ -106,7 +106,7 @@ class VLLMSubprocessRunner:
         return self._process is not None and self._process.returncode is None
 
     @property
-    def pid(self) -> Optional[int]:
+    def pid(self) -> int | None:
         return self._process.pid if self._process is not None else None
 
     # ------------------------------------------------------------------
@@ -115,11 +115,17 @@ class VLLMSubprocessRunner:
 
     def build_argv(self) -> list[str]:
         argv: list[str] = [
-            self.cmd, "serve", self.model_name,
-            "--host", self.host,
-            "--port", str(self.port),
-            "--dtype", self.dtype,
-            "--gpu-memory-utilization", str(self.gpu_memory_utilization),
+            self.cmd,
+            "serve",
+            self.model_name,
+            "--host",
+            self.host,
+            "--port",
+            str(self.port),
+            "--dtype",
+            self.dtype,
+            "--gpu-memory-utilization",
+            str(self.gpu_memory_utilization),
             "--trust-remote-code",
         ]
         if self.max_model_len is not None:
@@ -152,7 +158,8 @@ class VLLMSubprocessRunner:
                     break
                 self.logger.info(
                     "[vllm-subprocess role=%s] %s",
-                    self.role, line.decode(errors="replace").rstrip(),
+                    self.role,
+                    line.decode(errors="replace").rstrip(),
                 )
         except asyncio.CancelledError:
             raise
@@ -163,13 +170,12 @@ class VLLMSubprocessRunner:
         import httpx
 
         deadline = time.monotonic() + self.startup_timeout_sec
-        last_err: Optional[BaseException] = None
+        last_err: BaseException | None = None
         async with httpx.AsyncClient(timeout=5.0) as client:
             while time.monotonic() < deadline:
                 if self._process is not None and self._process.returncode is not None:
                     raise RuntimeError(
-                        f"vllm serve (role={self.role}) exited prematurely with code "
-                        f"{self._process.returncode} during startup"
+                        f"vllm serve (role={self.role}) exited prematurely with code {self._process.returncode} during startup"
                     )
                 try:
                     resp = await client.get(self.health_url)
@@ -208,7 +214,9 @@ class VLLMSubprocessRunner:
         await self.wait_for_health()
         self.logger.info(
             "vllm subprocess healthy at %s (role=%s, pid=%s)",
-            self.health_url, self.role, self._process.pid,
+            self.health_url,
+            self.role,
+            self._process.pid,
         )
 
     async def shutdown(self) -> None:
@@ -216,7 +224,9 @@ class VLLMSubprocessRunner:
         proc = self._process
         if proc is not None and proc.returncode is None:
             self.logger.info(
-                "Stopping vllm subprocess (role=%s, pid=%s)", self.role, proc.pid,
+                "Stopping vllm subprocess (role=%s, pid=%s)",
+                self.role,
+                proc.pid,
             )
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -224,7 +234,7 @@ class VLLMSubprocessRunner:
                 proc.terminate()
             try:
                 await asyncio.wait_for(proc.wait(), timeout=10)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.logger.warning(
                     "vllm subprocess (role=%s) did not stop in 10s; SIGKILL",
                     self.role,
@@ -236,7 +246,8 @@ class VLLMSubprocessRunner:
                 await proc.wait()
             self.logger.info(
                 "vllm subprocess stopped (role=%s, exit=%s)",
-                self.role, proc.returncode,
+                self.role,
+                proc.returncode,
             )
         if self._stderr_task is not None and not self._stderr_task.done():
             self._stderr_task.cancel()
@@ -245,8 +256,8 @@ class VLLMSubprocessRunner:
 def find_free_port(
     host: str = "127.0.0.1",
     *,
-    low: Optional[int] = None,
-    high: Optional[int] = None,
+    low: int | None = None,
+    high: int | None = None,
 ) -> int:
     """Find an unused TCP port on ``host``.
 

@@ -7,13 +7,14 @@ Supported scopes:
 - "user"  → top-level mcpServers key
 - "local" → projects[project_path].mcpServers key
 """
+
 from __future__ import annotations
 
 import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 _DEFAULT_CLAUDE_JSON = Path("~/.claude.json").expanduser()
 
@@ -26,8 +27,8 @@ def _default_target() -> Path:
 
 def read_claude_json_servers(
     scope: Literal["local", "user"],
-    project_path: Optional[str] = None,
-    target_path: Optional[Path] = None,
+    project_path: str | None = None,
+    target_path: Path | None = None,
 ) -> dict[str, McpServerEntry]:
     """Read mcpServers from the given scope in the Claude JSON file.
 
@@ -56,8 +57,8 @@ def read_claude_json_servers(
 def write_claude_json_servers(
     scope: Literal["local", "user"],
     servers: dict[str, McpServerEntry],
-    project_path: Optional[str] = None,
-    target_path: Optional[Path] = None,
+    project_path: str | None = None,
+    target_path: Path | None = None,
 ) -> None:
     """Write mcpServers into the given scope, preserving all other keys.
 
