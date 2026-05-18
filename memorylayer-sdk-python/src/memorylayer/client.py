@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -20,6 +21,7 @@ from .exceptions import (
 )
 from .models import (
     Association,
+    AuthorityContext,
     ChatMessage,
     ChatThread,
     ChatThreadWithMessages,
@@ -38,12 +40,20 @@ from .models import (
     SessionBriefing,
     Workspace,
 )
+from .knowledgebase import KnowledgebaseAPI
+from .mcp_servers import McpServersAPI
+from .skills import SkillsAPI
 from .types import (
-    MemorySubtype,
     MemoryType,
     RecallMode,
     RelationshipType,
     SearchTolerance,
+)
+from ._transport import (
+    AetherTransport,
+    HttpTransport,
+    Transport,
+    TransportResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,37 +95,86 @@ class MemoryLayerClient:
         workspace_id: str | None = None,
         session_id: str | None = None,
         timeout: float = 30.0,
+        default_authority: AuthorityContext | None = None,
+        *,
+        transport: str | Transport = "http",
+        aether_client: Any = None,
+        aether_target: str = "sv::memorylayer::default",
     ):
         """
         Initialize MemoryLayer client.
 
         Args:
-            base_url: API base URL (default: http://localhost:61001)
+            base_url: API base URL (default: http://localhost:61001).  Used
+                only by the HTTP transport.
             api_key: API key for authentication
             workspace_id: Default workspace ID for operations
             session_id: Session ID for session-based workspace resolution
             timeout: Request timeout in seconds (default: 30.0)
+            default_authority: Default OBO authority applied to every request
+            transport: ``"http"`` (default; direct httpx) or ``"aether"``
+                (route via ``proxy_http_async`` on a shared Aether SDK
+                connection).  May also be a custom ``Transport`` instance
+                for tests / advanced cases.
+            aether_client: Required when ``transport='aether'``.  An
+                ``AsyncAgentClient`` or ``AsyncServiceClient`` from
+                ``scitrera_aether_client`` that is already connected.  The
+                SDK does NOT own this client (lifecycle is the caller's).
+            aether_target: Target topic for Aether transport (default
+                ``sv::memorylayer::default``).
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.workspace_id = workspace_id
         self.session_id = session_id
         self.timeout = timeout
+        self.default_authority = default_authority
+        self._transport_kind = transport
+        self._aether_client = aether_client
+        self._aether_target = aether_target
+        # ``self._client`` remains a public-ish attribute used by the small
+        # set of bespoke httpx paths in this file (file uploads, NDJSON
+        # streaming).  HTTP transport sets it to its underlying httpx client;
+        # Aether transport leaves it None and those paths raise.
         self._client: httpx.AsyncClient | None = None
+        self._transport: Transport | None = None
+        if transport == "aether" and aether_client is None:
+            raise ValueError(
+                "transport='aether' requires aether_client (an AsyncAgentClient "
+                "or AsyncServiceClient with a live gateway connection)"
+            )
+        self.skills = SkillsAPI(self)
+        self.mcp_servers = McpServersAPI(self)
+        self.kb = KnowledgebaseAPI(self)
 
     async def __aenter__(self) -> "MemoryLayerClient":
         """Async context manager entry."""
-        headers = {}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        if self.session_id:
-            headers["X-Session-ID"] = self.session_id
-
-        self._client = httpx.AsyncClient(
-            base_url=f"{self.base_url}/v1",
-            headers=headers,
-            timeout=self.timeout,
-        )
+        if isinstance(self._transport_kind, str):
+            if self._transport_kind == "http":
+                http = HttpTransport(
+                    base_url=f"{self.base_url}/v1",
+                    api_key=self.api_key,
+                    session_id=self.session_id,
+                    timeout=self.timeout,
+                )
+                self._transport = http
+                self._client = http.httpx_client
+            elif self._transport_kind == "aether":
+                self._transport = AetherTransport(
+                    aether_client=self._aether_client,
+                    target=self._aether_target,
+                    api_key=self.api_key,
+                    session_id=self.session_id,
+                    timeout=self.timeout,
+                )
+            else:
+                raise ValueError(
+                    f"Unknown transport: {self._transport_kind!r} "
+                    "(expected 'http' or 'aether', or a Transport instance)"
+                )
+        else:
+            # Custom Transport instance — caller owns it.
+            self._transport = self._transport_kind
         return self
 
     def set_session(self, session_id: str) -> None:
@@ -132,7 +191,9 @@ class MemoryLayerClient:
             session_id: Session ID to use
         """
         self.session_id = session_id
-        if self._client:
+        if self._transport is not None and hasattr(self._transport, "set_session"):
+            self._transport.set_session(session_id)
+        elif self._client:
             self._client.headers["X-Session-ID"] = session_id
 
     def clear_session(self) -> None:
@@ -140,7 +201,9 @@ class MemoryLayerClient:
         Clear the active session ID.
         """
         self.session_id = None
-        if self._client and "X-Session-ID" in self._client.headers:
+        if self._transport is not None and hasattr(self._transport, "clear_session"):
+            self._transport.clear_session()
+        elif self._client and "X-Session-ID" in self._client.headers:
             del self._client.headers["X-Session-ID"]
 
     def get_session_id(self) -> str | None:
@@ -153,15 +216,113 @@ class MemoryLayerClient:
         return self.session_id
 
     async def __aexit__(self, *args: Any) -> None:
-        """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
+        """Async context manager exit.
+
+        For HTTP transport this closes the underlying httpx client.  For
+        Aether transport this is a no-op — the SDK does not own the
+        ``aether_client`` connection.
+        """
+        if self._transport is not None:
+            await self._transport.aclose()
+            self._transport = None
+        self._client = None
 
     def _ensure_client(self) -> httpx.AsyncClient:
-        """Ensure client is initialized."""
-        if self._client is None:
+        """Return the underlying ``httpx.AsyncClient`` (HTTP transport only).
+
+        Most SDK paths now flow through ``self._transport`` (which works on
+        both HTTP and Aether transports — including multipart uploads and
+        NDJSON streaming after Phase 5.1).  This escape hatch remains for
+        any future caller that genuinely needs raw httpx semantics
+        (e.g. response.aiter_bytes streaming).  It raises if the SDK isn't
+        entered or if the active transport isn't HTTP.
+        """
+        if self._transport is None:
             raise RuntimeError("Client not initialized. Use async with context manager.")
+        if self._client is None:
+            raise NotImplementedError(
+                "This SDK code path requires the HTTP transport. "
+                "Construct the client with transport='http' for now."
+            )
         return self._client
+
+    def _ensure_transport(self) -> Transport:
+        """Ensure the transport is initialized (works for any transport)."""
+        if self._transport is None:
+            raise RuntimeError("Client not initialized. Use async with context manager.")
+        return self._transport
+
+    @staticmethod
+    def _encode_multipart(
+        files: dict[str, tuple[str, bytes]],
+        data: dict[str, str],
+    ) -> tuple[bytes, str]:
+        """Serialize a multipart/form-data body without depending on the transport.
+
+        Uses ``httpx.Request`` (already a hard dep) to build the multipart bytes
+        and read back the ``content-type`` header (with boundary). Both transports
+        then ship the raw bytes and the caller-provided content-type — no
+        transport-specific multipart machinery required, which means the
+        multipart upload paths work over Aether transport too.
+
+        Returns:
+            (content_bytes, content_type_header) — pass ``content=content_bytes``
+            and ``headers={"content-type": content_type_header}`` to
+            ``Transport.request``.
+        """
+        req = httpx.Request("POST", "http://_local/_multipart", files=files, data=data)
+        # ``files=`` makes the body a streaming iterator; ``read()`` materializes
+        # it so we can ship the bytes through any transport unchanged.
+        return req.read(), req.headers["content-type"]
+
+    def _obo_headers(self, authority: AuthorityContext | None) -> dict[str, str]:
+        """Build X-Aether-* OBO headers from an AuthorityContext."""
+        effective = authority or self.default_authority
+        if effective is None:
+            return {}
+        headers: dict[str, str] = {"X-Aether-Grant-ID": effective.grant_id}
+        if effective.subject is not None:
+            headers["X-Aether-Authority-Mode"] = "on_behalf_of"
+            headers["X-Aether-Subject-Type"] = effective.subject.type
+            headers["X-Aether-Subject-ID"] = effective.subject.id
+        else:
+            headers["X-Aether-Authority-Mode"] = "direct"
+        return headers
+
+    @asynccontextmanager
+    async def acting_for(
+        self,
+        grant_id: str,
+        subject: tuple[str, str] | None = None,
+    ):  # type: ignore[return]
+        """
+        Async context manager that returns a proxy with OBO authority baked in.
+
+        All requests made through the proxy include X-Aether-* headers for the
+        given grant and subject without mutating the underlying httpx client.
+
+        Args:
+            grant_id: Aether authority grant ID
+            subject: (type, id) tuple, e.g. ("user", "alice")
+
+        Example:
+            async with client.acting_for("g_abc", subject=("user", "alice")) as alice:
+                await alice.recall("preferences", workspace_id="ws_work")
+        """
+        from .models import PrincipalRef
+
+        principal = PrincipalRef(type=subject[0], id=subject[1]) if subject is not None else None
+        authority = AuthorityContext(grant_id=grant_id, subject=principal)
+        yield _OBOProxy(self, authority=authority, workspace_id=self.workspace_id)
+
+    def for_workspace(self, workspace_id: str) -> "_OBOProxy":
+        """
+        Return a proxy with workspace_id baked in (uses client's default_authority).
+
+        Args:
+            workspace_id: Workspace ID to use for all operations on this proxy
+        """
+        return _OBOProxy(self, authority=self.default_authority, workspace_id=workspace_id)
 
     async def _request(
         self,
@@ -171,6 +332,7 @@ class MemoryLayerClient:
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         enterprise_feature: str | None = None,
+        authority: AuthorityContext | None = None,
     ) -> dict[str, Any]:
         """
         Make HTTP request with error handling.
@@ -182,6 +344,7 @@ class MemoryLayerClient:
             params: Query parameters
             enterprise_feature: If set, a 404 raises EnterpriseRequiredError
                 instead of NotFoundError, indicating the feature needs Enterprise.
+            authority: Per-request OBO authority (overrides default_authority)
 
         Returns:
             Response JSON
@@ -195,10 +358,11 @@ class MemoryLayerClient:
             ServerError: Server error (5xx)
             MemoryLayerError: Other errors
         """
-        client = self._ensure_client()
+        transport = self._ensure_transport()
+        obo_headers = self._obo_headers(authority)
 
         try:
-            response = await client.request(method, path, json=json, params=params)
+            response = await transport.request(method, path, json=json, params=params, headers=obo_headers)
 
             # Handle errors
             if response.status_code == 401:
@@ -245,12 +409,14 @@ class MemoryLayerClient:
         self,
         content: str,
         type: str | MemoryType | None = None,
-        subtype: str | MemorySubtype | None = None,
+        subtype: str | None = None,
         importance: float = 0.5,
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         context_id: str | None = None,
         user_id: str | None = None,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
     ) -> Memory:
         """
         Store a new memory.
@@ -271,7 +437,7 @@ class MemoryLayerClient:
             memory = await client.remember(
                 content="User prefers concise code comments",
                 type=MemoryType.SEMANTIC,
-                subtype=MemorySubtype.PREFERENCE,
+                subtype="preference",
                 importance=0.8,
                 tags=["preferences", "coding-style"]
             )
@@ -292,15 +458,18 @@ class MemoryLayerClient:
             payload["context_id"] = context_id
         if user_id is not None:
             payload["user_id"] = user_id
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            payload["workspace_id"] = ws_id
 
-        data = await self._request("POST", "/memories", json=payload)
+        data = await self._request("POST", "/memories", json=payload, authority=authority)
         return Memory(**data["memory"])
 
     async def recall(
         self,
         query: str,
         types: list[str | MemoryType] | None = None,
-        subtypes: list[str | MemorySubtype] | None = None,
+        subtypes: list[str] | None = None,
         tags: list[str] | None = None,
         mode: str | RecallMode | None = None,
         limit: int = 10,
@@ -313,6 +482,8 @@ class MemoryLayerClient:
         created_after: str | None = None,
         created_before: str | None = None,
         user_id: str | None = None,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
     ) -> RecallResult:
         """
         Search memories by semantic query.
@@ -372,8 +543,11 @@ class MemoryLayerClient:
             payload["created_before"] = created_before
         if user_id is not None:
             payload["user_id"] = user_id
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            payload["workspace_id"] = ws_id
 
-        data = await self._request("POST", "/memories/recall", json=payload)
+        data = await self._request("POST", "/memories/recall", json=payload, authority=authority)
 
         # Parse memories
         memories_adapter = TypeAdapter(list[Memory])
@@ -391,6 +565,7 @@ class MemoryLayerClient:
         query: str,
         max_tokens: int = 500,
         include_sources: bool = True,
+        authority: AuthorityContext | None = None,
     ) -> ReflectResult:
         """
         Synthesize and summarize memories.
@@ -399,6 +574,7 @@ class MemoryLayerClient:
             query: What to reflect on
             max_tokens: Maximum tokens in reflection (default: 500)
             include_sources: Include source memory IDs (default: True)
+            authority: Per-request OBO authority
 
         Returns:
             Reflection result with synthesis
@@ -415,7 +591,7 @@ class MemoryLayerClient:
             "include_sources": include_sources,
         }
 
-        data = await self._request("POST", "/memories/reflect", json=payload)
+        data = await self._request("POST", "/memories/reflect", json=payload, authority=authority)
         return ReflectResult(**data)
 
     async def forget(
@@ -889,9 +1065,9 @@ class MemoryLayerClient:
             "limit": str(limit),
         }
 
-        # Fetch raw NDJSON response
-        client = self._ensure_client()
-        response = await client.get(f"/workspaces/{ws_id}/export", params=params)
+        # Fetch raw NDJSON response via the transport (works on HTTP + Aether).
+        transport = self._ensure_transport()
+        response = await transport.request("GET", f"/workspaces/{ws_id}/export", params=params)
 
         # Handle errors
         if response.status_code >= 400:
@@ -994,8 +1170,8 @@ class MemoryLayerClient:
             "limit": str(limit),
         }
 
-        client = self._ensure_client()
-        response = await client.get(f"/workspaces/{ws_id}/export", params=params)
+        transport = self._ensure_transport()
+        response = await transport.request("GET", f"/workspaces/{ws_id}/export", params=params)
 
         if response.status_code >= 400:
             if response.status_code == 401:
@@ -1043,9 +1219,12 @@ class MemoryLayerClient:
         # Serialize to NDJSON
         ndjson_body = "\n".join(json.dumps(line) for line in ndjson_lines)
 
-        client = self._ensure_client()
-        response = await client.post(
-            f"/workspaces/{workspace_id}/import", content=ndjson_body, headers={"Content-Type": "application/x-ndjson"}
+        transport = self._ensure_transport()
+        response = await transport.request(
+            "POST",
+            f"/workspaces/{workspace_id}/import",
+            content=ndjson_body,
+            headers={"Content-Type": "application/x-ndjson"},
         )
 
         if response.status_code >= 400:
@@ -1529,6 +1708,7 @@ class MemoryLayerClient:
         title: str | None = None,
         metadata: dict[str, Any] | None = None,
         expires_at: str | None = None,
+        scope: str | None = None,
     ) -> ChatThread:
         """
         Create a new chat thread.
@@ -1570,6 +1750,8 @@ class MemoryLayerClient:
             payload["metadata"] = metadata
         if expires_at is not None:
             payload["expires_at"] = expires_at
+        if scope is not None:
+            payload["scope"] = scope
 
         data = await self._request("POST", "/threads", json=payload)
         return ChatThread(**data)
@@ -1581,6 +1763,7 @@ class MemoryLayerClient:
         user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        scope_filter: str | None = None,
     ) -> list[ChatThread]:
         """
         List chat threads.
@@ -1603,6 +1786,8 @@ class MemoryLayerClient:
             params["workspace_id"] = ws_id
         if user_id is not None:
             params["user_id"] = user_id
+        if scope_filter is not None:
+            params["scope_filter"] = scope_filter
 
         data = await self._request("GET", "/threads", params=params)
         threads_adapter = TypeAdapter(list[ChatThread])
@@ -1668,6 +1853,40 @@ class MemoryLayerClient:
         data = await self._request("GET", f"/threads/{thread_id}/full", params=params)
         return ChatThreadWithMessages(**data)
 
+    async def update_thread(
+        self,
+        thread_id: str,
+        *,
+        workspace_id: str | None = None,
+        title: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> "ChatThread":
+        """
+        Update a thread's metadata (e.g. rename it).
+
+        Args:
+            thread_id: Thread ID
+            workspace_id: Workspace ID (uses default if not provided)
+            title: New thread title
+            metadata: Optional metadata dict to merge
+
+        Example:
+            await client.update_thread("thread_123", title="My renamed thread")
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        payload: dict[str, Any] = {}
+        if title is not None:
+            payload["title"] = title
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        data = await self._request("PUT", f"/threads/{thread_id}", params=params or None, json=payload)
+        return ChatThread(**data)
+
     async def delete_thread(
         self,
         thread_id: str,
@@ -1690,6 +1909,42 @@ class MemoryLayerClient:
             params["workspace_id"] = ws_id
 
         await self._request("DELETE", f"/threads/{thread_id}", params=params or None)
+
+    async def delete_message(
+        self,
+        thread_id: str,
+        message_id: str,
+        *,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> bool:
+        """
+        Delete a single message from a thread.
+
+        Args:
+            thread_id: Thread ID
+            message_id: Message ID to delete
+            workspace_id: Workspace ID (uses default if not provided)
+            authority: Per-request OBO authority
+
+        Returns:
+            True if the message was found and deleted, False if not found.
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        try:
+            await self._request(
+                "DELETE",
+                f"/threads/{thread_id}/messages/{message_id}",
+                params=params or None,
+                authority=authority,
+            )
+            return True
+        except NotFoundError:
+            return False
 
     async def append_messages(
         self,
@@ -1835,20 +2090,25 @@ class MemoryLayerClient:
         Returns:
             Tuple of (DocumentInfo, JobInfo).
         """
-        client = self._ensure_client()
+        transport = self._ensure_transport()
+        body, content_type = self._encode_multipart(
+            files={"file": (filename, file_data)},
+            data={
+                "target_context_id": target_context_id,
+                "chunking_strategy": chunking_strategy,
+                "chunk_size": str(chunk_size),
+                "chunk_overlap": str(chunk_overlap),
+                "importance": str(importance),
+                "retain_original": str(retain_original).lower(),
+            },
+        )
 
         try:
-            response = await client.post(
+            response = await transport.request(
+                "POST",
                 "/documents",
-                files={"file": (filename, file_data)},
-                data={
-                    "target_context_id": target_context_id,
-                    "chunking_strategy": chunking_strategy,
-                    "chunk_size": str(chunk_size),
-                    "chunk_overlap": str(chunk_overlap),
-                    "importance": str(importance),
-                    "retain_original": str(retain_original).lower(),
-                },
+                content=body,
+                headers={"content-type": content_type},
             )
 
             if response.status_code == 501:
@@ -1968,10 +2228,11 @@ class MemoryLayerClient:
 
         Requires MemoryLayer Enterprise.
         """
-        client = self._ensure_client()
+        transport = self._ensure_transport()
 
         try:
-            response = await client.get(
+            response = await transport.request(
+                "GET",
                 f"/documents/{document_id}/pages/{page_id}/image",
             )
             if response.status_code == 501:
@@ -2088,7 +2349,7 @@ class MemoryLayerClient:
         Returns:
             Tuple of (DatasetInfo, DatasetJobInfo).
         """
-        client = self._ensure_client()
+        transport = self._ensure_transport()
 
         form_data: dict[str, str] = {
             "target_context_id": target_context_id,
@@ -2100,11 +2361,17 @@ class MemoryLayerClient:
         if name is not None:
             form_data["name"] = name
 
+        body, content_type = self._encode_multipart(
+            files={"file": (filename, file_data)},
+            data=form_data,
+        )
+
         try:
-            response = await client.post(
+            response = await transport.request(
+                "POST",
                 "/datasets",
-                files={"file": (filename, file_data)},
-                data=form_data,
+                content=body,
+                headers={"content-type": content_type},
             )
 
             if response.status_code == 501:
@@ -2277,4 +2544,393 @@ class MemoryLayerClient:
             "POST",
             f"/datasets/jobs/{job_id}/cancel",
             enterprise_feature="Dataset processing jobs",
+        )
+
+
+class _OBOProxy:
+    """
+    Lightweight proxy over MemoryLayerClient that injects OBO authority and/or
+    a fixed workspace_id on every request.  Shares the parent's httpx.AsyncClient
+    — no new HTTP connections, no mutation of shared headers.
+    """
+
+    def __init__(
+        self,
+        parent: MemoryLayerClient,
+        authority: AuthorityContext | None,
+        workspace_id: str | None,
+    ) -> None:
+        self._parent = parent
+        self._authority = authority
+        self._workspace_id = workspace_id
+
+    # --- proxy helpers ---
+
+    def _resolve_authority(self, authority: AuthorityContext | None) -> AuthorityContext | None:
+        return authority if authority is not None else self._authority
+
+    def _resolve_workspace(self, workspace_id: str | None) -> str | None:
+        return workspace_id if workspace_id is not None else self._workspace_id
+
+    # --- sub-proxy ---
+
+    @asynccontextmanager
+    async def acting_for(
+        self,
+        grant_id: str,
+        subject: tuple[str, str] | None = None,
+    ):  # type: ignore[return]
+        """Return a new proxy with a different authority (workspace_id inherited)."""
+        from .models import PrincipalRef
+
+        principal = PrincipalRef(type=subject[0], id=subject[1]) if subject is not None else None
+        authority = AuthorityContext(grant_id=grant_id, subject=principal)
+        yield _OBOProxy(self._parent, authority=authority, workspace_id=self._workspace_id)
+
+    def for_workspace(self, workspace_id: str) -> "_OBOProxy":
+        """Return a new proxy with a different workspace_id (authority inherited)."""
+        return _OBOProxy(self._parent, authority=self._authority, workspace_id=workspace_id)
+
+    # --- delegated namespaces ---
+
+    @property
+    def skills(self) -> "_SkillsOBOProxy":
+        """Skills namespace bound to this proxy's authority + workspace."""
+        return _SkillsOBOProxy(
+            self._parent.skills,
+            authority=self._authority,
+            workspace_id=self._workspace_id,
+        )
+
+    @property
+    def mcp_servers(self) -> "_McpServersOBOProxy":
+        """MCP servers namespace bound to this proxy's authority + workspace."""
+        return _McpServersOBOProxy(
+            self._parent.mcp_servers,
+            authority=self._authority,
+            workspace_id=self._workspace_id,
+        )
+
+    @property
+    def kb(self) -> "_KbOBOProxy":
+        """Knowledgebase namespace bound to this proxy's authority + workspace."""
+        return _KbOBOProxy(
+            self._parent.kb,
+            authority=self._authority,
+            workspace_id=self._workspace_id,
+        )
+
+    # --- delegated memory operations ---
+
+    async def remember(
+        self,
+        content: str,
+        type: str | MemoryType | None = None,
+        subtype: str | None = None,
+        importance: float = 0.5,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        context_id: str | None = None,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> Memory:
+        return await self._parent.remember(
+            content,
+            type=type,
+            subtype=subtype,
+            importance=importance,
+            tags=tags,
+            metadata=metadata,
+            context_id=context_id,
+            user_id=user_id,
+            workspace_id=self._resolve_workspace(workspace_id),
+            authority=self._resolve_authority(authority),
+        )
+
+    async def recall(
+        self,
+        query: str,
+        types: list[str | MemoryType] | None = None,
+        subtypes: list[str] | None = None,
+        tags: list[str] | None = None,
+        mode: str | RecallMode | None = None,
+        limit: int = 10,
+        min_relevance: float | None = None,
+        recency_weight: float | None = None,
+        tolerance: str | SearchTolerance | None = None,
+        include_associations: bool | None = None,
+        traverse_depth: int | None = None,
+        max_expansion: int | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> RecallResult:
+        return await self._parent.recall(
+            query,
+            types=types,
+            subtypes=subtypes,
+            tags=tags,
+            mode=mode,
+            limit=limit,
+            min_relevance=min_relevance,
+            recency_weight=recency_weight,
+            tolerance=tolerance,
+            include_associations=include_associations,
+            traverse_depth=traverse_depth,
+            max_expansion=max_expansion,
+            created_after=created_after,
+            created_before=created_before,
+            user_id=user_id,
+            workspace_id=self._resolve_workspace(workspace_id),
+            authority=self._resolve_authority(authority),
+        )
+
+    async def reflect(
+        self,
+        query: str,
+        max_tokens: int = 500,
+        include_sources: bool = True,
+        authority: AuthorityContext | None = None,
+    ) -> ReflectResult:
+        return await self._parent.reflect(
+            query,
+            max_tokens=max_tokens,
+            include_sources=include_sources,
+            authority=self._resolve_authority(authority),
+        )
+
+    async def delete_message(
+        self,
+        thread_id: str,
+        message_id: str,
+        *,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> bool:
+        return await self._parent.delete_message(
+            thread_id,
+            message_id,
+            workspace_id=self._resolve_workspace(workspace_id),
+            authority=self._resolve_authority(authority),
+        )
+
+
+class _SkillsOBOProxy:
+    """SkillsAPI namespace bound to an OBO authority + workspace_id.
+
+    Returned from ``_OBOProxy.skills``. Forwards every call to the parent
+    SkillsAPI while injecting the proxy's authority + default workspace_id
+    so OBO context flows through to the server unchanged.
+    """
+
+    def __init__(
+        self,
+        parent: "SkillsAPI",
+        authority: AuthorityContext | None,
+        workspace_id: str | None,
+    ) -> None:
+        self._parent = parent
+        self._authority = authority
+        self._workspace_id = workspace_id
+
+    def _ws(self, workspace_id: str | None) -> str | None:
+        return workspace_id if workspace_id is not None else self._workspace_id
+
+    async def list(
+        self,
+        scope: str | None = None,
+        name: str | None = None,
+        tags: list[str] | None = None,
+        enabled: bool | None = None,
+        include_shadowed: bool = False,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ):
+        return await self._parent.list(
+            scope=scope, name=name, tags=tags, enabled=enabled,
+            include_shadowed=include_shadowed,
+            workspace_id=self._ws(workspace_id),
+            authority=authority if authority is not None else self._authority,
+        )
+
+    async def get(self, skill_id: str, authority: AuthorityContext | None = None):
+        return await self._parent.get(
+            skill_id, authority=authority if authority is not None else self._authority,
+        )
+
+    async def list_files(self, skill_id: str, authority: AuthorityContext | None = None):
+        return await self._parent.list_files(
+            skill_id, authority=authority if authority is not None else self._authority,
+        )
+
+    async def save(
+        self,
+        name: str,
+        description: str,
+        body: str = "",
+        files: "list[tuple[str, bytes]] | None" = None,
+        scope: str = "workspace",
+        source_mode: str = "server",
+        workspace_id: str | None = None,
+        user_id: str | None = None,
+        authority: AuthorityContext | None = None,
+        **manifest_extras: Any,
+    ):
+        return await self._parent.save(
+            name=name, description=description, body=body, files=files,
+            scope=scope, source_mode=source_mode,
+            workspace_id=self._ws(workspace_id), user_id=user_id,
+            authority=authority if authority is not None else self._authority,
+            **manifest_extras,
+        )
+
+    async def delete(self, skill_id: str, authority: AuthorityContext | None = None):
+        return await self._parent.delete(
+            skill_id, authority=authority if authority is not None else self._authority,
+        )
+
+    async def resolve(
+        self,
+        name: str | None = None,
+        query: str | None = None,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ):
+        return await self._parent.resolve(
+            name=name, query=query,
+            workspace_id=self._ws(workspace_id),
+            authority=authority if authority is not None else self._authority,
+        )
+
+
+class _KbOBOProxy:
+    """KnowledgebaseAPI namespace bound to an OBO authority + workspace_id."""
+
+    def __init__(
+        self,
+        parent: "KnowledgebaseAPI",
+        authority: AuthorityContext | None,
+        workspace_id: str | None,
+    ) -> None:
+        self._parent = parent
+        self._authority = authority
+        self._workspace_id = workspace_id
+
+    def _ws(self, workspace_id: str | None) -> str | None:
+        return workspace_id if workspace_id is not None else self._workspace_id
+
+    def _auth(self, authority: AuthorityContext | None) -> AuthorityContext | None:
+        return authority if authority is not None else self._authority
+
+    async def get(self, workspace_id: str | None = None, *, context_id: str | None = None,
+                  authority: AuthorityContext | None = None):
+        return await self._parent.get(
+            self._ws(workspace_id), context_id=context_id, authority=self._auth(authority),
+        )
+
+    async def list_articles(self, workspace_id: str | None = None, *,
+                            article_type: str | None = None, limit: int = 100, offset: int = 0,
+                            authority: AuthorityContext | None = None):
+        return await self._parent.list_articles(
+            self._ws(workspace_id), article_type=article_type, limit=limit, offset=offset,
+            authority=self._auth(authority),
+        )
+
+    async def get_article(self, article_id: str, workspace_id: str | None = None, *,
+                          authority: AuthorityContext | None = None):
+        return await self._parent.get_article(
+            article_id, self._ws(workspace_id), authority=self._auth(authority),
+        )
+
+    async def generate(self, workspace_id: str | None = None, *,
+                       regenerate: bool = False, max_communities: int | None = None,
+                       max_god_nodes: int | None = None, include_rpg: bool = False,
+                       context_id: str | None = None,
+                       authority: AuthorityContext | None = None):
+        return await self._parent.generate(
+            self._ws(workspace_id), regenerate=regenerate, max_communities=max_communities,
+            max_god_nodes=max_god_nodes, include_rpg=include_rpg, context_id=context_id,
+            authority=self._auth(authority),
+        )
+
+    async def export_vault(self, workspace_id: str | None = None, *,
+                           authority: AuthorityContext | None = None):
+        return await self._parent.export_vault(
+            self._ws(workspace_id), authority=self._auth(authority),
+        )
+
+    async def get_graph_analysis(self, workspace_id: str | None = None, *,
+                                 context_id: str | None = None,
+                                 authority: AuthorityContext | None = None):
+        return await self._parent.get_graph_analysis(
+            self._ws(workspace_id), context_id=context_id, authority=self._auth(authority),
+        )
+
+    async def get_community(self, community_id: int, workspace_id: str | None = None, *,
+                            authority: AuthorityContext | None = None):
+        return await self._parent.get_community(
+            community_id, self._ws(workspace_id), authority=self._auth(authority),
+        )
+
+
+class _McpServersOBOProxy:
+    """McpServersAPI namespace bound to an OBO authority + workspace_id."""
+
+    def __init__(
+        self,
+        parent: "McpServersAPI",
+        authority: AuthorityContext | None,
+        workspace_id: str | None,
+    ) -> None:
+        self._parent = parent
+        self._authority = authority
+        self._workspace_id = workspace_id
+
+    def _ws(self, workspace_id: str | None) -> str | None:
+        return workspace_id if workspace_id is not None else self._workspace_id
+
+    async def list(self, workspace_id: str | None = None, authority: AuthorityContext | None = None, **kwargs: Any):
+        return await self._parent.list(
+            workspace_id=self._ws(workspace_id),
+            authority=authority if authority is not None else self._authority,
+            **kwargs,
+        )
+
+    async def get(self, server_id: str, authority: AuthorityContext | None = None):
+        return await self._parent.get(
+            server_id, authority=authority if authority is not None else self._authority,
+        )
+
+    async def get_by_name(self, name: str, workspace_id: str | None = None, authority: AuthorityContext | None = None, **kwargs: Any):
+        return await self._parent.get_by_name(
+            name, workspace_id=self._ws(workspace_id),
+            authority=authority if authority is not None else self._authority,
+            **kwargs,
+        )
+
+    async def create(self, workspace_id: str | None = None, authority: AuthorityContext | None = None, **kwargs: Any):
+        return await self._parent.create(
+            workspace_id=self._ws(workspace_id),
+            authority=authority if authority is not None else self._authority,
+            **kwargs,
+        )
+
+    async def update(self, server_id: str, authority: AuthorityContext | None = None, **kwargs: Any):
+        return await self._parent.update(
+            server_id, authority=authority if authority is not None else self._authority,
+            **kwargs,
+        )
+
+    async def delete(self, server_id: str, authority: AuthorityContext | None = None):
+        return await self._parent.delete(
+            server_id, authority=authority if authority is not None else self._authority,
+        )
+
+    async def resolve(self, name: str, workspace_id: str | None = None, authority: AuthorityContext | None = None):
+        return await self._parent.resolve(
+            name, workspace_id=self._ws(workspace_id),
+            authority=authority if authority is not None else self._authority,
         )

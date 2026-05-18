@@ -195,6 +195,67 @@ class TestChatThreadStorage:
         assert deleted is True
         assert await storage.get_thread(workspace_id, "t-delete") is None
 
+    # ------------------------------------------------------------------
+    # scope field tests
+    # ------------------------------------------------------------------
+
+    async def test_create_thread_scope_roundtrip(self, storage, workspace_id):
+        """scope field persists through create → get round-trip."""
+        web_thread = _make_thread(workspace_id, thread_id="t-scope-web", scope="web")
+        office_thread = _make_thread(workspace_id, thread_id="t-scope-office", scope="office")
+        null_thread = _make_thread(workspace_id, thread_id="t-scope-null")  # scope=None
+
+        await storage.create_thread(web_thread)
+        await storage.create_thread(office_thread)
+        await storage.create_thread(null_thread)
+
+        fetched_web = await storage.get_thread(workspace_id, "t-scope-web")
+        fetched_office = await storage.get_thread(workspace_id, "t-scope-office")
+        fetched_null = await storage.get_thread(workspace_id, "t-scope-null")
+
+        assert fetched_web is not None and fetched_web.scope == "web"
+        assert fetched_office is not None and fetched_office.scope == "office"
+        assert fetched_null is not None and fetched_null.scope is None
+
+    async def test_list_threads_scope_filter_web(self, storage, workspace_id):
+        """scope_filter='web' returns web threads AND null-scope threads (NULL ≡ web)."""
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-sf-web", scope="web"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-sf-office", scope="office"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-sf-null"))  # NULL ≡ web
+
+        threads = await storage.list_threads(workspace_id, scope_filter="web")
+        thread_ids = {t.id for t in threads}
+
+        assert "t-sf-web" in thread_ids
+        assert "t-sf-null" in thread_ids
+        assert "t-sf-office" not in thread_ids
+
+    async def test_list_threads_scope_filter_office(self, storage, workspace_id):
+        """scope_filter='office' returns only office threads."""
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-sfo-web", scope="web"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-sfo-office", scope="office"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-sfo-null"))
+
+        threads = await storage.list_threads(workspace_id, scope_filter="office")
+        thread_ids = {t.id for t in threads}
+
+        assert "t-sfo-office" in thread_ids
+        assert "t-sfo-web" not in thread_ids
+        assert "t-sfo-null" not in thread_ids
+
+    async def test_list_threads_scope_filter_none_returns_all(self, storage, workspace_id):
+        """scope_filter=None (default) returns all threads regardless of scope."""
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-all-web", scope="web"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-all-office", scope="office"))
+        await storage.create_thread(_make_thread(workspace_id, thread_id="t-all-null"))
+
+        threads = await storage.list_threads(workspace_id)
+        thread_ids = {t.id for t in threads}
+
+        assert "t-all-web" in thread_ids
+        assert "t-all-office" in thread_ids
+        assert "t-all-null" in thread_ids
+
 
 # ---------------------------------------------------------------------------
 # TestChatMessageStorage
@@ -356,3 +417,76 @@ class TestChatMessageStorage:
         # Messages gone (querying should return empty list, not raise)
         after = await storage.get_messages(workspace_id, "t-cascade")
         assert len(after) == 0
+
+    async def test_delete_message_removes_row(self, storage, workspace_id):
+        """delete_message returns True and removes the targeted row."""
+        thread = _make_thread(workspace_id, thread_id="t-del-msg")
+        await storage.create_thread(thread)
+
+        created = await storage.append_messages(
+            workspace_id,
+            "t-del-msg",
+            [
+                _make_msg_input("user", "first"),
+                _make_msg_input("assistant", "second"),
+            ],
+        )
+        target_id = created[0].id
+
+        result = await storage.delete_message(workspace_id, "t-del-msg", target_id)
+
+        assert result is True
+        remaining = await storage.get_messages(workspace_id, "t-del-msg")
+        assert len(remaining) == 1
+        assert remaining[0].id == created[1].id
+
+    async def test_delete_message_not_found_returns_false(self, storage, workspace_id):
+        """delete_message returns False without raising when message does not exist."""
+        thread = _make_thread(workspace_id, thread_id="t-del-missing")
+        await storage.create_thread(thread)
+
+        result = await storage.delete_message(workspace_id, "t-del-missing", "nonexistent-id")
+
+        assert result is False
+
+    async def test_delete_message_wrong_workspace_returns_false(self, storage, workspace_id):
+        """delete_message respects workspace scoping — wrong workspace returns False."""
+        thread = _make_thread(workspace_id, thread_id="t-del-ws")
+        await storage.create_thread(thread)
+
+        created = await storage.append_messages(
+            workspace_id,
+            "t-del-ws",
+            [_make_msg_input("user", "hello")],
+        )
+        msg_id = created[0].id
+
+        result = await storage.delete_message("other-workspace", "t-del-ws", msg_id)
+
+        assert result is False
+        # Original message still present in the correct workspace
+        remaining = await storage.get_messages(workspace_id, "t-del-ws")
+        assert len(remaining) == 1
+
+    async def test_client_supplied_id_is_used(self, storage, workspace_id):
+        """When a client supplies an id in MessageInput, the stored row uses that id."""
+        thread = _make_thread(workspace_id, thread_id="t-client-id")
+        await storage.create_thread(thread)
+
+        client_id = "msg_test_123"
+        created = await storage.append_messages(
+            workspace_id,
+            "t-client-id",
+            [MessageInput(role="user", content="hello", id=client_id)],
+        )
+
+        assert len(created) == 1
+        assert created[0].id == client_id
+
+        # delete_message should succeed using that exact id
+        deleted = await storage.delete_message(workspace_id, "t-client-id", client_id)
+        assert deleted is True
+
+        # Row is gone
+        remaining = await storage.get_messages(workspace_id, "t-client-id")
+        assert len(remaining) == 0

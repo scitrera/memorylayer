@@ -65,6 +65,10 @@ class ChatThread(BaseModel):
     title: str | None = Field(None, description="Optional display title")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
 
+    # Surface scope — separates web-app threads from Office add-in threads.
+    # NULL in the database is treated as "web" at read time (no backfill required).
+    scope: str | None = Field(None, description="Surface scope: 'web' | 'office' | None (≡ 'web')")
+
     # Counters and watermarks
     message_count: int = Field(0, description="Total messages in thread")
     last_decomposed_at: datetime | None = Field(None, description="When decomposition last ran")
@@ -114,6 +118,7 @@ class CreateThreadInput(BaseModel):
     title: str | None = Field(None, description="Display title")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Metadata")
     expires_at: datetime | None = Field(None, description="Optional expiration")
+    scope: str | None = Field(None, description="Surface scope: 'web' | 'office' | None (≡ 'web')")
 
 
 class AppendMessagesInput(BaseModel):
@@ -123,8 +128,9 @@ class AppendMessagesInput(BaseModel):
 
 
 class MessageInput(BaseModel):
-    """A single message to append (no ID or index — assigned by the service)."""
+    """A single message to append (index assigned by the service; id assigned by the service unless the caller supplies one)."""
 
+    id: str | None = Field(default=None, description="Optional client-provided id; server generates one when omitted.")
     role: str = Field(..., description="Message role: user, assistant, system, tool")
     content: str | list[ChatMessageContent] = Field(..., description="Message content")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Metadata")

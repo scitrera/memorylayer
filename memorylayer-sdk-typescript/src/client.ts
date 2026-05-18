@@ -14,9 +14,12 @@ import type {
   ThreadWithMessagesResponse, MessageListResponse, MessagesAppendResponse, DecomposeResponse,
   DatasetInfo, DatasetJobInfo, DatasetUploadOptions, DatasetUploadResponse,
   DatasetListResponse, DatasetSliceOptions, DatasetSliceResult, DatasetMemoriesResponse,
+  AuthorityContext,
 } from "./types.js";
 import { RelationshipType } from "./types.js";
 import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError, EnterpriseRequiredError } from "./errors.js";
+import { SkillsNamespace } from "./skills.js";
+import { McpServersNamespace } from "./mcp_servers.js";
 
 export class MemoryLayerClient {
   private baseUrl: string;
@@ -24,6 +27,13 @@ export class MemoryLayerClient {
   private workspaceId?: string;
   private sessionId?: string;
   private timeout: number;
+  private defaultAuthority?: AuthorityContext;
+
+  /** Skills namespace — access via `client.skills.list(...)` etc. */
+  readonly skills: SkillsNamespace;
+
+  /** MCP Servers namespace — access via `client.mcpServers.list(...)` etc. */
+  readonly mcpServers: McpServersNamespace;
 
   constructor(config: ClientConfig = {}) {
     this.baseUrl = config.baseUrl ?? "http://localhost:61001";
@@ -31,6 +41,18 @@ export class MemoryLayerClient {
     this.workspaceId = config.workspaceId;
     this.sessionId = config.sessionId;
     this.timeout = config.timeout ?? 30000;
+    this.defaultAuthority = config.defaultAuthority;
+    this.skills = new SkillsNamespace(this);
+    this.mcpServers = new McpServersNamespace(this);
+  }
+
+  /**
+   * Returns a lightweight proxy that sends OBO headers for the given grant/subject
+   * on every request. The proxy is synchronous and reuses the parent client's
+   * connection settings — safe for concurrent use across multiple subjects.
+   */
+  actingFor(opts: { grantId: string; subject: { type: string; id: string } }): OboProxy {
+    return new OboProxy(this, { grantId: opts.grantId, subject: opts.subject });
   }
 
   /**
@@ -56,11 +78,24 @@ export class MemoryLayerClient {
     return this.sessionId;
   }
 
+  private buildAuthorityHeaders(authority?: AuthorityContext): Record<string, string> {
+    const resolved = authority ?? this.defaultAuthority;
+    if (!resolved) return {};
+    const h: Record<string, string> = {
+      "X-Aether-Grant-ID": resolved.grantId,
+      "X-Aether-Authority-Mode": "on_behalf_of",
+      "X-Aether-Subject-Type": resolved.subject.type,
+      "X-Aether-Subject-ID": resolved.subject.id,
+    };
+    return h;
+  }
+
   private async request<T>(
     method: string,
     path: string,
     body?: unknown,
     enterpriseFeature?: string,
+    authority?: AuthorityContext,
   ): Promise<T> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -74,6 +109,7 @@ export class MemoryLayerClient {
     if (this.workspaceId) {
       headers["X-Workspace-ID"] = this.workspaceId;
     }
+    Object.assign(headers, this.buildAuthorityHeaders(authority));
 
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
@@ -144,8 +180,9 @@ export class MemoryLayerClient {
       metadata: options.metadata ?? {},
       associations: options.associations ?? [],
       context_id: options.contextId,
+      user_id: options.userId,
     };
-    const response = await this.request<{ memory: Memory }>("POST", "/v1/memories", body);
+    const response = await this.request<{ memory: Memory }>("POST", "/v1/memories", body, undefined, options.authority);
     return response.memory;
   }
 
@@ -172,8 +209,9 @@ export class MemoryLayerClient {
       context: options.conversationContext ?? [],
       rag_threshold: options.ragThreshold,
       detail_level: options.detailLevel,
+      user_id: options.userId,
     };
-    return this.request<RecallResult>("POST", "/v1/memories/recall", body);
+    return this.request<RecallResult>("POST", "/v1/memories/recall", body, undefined, options.authority);
   }
 
   async reflect(query: string, options: ReflectOptions = {}): Promise<ReflectResult> {
@@ -188,8 +226,9 @@ export class MemoryLayerClient {
       subtypes: options.subtypes ?? [],
       tags: options.tags ?? [],
       context_id: options.contextId,
+      user_id: options.userId,
     };
-    return this.request<ReflectResult>("POST", "/v1/memories/reflect", body);
+    return this.request<ReflectResult>("POST", "/v1/memories/reflect", body, undefined, options.authority);
   }
 
   async getMemory(memoryId: string): Promise<Memory> {
@@ -1244,5 +1283,81 @@ export class MemoryLayerClient {
       undefined,
       "Dataset processing jobs",
     );
+  }
+
+  /** Used internally by SkillsNamespace to make requests with OBO authority. */
+  async _skillsRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    authority?: AuthorityContext,
+  ): Promise<T> {
+    return this.request<T>(method, path, body, undefined, authority);
+  }
+
+  /** Used internally by McpServersNamespace to make requests with OBO authority. */
+  async _mcpServersRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    authority?: AuthorityContext,
+  ): Promise<T> {
+    return this.request<T>(method, path, body, undefined, authority);
+  }
+}
+
+/**
+ * Lightweight OBO proxy returned by `client.actingFor()`.
+ * Delegates all calls to the parent client with a fixed AuthorityContext and
+ * optional workspace override. Per-call authority headers are computed fresh
+ * on each request — no shared mutable state, so concurrent calls for different
+ * subjects on the same underlying client never interfere.
+ */
+export class OboProxy {
+  private _client: MemoryLayerClient;
+  private _authority: AuthorityContext;
+  private _workspaceId?: string;
+
+  /** Skills namespace scoped to this proxy's authority. */
+  readonly skills: SkillsNamespace;
+
+  /** MCP Servers namespace scoped to this proxy's authority. */
+  readonly mcpServers: McpServersNamespace;
+
+  constructor(client: MemoryLayerClient, authority: AuthorityContext, workspaceId?: string) {
+    this._client = client;
+    this._authority = authority;
+    this._workspaceId = workspaceId;
+    this.skills = new SkillsNamespace(client, authority, workspaceId);
+    this.mcpServers = new McpServersNamespace(client, authority, workspaceId);
+  }
+
+  /** Further scope this proxy to a single workspace. */
+  forWorkspace(workspaceId: string): OboProxy {
+    return new OboProxy(this._client, this._authority, workspaceId);
+  }
+
+  async remember(content: string, options: RememberOptions = {}): Promise<Memory> {
+    return this._client.remember(content, {
+      ...options,
+      workspaceId: options.workspaceId ?? this._workspaceId,
+      authority: options.authority ?? this._authority,
+    });
+  }
+
+  async recall(query: string, options: RecallOptions = {}): Promise<RecallResult> {
+    return this._client.recall(query, {
+      ...options,
+      workspaceId: options.workspaceId ?? this._workspaceId,
+      authority: options.authority ?? this._authority,
+    });
+  }
+
+  async reflect(query: string, options: ReflectOptions = {}): Promise<ReflectResult> {
+    return this._client.reflect(query, {
+      ...options,
+      workspaceId: options.workspaceId ?? this._workspaceId,
+      authority: options.authority ?? this._authority,
+    });
   }
 }

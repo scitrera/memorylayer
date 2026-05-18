@@ -20,18 +20,47 @@ DEFAULT_MEMORYLAYER_SERVER_PORT = 61001
 # Embedding Providers
 # ============================================
 class EmbeddingProviderType(str, Enum):
-    """Available embedding provider types."""
+    """Available embedding provider types.
+
+    The legacy in-process providers ``local`` (sentence-transformers),
+    ``colpali`` (colpali-engine), and ``qwen3-vl`` (qwen-vl-utils) were
+    removed. All self-hosted/multi-vector workloads now route through
+    the ``embed_server`` provider, which delegates to ``memorylayer-embed-server``.
+    See ``_LEGACY_EMBEDDING_PROVIDERS`` below for the migration guard.
+    """
 
     OPENAI = "openai"  # OpenAI API (cloud, text-only; also works with any OpenAI-compatible endpoint)
     GOOGLE = "google"  # Google GenAI API (cloud, text-only)
-    LOCAL = "local"  # sentence-transformers (self-hosted, text-only)
+    EMBED_SERVER = "embed_server"  # Delegates to memorylayer-embed-server (self-hosted, all modalities)
     MOCK = "mock"  # Mock provider for testing only (deterministic hash-based)
 
 
+# Legacy provider names that were removed when heavy ML moved to memorylayer-embed-server.
+# Any of these in MEMORYLAYER_EMBEDDING_PROVIDER must trigger a hard error
+# at config-load time (see assert_supported_embedding_provider).
+_LEGACY_EMBEDDING_PROVIDERS: frozenset[str] = frozenset({"local", "colpali", "qwen3-vl"})
+
+
+def assert_supported_embedding_provider(value: str) -> None:
+    """Raise ValueError with migration guidance if ``value`` is a removed provider name."""
+    if value in _LEGACY_EMBEDDING_PROVIDERS:
+        raise ValueError(
+            f"MEMORYLAYER_EMBEDDING_PROVIDER={value!r} was removed. "
+            f"Heavy ML (sentence-transformers, colpali-engine, qwen-vl-utils) "
+            f"now lives in the memorylayer-embed-server package. "
+            f"Set MEMORYLAYER_EMBEDDING_PROVIDER=embed_server and run "
+            f"a memorylayer-embed-server peer (configure MEMORYLAYER_EMBED_SERVER_URL "
+            f"or MEMORYLAYER_EMBED_TRANSPORT=aether). For cloud, use 'openai' or 'google'."
+        )
+
+
 MEMORYLAYER_EMBEDDING_PROVIDER = "MEMORYLAYER_EMBEDDING_PROVIDER"
-DEFAULT_MEMORYLAYER_EMBEDDING_PROVIDER = EmbeddingProviderType.LOCAL
+DEFAULT_MEMORYLAYER_EMBEDDING_PROVIDER = EmbeddingProviderType.EMBED_SERVER
 MEMORYLAYER_EMBEDDING_MODEL = "MEMORYLAYER_EMBEDDING_MODEL"
 MEMORYLAYER_EMBEDDING_DIMENSIONS = "MEMORYLAYER_EMBEDDING_DIMENSIONS"
+# Default vector dimension for embed_server's text embeddings. Operators can
+# override via MEMORYLAYER_EMBEDDING_DIMENSIONS to match their server-side model.
+DEFAULT_EMBEDDING_DIMENSIONS_EMBED_SERVER = 1024
 MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED = "MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED"
 DEFAULT_MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED = True
 
@@ -49,6 +78,22 @@ DEFAULT_MEMORYLAYER_STORAGE_BACKEND = "sqlite"
 
 MEMORYLAYER_SQLITE_STORAGE_PATH = "MEMORYLAYER_SQLITE_STORAGE_PATH"
 DEFAULT_MEMORYLAYER_SQLITE_STORAGE_PATH = "memorylayer.db"
+
+# Turso/libSQL storage backend (alternative to SQLite with native vector support)
+MEMORYLAYER_TURSO_MODE = "MEMORYLAYER_TURSO_MODE"
+DEFAULT_MEMORYLAYER_TURSO_MODE = "local"  # local, remote, replica
+
+MEMORYLAYER_TURSO_DB_PATH = "MEMORYLAYER_TURSO_DB_PATH"
+DEFAULT_MEMORYLAYER_TURSO_DB_PATH = "memorylayer.db"
+
+MEMORYLAYER_TURSO_URL = "MEMORYLAYER_TURSO_URL"  # remote/replica mode
+MEMORYLAYER_TURSO_AUTH_TOKEN = "MEMORYLAYER_TURSO_AUTH_TOKEN"  # remote/replica mode
+
+MEMORYLAYER_TURSO_SYNC_INTERVAL = "MEMORYLAYER_TURSO_SYNC_INTERVAL"
+DEFAULT_MEMORYLAYER_TURSO_SYNC_INTERVAL = "60"  # seconds, replica mode only
+
+MEMORYLAYER_TURSO_VECTOR_INDEX = "MEMORYLAYER_TURSO_VECTOR_INDEX"
+DEFAULT_MEMORYLAYER_TURSO_VECTOR_INDEX = "false"  # opt-in DiskANN indexing
 
 # ============================================
 # Memory Service
@@ -116,13 +161,33 @@ DEFAULT_MEMORYLAYER_AUTHORIZATION_SERVICE = "default"  # Open permissions (allow
 # Reranker Service
 # ============================================
 class RerankerProviderType(str, Enum):
-    """Available reranker provider types."""
+    """Available reranker provider types.
+
+    The legacy in-process providers ``local`` (sentence-transformers
+    CrossEncoder) and ``qwen3-vl`` were removed; all self-hosted reranking
+    now routes through ``embed_server`` (MaxSim via memorylayer-embed-server).
+    See ``_LEGACY_RERANKER_PROVIDERS`` below.
+    """
 
     LLM = "llm"  # Use LLM service for reranking
     HYDE = "hyde"  # Hypothetical Document Embeddings (LLM + embedding)
     RRF = "rrf"  # Reciprocal Rank Fusion (embedding-only multi-query) (default)
-    LOCAL = "local"  # sentence-transformers CrossEncoder (self-hosted)
+    EMBED_SERVER = "embed_server"  # Delegates MaxSim reranking to memorylayer-embed-server
     NONE = "none"  # Disabled (no reranking)
+
+
+_LEGACY_RERANKER_PROVIDERS: frozenset[str] = frozenset({"local", "qwen3-vl"})
+
+
+def assert_supported_reranker_provider(value: str) -> None:
+    """Raise ValueError with migration guidance if ``value`` is a removed reranker name."""
+    if value in _LEGACY_RERANKER_PROVIDERS:
+        raise ValueError(
+            f"MEMORYLAYER_RERANKER_PROVIDER={value!r} was removed. "
+            f"Self-hosted reranking now routes through memorylayer-embed-server. "
+            f"Set MEMORYLAYER_RERANKER_PROVIDER=embed_server (or one of "
+            f"'rrf', 'llm', 'hyde', 'none')."
+        )
 
 
 MEMORYLAYER_RERANKER_PROVIDER = "MEMORYLAYER_RERANKER_PROVIDER"
@@ -145,6 +210,13 @@ DEFAULT_MEMORYLAYER_CACHE_SERVICE = "lru"
 DEFAULT_TENANT_ID = "_default"
 DEFAULT_WORKSPACE_ID = "_default"
 GLOBAL_WORKSPACE_ID = "_global"
+# User-scoped global workspace. Unlike GLOBAL_WORKSPACE_ID (tenant-wide shared
+# memories), GLOBAL_USER_WORKSPACE_ID partitions memories by user_id inside a
+# single workspace — it is the natural home for per-user preferences and
+# profile facts that should follow a user across their workspaces without
+# leaking across users. Callers opt in to cross-workspace recall by setting
+# RecallInput.include_global_user=True (default).
+GLOBAL_USER_WORKSPACE_ID = "_global_user"
 
 # ============================================
 # Context ID Default
@@ -315,7 +387,7 @@ DEFAULT_MEMORYLAYER_METRICS_SERVICE = "noop"
 # LLM Query Rewriting
 # ============================================
 MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED = "MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED"
-DEFAULT_MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED = True
+DEFAULT_MEMORYLAYER_LLM_QUERY_REWRITE_ENABLED = False  # Query rewrite sounds good in theory, but doesn't do well in ambiguous contexts
 
 # ============================================
 # Memory Consolidation
@@ -331,3 +403,65 @@ DEFAULT_MEMORYLAYER_CONSOLIDATION_MAX_IMPORTANCE = 0.3
 
 MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY = "MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY"
 DEFAULT_MEMORYLAYER_CONSOLIDATION_MIN_SIMILARITY = 0.85
+
+# ============================================
+# Document Ingestion Service
+# ============================================
+MEMORYLAYER_DOCUMENT_PROVIDER = "MEMORYLAYER_DOCUMENT_PROVIDER"
+DEFAULT_MEMORYLAYER_DOCUMENT_PROVIDER = "default"
+
+MEMORYLAYER_DOCUMENT_MAX_FILE_SIZE = "MEMORYLAYER_DOCUMENT_MAX_FILE_SIZE"
+DEFAULT_MEMORYLAYER_DOCUMENT_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+# ============================================
+# Embed Server Client (relocated to OSS in Phase 3 of the Aether convergence;
+# the embed server itself lives at oss/memorylayer-embed-server/).
+# ============================================
+MEMORYLAYER_EMBED_SERVER_URL = "MEMORYLAYER_EMBED_SERVER_URL"
+DEFAULT_MEMORYLAYER_EMBED_SERVER_URL = "http://localhost:61051"
+MEMORYLAYER_EMBED_SERVER_TIMEOUT = "MEMORYLAYER_EMBED_SERVER_TIMEOUT"
+DEFAULT_MEMORYLAYER_EMBED_SERVER_TIMEOUT = 300
+
+# Transport switch. ``http`` (default) calls the embed server directly via
+# ``MEMORYLAYER_EMBED_SERVER_URL``; ``aether`` issues proxy_http_async calls
+# through the AetherServiceConnection against the configured target topic
+# (default sv::memorylayer-embed::default). ``aether`` is what enables
+# cross-DC GPU placement under mTLS.
+MEMORYLAYER_EMBED_TRANSPORT = "MEMORYLAYER_EMBED_TRANSPORT"
+DEFAULT_MEMORYLAYER_EMBED_TRANSPORT = "http"
+MEMORYLAYER_EMBED_AETHER_TARGET = "MEMORYLAYER_EMBED_AETHER_TARGET"
+DEFAULT_MEMORYLAYER_EMBED_AETHER_TARGET = "sv::memorylayer-embed::default"
+
+# Idle-timeout for streaming RPCs over Aether (milliseconds). Maps to
+# ``proxy_http_async(stream_idle_timeout_ms=...)``; ``0`` lets the
+# Aether client choose its own default (typically 30 seconds).
+MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS = "MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS"
+DEFAULT_MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS = 30000
+
+# Plugin-selection key for the embed-server-client extension.
+MEMORYLAYER_EMBED_SERVER_SERVICE = "MEMORYLAYER_EMBED_SERVER_SERVICE"
+DEFAULT_MEMORYLAYER_EMBED_SERVER_SERVICE = "default"
+
+# ============================================
+# Data Provider Service
+# ============================================
+MEMORYLAYER_DATA_PROVIDER_PROVIDER = "MEMORYLAYER_DATA_PROVIDER_PROVIDER"
+DEFAULT_MEMORYLAYER_DATA_PROVIDER_PROVIDER = "local"
+
+# ============================================
+# Skills Service
+# ============================================
+MEMORYLAYER_SKILLS_PROVIDER = "MEMORYLAYER_SKILLS_PROVIDER"
+DEFAULT_MEMORYLAYER_SKILLS_PROVIDER = "default"
+
+# ============================================
+# Graph Analysis Service
+# ============================================
+MEMORYLAYER_GRAPH_ANALYSIS_PROVIDER = "MEMORYLAYER_GRAPH_ANALYSIS_PROVIDER"
+DEFAULT_MEMORYLAYER_GRAPH_ANALYSIS_PROVIDER = "default"
+
+# ============================================
+# Knowledgebase Service
+# ============================================
+MEMORYLAYER_KNOWLEDGEBASE_PROVIDER = "MEMORYLAYER_KNOWLEDGEBASE_PROVIDER"
+DEFAULT_MEMORYLAYER_KNOWLEDGEBASE_PROVIDER = "default"

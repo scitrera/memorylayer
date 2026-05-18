@@ -1,0 +1,59 @@
+# Compose override for the FULL real-model integration test (vLLM + ColPali).
+#
+# Stacks on top of docker-compose.embed-chain.yml. Spins up the embed-server
+# with BOTH real providers wired separately:
+#   * single-vector: vLLM running ``Qwen/Qwen3-VL-Embedding-2B``
+#   * multi-vector:  ColPali running ``ModernVBERT/colmodernvbert``
+#
+# Run from repo root:
+#   COMPOSE_FILE_OVERRIDE=docker-compose.embed-chain.real-full.yml \
+#       pytest -m integration oss/memorylayer-embed-server/tests/integration/
+#
+# Slow! First run pulls vllm wheels (~minutes) and downloads Qwen3-VL +
+# ColModernVBert weights on first request (~minutes).
+
+services:
+  embed-server:
+    image: memorylayer-embed-server:real-test-full
+    build:
+      context: ../../../..
+      dockerfile: oss/memorylayer-embed-server/Dockerfile.real-test-full
+    # vLLM uses POSIX shared memory between the engine and its worker
+    # processes; without host IPC (or a large shm size) the engine
+    # bootstrap intermittently fails. ``--ipc=host`` is the docker-compose
+    # equivalent of the docker-run flag.
+    ipc: host
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:61051/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              capabilities: [gpu]
+              device_ids:
+                - nvidia.com/gpu=all
+    environment:
+      # No MEMORYLAYER_EMBEDDING_MODEL — each provider falls back to its
+      # own default (vLLM → Qwen3-VL-Embedding-2B; ColPali → ColModernVBert).
+      MEMORYLAYER_EMBEDDING_DEVICE: "${MEMORYLAYER_EMBEDDING_DEVICE:-cuda}"
+      # The CUDA *-runtime-* base image doesn't ship nvcc, so torch.compile /
+      # inductor blows up on engine init. Eager mode skips compilation —
+      # acceptable for the integration smoke test; flip back to false on
+      # production images built from CUDA *-devel-*.
+      MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER: "true"
+
+  memorylayer-server:
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:61001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 120
+      start_period: 180s
+    environment:
+      # vLLM Qwen3-VL-Embedding-2B is 2048-dim by default.
+      MEMORYLAYER_EMBEDDING_DIMENSIONS: "2048"

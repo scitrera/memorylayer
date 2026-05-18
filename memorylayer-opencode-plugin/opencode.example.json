@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "memorylayer": {
+      "type": "local",
+      "command": ["npx", "@scitrera/memorylayer-mcp-server"],
+      "environment": {
+        "MEMORYLAYER_URL": "{env:MEMORYLAYER_URL}",
+        "MEMORYLAYER_API_KEY": "{env:MEMORYLAYER_API_KEY}"
+      },
+      "enabled": true
+    }
+  },
+  "plugin": ["@scitrera/memorylayer-opencode-plugin"]
+}

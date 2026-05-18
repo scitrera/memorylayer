@@ -47,6 +47,7 @@ from ...config import (
     DEFAULT_MEMORYLAYER_SCOPE_BOOST_SAME_WORKSPACE,
     DEFAULT_RECENCY_HALF_LIFE_HOURS,
     DEFAULT_RECENCY_WEIGHT,
+    GLOBAL_USER_WORKSPACE_ID,
     GLOBAL_WORKSPACE_ID,
     MEMORYLAYER_FACT_DECOMPOSITION_ENABLED,
     MEMORYLAYER_FACT_DECOMPOSITION_MIN_LENGTH,
@@ -608,13 +609,8 @@ class MemoryService:
                     fact_type = MemoryType(fact["type"])
             except ValueError:
                 pass
-            try:
-                from ...models import MemorySubtype
-
-                if fact.get("subtype"):
-                    fact_subtype = MemorySubtype(fact["subtype"])
-            except (ValueError, ImportError):
-                pass
+            if fact.get("subtype"):
+                fact_subtype = fact["subtype"]
 
             fact_input = RememberInput(
                 content=fact["content"],
@@ -1121,7 +1117,7 @@ class MemoryService:
             offset=input.offset,
             min_relevance=relevance_threshold,
             types=[t.value for t in input.types] if input.types else None,
-            subtypes=[s.value for s in input.subtypes] if input.subtypes else None,
+            subtypes=list(input.subtypes) if input.subtypes else None,
             tags=input.tags if input.tags else None,
             include_archived=include_archived,
             **entity_filters,
@@ -1138,15 +1134,45 @@ class MemoryService:
                 offset=input.offset,
                 min_relevance=relevance_threshold,
                 types=[t.value for t in input.types] if input.types else None,
-                subtypes=[s.value for s in input.subtypes] if input.subtypes else None,
+                subtypes=list(input.subtypes) if input.subtypes else None,
                 tags=input.tags if input.tags else None,
                 include_archived=include_archived,
                 **entity_filters,
                 **date_filters,
             )
 
+        # Search _global_user workspace filtered by user_id. This lets per-user
+        # preferences (stored at workspace=_global_user, user_id=<uid>) surface
+        # in any workspace the same user is acting in, without leaking across
+        # users. Requires user_id to be set — otherwise the filter would return
+        # everything in _global_user, which is not intended.
+        global_user_results = []
+        if (
+            input.include_global_user
+            and input.user_id
+            and workspace_id != GLOBAL_USER_WORKSPACE_ID
+        ):
+            # The user_id filter flows through entity_filters only when the
+            # caller set it on the RecallInput; we need to force it here
+            # regardless so cross-user leakage cannot happen.
+            global_user_filters = dict(entity_filters)
+            global_user_filters["user_id"] = input.user_id
+            global_user_results = await self.storage.search_memories(
+                workspace_id=GLOBAL_USER_WORKSPACE_ID,
+                query_embedding=query_embedding,
+                limit=overfetch_limit,
+                offset=input.offset,
+                min_relevance=relevance_threshold,
+                types=[t.value for t in input.types] if input.types else None,
+                subtypes=list(input.subtypes) if input.subtypes else None,
+                tags=input.tags if input.tags else None,
+                include_archived=include_archived,
+                **global_user_filters,
+                **date_filters,
+            )
+
         # Combine results
-        all_results = results + global_results
+        all_results = results + global_results + global_user_results
 
         # Filter out already-surfaced memory IDs
         exclude_ids = getattr(input, "exclude_ids", None)
@@ -1850,6 +1876,9 @@ Top {limit} indices (comma-separated):"""
             elif memory_workspace_id == GLOBAL_WORKSPACE_ID:
                 source_scope = "global_workspace"
                 boost = boosts.global_workspace
+            elif memory_workspace_id == GLOBAL_USER_WORKSPACE_ID:
+                source_scope = "global_user_workspace"
+                boost = boosts.global_workspace
             else:
                 source_scope = "other"
                 boost = 1.0
@@ -2014,7 +2043,7 @@ Top {limit} indices (comma-separated):"""
             limit=recall_input.limit,
             min_relevance=self._get_relevance_threshold(recall_input.tolerance, recall_input.min_relevance),
             types=[t.value for t in recall_input.types] if recall_input.types else None,
-            subtypes=[s.value for s in recall_input.subtypes] if recall_input.subtypes else None,
+            subtypes=list(recall_input.subtypes) if recall_input.subtypes else None,
             tags=recall_input.tags if recall_input.tags else None,
             **entity_filters,
         )
@@ -2028,7 +2057,7 @@ Top {limit} indices (comma-separated):"""
                 limit=recall_input.limit,
                 min_relevance=self._get_relevance_threshold(recall_input.tolerance, recall_input.min_relevance),
                 types=[t.value for t in recall_input.types] if recall_input.types else None,
-                subtypes=[s.value for s in recall_input.subtypes] if recall_input.subtypes else None,
+                subtypes=list(recall_input.subtypes) if recall_input.subtypes else None,
                 tags=recall_input.tags if recall_input.tags else None,
                 **entity_filters,
             )

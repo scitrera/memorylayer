@@ -26,3 +26,12 @@ class AuthorizationContext(BaseModel):
     action: str = Field("", description="Action type (e.g., 'read', 'write', 'delete')")
     resource_id: str | None = Field(None, description="Specific resource ID")
     metadata: dict = Field(default_factory=dict, description="Additional context")
+
+    # OBO actor/authority fields — populated from RequestContext when available
+    actor_type: str | None = Field(None, description="Authenticated connection principal type")
+    actor_id: str | None = Field(None, description="Authenticated connection principal id")
+    subject_type: str | None = Field(None, description="Subject (on-behalf-of) principal type")
+    subject_id: str | None = Field(None, description="Subject (on-behalf-of) principal id")
+    authority_mode: str | None = Field(None, description="'direct' or 'on_behalf_of'")
+    grant_id: str | None = Field(None, description="Aether grant id when OBO is active")
+    max_access_level: int | None = Field(None, description="Grant ceiling from OBO grant")

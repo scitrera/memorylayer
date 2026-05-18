@@ -38,12 +38,12 @@ RUN apt-get purge -y build-essential && \
 USER memorylayer
 
 # Container defaults:
-# - Bind to 0.0.0.0 (code default 127.0.0.1 is unreachable from outside the container)
-# - Use local sentence-transformers for embeddings (no API key required)
+# - Bind to 0.0.0.0 to be accessible from outside the container
+# - Use port 61001, the default for memorylayer-server
+# - Does not specify an embedding provider, configuration is required!
 ENV MEMORYLAYER_SERVER_HOST=0.0.0.0 \
     MEMORYLAYER_SERVER_PORT=61001 \
-    MEMORYLAYER_DATA_DIR=/data \
-    MEMORYLAYER_EMBEDDING_PROVIDER=local
+    MEMORYLAYER_DATA_DIR=/data
 
 EXPOSE 61001
 

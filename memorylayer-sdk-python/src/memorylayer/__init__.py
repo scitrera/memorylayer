@@ -1,6 +1,18 @@
 """MemoryLayer.ai Python SDK - Memory infrastructure for AI agents."""
 
 from .client import MemoryLayerClient
+from .knowledgebase import (
+    KbArticle,
+    KbBridge,
+    KbCentralNode,
+    KbCommunity,
+    KbGraphAnalysis,
+    KbGraphSnapshot,
+    KbGraphStats,
+    KbMetadata,
+    KnowledgebaseAPI,
+    SyncKnowledgebaseAPI,
+)
 from .exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -13,6 +25,7 @@ from .exceptions import (
 )
 from .models import (
     Association,
+    AuthorityContext,
     ChatMessage,
     ChatMessageContent,
     ChatThread,
@@ -27,6 +40,7 @@ from .models import (
     JobInfo,
     Memory,
     PageSearchResult,
+    PrincipalRef,
     RecallResult,
     ReflectResult,
     Session,
@@ -43,13 +57,16 @@ from .types import (
     SearchTolerance,
 )
 
-__version__ = "0.0.6"
+__version__ = "0.1.22"
 
 __all__ = [
     # Main clients
     "MemoryLayerClient",
     "SyncMemoryLayerClient",
     "sync_client",
+    # OBO authority types
+    "AuthorityContext",
+    "PrincipalRef",
     # Models
     "Memory",
     "RecallResult",
@@ -74,6 +91,17 @@ __all__ = [
     "DatasetInfo",
     "DatasetJobInfo",
     "DatasetSliceResult",
+    # Knowledgebase models + namespace
+    "KnowledgebaseAPI",
+    "SyncKnowledgebaseAPI",
+    "KbArticle",
+    "KbMetadata",
+    "KbGraphStats",
+    "KbCommunity",
+    "KbCentralNode",
+    "KbBridge",
+    "KbGraphAnalysis",
+    "KbGraphSnapshot",
     # Types
     "MemoryType",
     "MemorySubtype",

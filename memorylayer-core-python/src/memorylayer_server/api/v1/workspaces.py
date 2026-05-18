@@ -86,8 +86,8 @@ async def create_workspace(
         ctx = await auth_service.build_context(http_request, None)
         await authz_service.require_authorization(ctx, "workspaces", "create")
 
-        # Generate workspace ID
-        workspace_id = f"ws_{uuid4().hex[:16]}"
+        # Use client-provided ID if given, otherwise generate one
+        workspace_id = request.id or f"ws_{uuid4().hex[:16]}"
 
         logger.info("Creating workspace: %s for tenant: %s, name: %s", workspace_id, ctx.tenant_id, request.name)
 
@@ -406,10 +406,10 @@ async def get_workspace_schema(
         # Get relationship types from ontology
         relationship_types = ontology_service.list_relationship_types(tenant_id=ctx.tenant_id, workspace_id=workspace_id)
 
-        # Get memory subtypes from model
-        from ...models.memory import MemorySubtype
-
-        memory_subtypes = [subtype.value for subtype in MemorySubtype]
+        # Get memory subtypes from ontology service so plugin contributions
+        # (e.g. RPG) flow through and OSS-only deployments don't leak
+        # plugin-specific subtypes via the API.
+        memory_subtypes = ontology_service.list_subtypes(tenant_id=ctx.tenant_id, workspace_id=workspace_id)
 
         return {
             "relationship_types": relationship_types,
@@ -625,7 +625,7 @@ def _process_memory_import(item: MemoryExportItem, workspace_id: str, tenant_id:
     """Process a single memory import. Returns (success, new_id, error_msg)."""
     from uuid import uuid4
 
-    from ...models.memory import Memory, MemorySubtype, MemoryType
+    from ...models.memory import Memory, MemoryType
 
     try:
         # Parse type/subtype
@@ -634,12 +634,10 @@ def _process_memory_import(item: MemoryExportItem, workspace_id: str, tenant_id:
         except (ValueError, KeyError):
             mem_type = MemoryType.EPISODIC
 
-        mem_subtype = None
-        if item.subtype:
-            try:
-                mem_subtype = MemorySubtype(item.subtype)
-            except (ValueError, KeyError):
-                pass
+        # Subtype is now a free string (validated against the ontology
+        # service contributions, not against a closed enum). Pass it
+        # through unchanged; ontology validation is request-time only.
+        mem_subtype = item.subtype or None
 
         # Create new memory with fresh ID
         new_id = f"mem_{uuid4().hex[:16]}"

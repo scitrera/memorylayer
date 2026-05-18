@@ -15,6 +15,8 @@ from ...config import DEFAULT_CONTEXT_ID, DEFAULT_TENANT_ID
 from ...models.association import AssociateInput, Association, GraphPath, GraphQueryResult
 from ...models.memory import Memory, MemoryType, RememberInput
 from ...models.session import Session, WorkingMemory
+from ...models.mcp_server import McpServer
+from ...models.skill import Skill, SkillFile
 from ...models.workspace import Context, Workspace
 from ...utils import compute_content_hash, cosine_similarity, generate_id, utc_now_iso
 from .base import StorageBackend, StoragePluginBase
@@ -38,6 +40,9 @@ class MemoryStorageBackend(StorageBackend):
         self._associations: dict[str, dict[str, Association]] = {}  # workspace_id -> {assoc_id -> Association}
         self._sessions: dict[str, dict[str, Session]] = {}  # workspace_id -> {session_id -> Session}
         self._working_memory: dict[str, dict[str, dict[str, WorkingMemory]]] = {}  # ws -> {sess -> {key -> WM}}
+        self._skills: dict[str, dict[str, Skill]] = {}  # workspace_id -> {skill_id -> Skill}
+        self._skill_files: dict[str, dict[str, SkillFile]] = {}  # skill_id -> {path -> SkillFile}
+        self._mcp_servers: dict[str, dict[str, McpServer]] = {}  # workspace_id -> {server_id -> McpServer}
         self.logger.info("Initialized MemoryStorageBackend")
 
     async def connect(self) -> None:
@@ -199,6 +204,7 @@ class MemoryStorageBackend(StorageBackend):
         query: str,
         limit: int = 10,
         offset: int = 0,
+        context_id: str | None = None,
     ) -> list[Memory]:
         """Full-text search on memory content."""
         ws_memories = self._memories.get(workspace_id, {})
@@ -207,6 +213,8 @@ class MemoryStorageBackend(StorageBackend):
 
         for memory in ws_memories.values():
             if memory.id in self._deleted_memories:
+                continue
+            if context_id is not None and getattr(memory, "context_id", None) != context_id:
                 continue
             if query_lower in memory.content.lower():
                 results.append(memory)
@@ -532,6 +540,223 @@ class MemoryStorageBackend(StorageBackend):
         for sid in expired:
             await self.delete_session(workspace_id, sid)
         return len(expired)
+
+    # ========== Skill Operations ==========
+
+    async def create_skill(self, skill: Skill) -> Skill:
+        """Store a new skill."""
+        if skill.workspace_id not in self._skills:
+            self._skills[skill.workspace_id] = {}
+        self._skills[skill.workspace_id][skill.id] = skill
+        self.logger.debug("Created skill: %s in workspace: %s", skill.id, skill.workspace_id)
+        return skill
+
+    async def get_skill(self, workspace_id: str, skill_id: str) -> Skill | None:
+        """Get skill by ID within a workspace."""
+        return self._skills.get(workspace_id, {}).get(skill_id)
+
+    async def get_skill_by_name(
+        self,
+        workspace_id: str,
+        name: str,
+        user_id: str | None = None,
+    ) -> Skill | None:
+        """Get skill by name within a workspace, optionally filtering by user scope."""
+        for skill in self._skills.get(workspace_id, {}).values():
+            if skill.name == name:
+                if user_id is None or skill.user_id == user_id:
+                    return skill
+        return None
+
+    async def list_skills(
+        self,
+        workspace_id: str,
+        user_id: str | None = None,
+        name: str | None = None,
+        tags: list[str] | None = None,
+        enabled: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Skill]:
+        """List skills in a workspace with optional filters."""
+        results = []
+        for skill in self._skills.get(workspace_id, {}).values():
+            if user_id is not None and skill.user_id != user_id:
+                continue
+            if name is not None and skill.name != name:
+                continue
+            if enabled is not None and skill.enabled != enabled:
+                continue
+            if tags:
+                skill_tags = skill.metadata.get("tags", [])
+                if not any(t in skill_tags for t in tags):
+                    continue
+            results.append(skill)
+        return results[offset : offset + limit]
+
+    async def find_skills_by_name(
+        self,
+        name: str,
+        scope_filters: list[dict],
+    ) -> list[Skill]:
+        """Find skills by name across multiple scopes for precedence resolution."""
+        results = []
+        for scope in scope_filters:
+            ws_id = scope.get("workspace_id")
+            uid = scope.get("user_id")
+            if not ws_id:
+                continue
+            for skill in self._skills.get(ws_id, {}).values():
+                if skill.name != name:
+                    continue
+                if uid is not None and skill.user_id != uid:
+                    continue
+                results.append(skill)
+        return results
+
+    async def update_skill(
+        self,
+        workspace_id: str,
+        skill_id: str,
+        updates: dict,
+    ) -> Skill | None:
+        """Update skill fields."""
+        skill = await self.get_skill(workspace_id, skill_id)
+        if not skill:
+            return None
+        for key, value in updates.items():
+            if hasattr(skill, key):
+                setattr(skill, key, value)
+        skill.updated_at = datetime.now(UTC)
+        return skill
+
+    async def delete_skill(self, workspace_id: str, skill_id: str) -> bool:
+        """Delete a skill and cascade to its files."""
+        ws_skills = self._skills.get(workspace_id, {})
+        if skill_id not in ws_skills:
+            return False
+        del ws_skills[skill_id]
+        # Cascade: remove all files for this skill
+        self._skill_files.pop(skill_id, None)
+        return True
+
+    async def upsert_skill_file(self, skill_file: SkillFile) -> SkillFile:
+        """Insert or update a file within a skill bundle."""
+        if skill_file.skill_id not in self._skill_files:
+            self._skill_files[skill_file.skill_id] = {}
+        self._skill_files[skill_file.skill_id][skill_file.path] = skill_file
+        return skill_file
+
+    async def get_skill_file(self, skill_id: str, path: str) -> SkillFile | None:
+        """Get a single skill file by skill ID and relative path."""
+        return self._skill_files.get(skill_id, {}).get(path)
+
+    async def list_skill_files(self, skill_id: str) -> list[SkillFile]:
+        """List all files belonging to a skill bundle."""
+        return list(self._skill_files.get(skill_id, {}).values())
+
+    async def delete_skill_file(self, skill_id: str, path: str) -> bool:
+        """Delete a single skill file by path."""
+        skill_files = self._skill_files.get(skill_id, {})
+        if path not in skill_files:
+            return False
+        del skill_files[path]
+        return True
+
+    # ========== MCP Server Operations ==========
+
+    async def create_mcp_server(self, server: McpServer) -> McpServer:
+        """Store a new MCP server record."""
+        if server.workspace_id not in self._mcp_servers:
+            self._mcp_servers[server.workspace_id] = {}
+        self._mcp_servers[server.workspace_id][server.id] = server
+        self.logger.debug("Created mcp_server: %s in workspace: %s", server.id, server.workspace_id)
+        return server
+
+    async def get_mcp_server(self, workspace_id: str, server_id: str) -> McpServer | None:
+        """Get MCP server by ID within a workspace."""
+        return self._mcp_servers.get(workspace_id, {}).get(server_id)
+
+    async def get_mcp_server_by_name(
+        self,
+        workspace_id: str,
+        name: str,
+        user_id: str | None = None,
+    ) -> McpServer | None:
+        """Get MCP server by name within a workspace, optionally filtering by user scope."""
+        for server in self._mcp_servers.get(workspace_id, {}).values():
+            if server.name == name:
+                if user_id is None or server.user_id == user_id:
+                    return server
+        return None
+
+    async def list_mcp_servers(
+        self,
+        workspace_id: str,
+        user_id: str | None = None,
+        name: str | None = None,
+        transport: str | None = None,
+        enabled: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[McpServer]:
+        """List MCP servers in a workspace with optional filters."""
+        results = []
+        for server in self._mcp_servers.get(workspace_id, {}).values():
+            if user_id is not None and server.user_id != user_id:
+                continue
+            if name is not None and server.name != name:
+                continue
+            if transport is not None and server.transport != transport:
+                continue
+            if enabled is not None and server.enabled != enabled:
+                continue
+            results.append(server)
+        return results[offset : offset + limit]
+
+    async def find_mcp_servers_by_name(
+        self,
+        name: str,
+        scope_filters: list[dict],
+    ) -> list[McpServer]:
+        """Find MCP servers by name across multiple scopes for precedence resolution."""
+        results = []
+        for scope in scope_filters:
+            ws_id = scope.get("workspace_id")
+            uid = scope.get("user_id")
+            if not ws_id:
+                continue
+            for server in self._mcp_servers.get(ws_id, {}).values():
+                if server.name != name:
+                    continue
+                if uid is not None and server.user_id != uid:
+                    continue
+                results.append(server)
+        return results
+
+    async def update_mcp_server(
+        self,
+        workspace_id: str,
+        server_id: str,
+        updates: dict,
+    ) -> McpServer | None:
+        """Update MCP server fields."""
+        server = await self.get_mcp_server(workspace_id, server_id)
+        if not server:
+            return None
+        for key, value in updates.items():
+            if hasattr(server, key):
+                setattr(server, key, value)
+        server.updated_at = datetime.now(UTC)
+        return server
+
+    async def delete_mcp_server(self, workspace_id: str, server_id: str) -> bool:
+        """Delete an MCP server record."""
+        ws_servers = self._mcp_servers.get(workspace_id, {})
+        if server_id not in ws_servers:
+            return False
+        del ws_servers[server_id]
+        return True
 
 
 class MemoryStoragePlugin(StoragePluginBase):

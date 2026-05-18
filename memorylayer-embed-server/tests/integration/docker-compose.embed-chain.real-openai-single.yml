@@ -1,0 +1,58 @@
+# Compose override: real ColPali for multi-vector + OpenAI (or
+# OpenAI-compatible HTTP endpoint) for single-vector.
+#
+# Useful when the operator doesn't want vLLM on-box but does want
+# self-hosted multi-vector for retrieval. The embed-server stays GPU-
+# bound only for ColPali; single-vector traffic goes out over the
+# network to OpenAI (or an OpenAI-compatible endpoint set via
+# ``MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL``).
+#
+# Run from repo root:
+#   OPENAI_API_KEY=sk-... \
+#   COMPOSE_FILE_OVERRIDE=docker-compose.embed-chain.real-openai-single.yml \
+#       pytest -m integration oss/memorylayer-embed-server/tests/integration/
+#
+# Or with an OpenAI-compatible endpoint (vLLM, LocalAI, Ollama, …):
+#   MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL=http://host.docker.internal:8000/v1 \
+#   MEMORYLAYER_EMBEDDING_OPENAI_API_KEY=x \
+#   COMPOSE_FILE_OVERRIDE=docker-compose.embed-chain.real-openai-single.yml \
+#       pytest -m integration oss/memorylayer-embed-server/tests/integration/
+
+services:
+  embed-server:
+    # Reuse the ColPali-only real image — no vLLM extras needed.
+    image: memorylayer-embed-server:real-test
+    build:
+      context: ../../../..
+      dockerfile: oss/memorylayer-embed-server/Dockerfile.real-test
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:61051/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              capabilities: [gpu]
+              device_ids:
+                - nvidia.com/gpu=all
+    environment:
+      MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER: "openai"
+      # API key: pass through from the host environment. Empty string is
+      # accepted by the provider (works against OpenAI-compat endpoints
+      # like local vLLM that don't enforce auth).
+      MEMORYLAYER_EMBEDDING_OPENAI_API_KEY: "${MEMORYLAYER_EMBEDDING_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}"
+      MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL: "${MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL:-}"
+      MEMORYLAYER_EMBEDDING_MODEL: "${MEMORYLAYER_EMBEDDING_MODEL:-text-embedding-3-small}"
+      # Optional: dimension override matters when using non-OpenAI text-3
+      # endpoints. Default text-embedding-3-small is 1536-dim.
+      MEMORYLAYER_EMBEDDING_DIMENSIONS: "${MEMORYLAYER_EMBEDDING_DIMENSIONS:-1536}"
+
+  memorylayer-server:
+    environment:
+      # Match whatever the OpenAI-compat endpoint produces. Default
+      # text-embedding-3-small → 1536; override per-test as needed.
+      MEMORYLAYER_EMBEDDING_DIMENSIONS: "${MEMORYLAYER_EMBEDDING_DIMENSIONS:-1536}"

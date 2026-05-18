@@ -45,7 +45,7 @@ with sync_client() as memory:
 | **[memorylayer-core-python](./memorylayer-core-python)**                     | `pip install memorylayer-server` | FastAPI server with SQLite + sqlite-vec storage         |
 | **[memorylayer-sdk-python](./memorylayer-sdk-python)**                       | `pip install memorylayer-client` | Python client SDK (async/sync)                          |
 | **[memorylayer-sdk-typescript](./memorylayer-sdk-typescript)**               | `npm i @scitrera/memorylayer-sdk` | TypeScript/JavaScript client SDK                        |
-| **[memorylayer-mcp-typescript](./memorylayer-mcp-typescript)**               | `npm i @scitrera/memorylayer-mcp-server` | MCP server -- 21 tools for LLM agents                   |
+| **[memorylayer-mcp-typescript](./memorylayer-mcp-typescript)**               | `npm i @scitrera/memorylayer-mcp-server` | MCP server -- 25 tools (default), up to 38 in `full`    |
 | **[memorylayer-sdk-langchain-python](./memorylayer-sdk-langchain-python)**   | `pip install memorylayer-langchain` | LangChain integration                                   |
 | **[memorylayer-sdk-llamaindex-python](./memorylayer-sdk-llamaindex-python)** | `pip install memorylayer-llamaindex` | LlamaIndex integration                                  |
 | **[memorylayer-cc-plugin](./memorylayer-cc-plugin)**                         | see README | Claude Code plugin -- captures memory before compaction |
@@ -56,9 +56,16 @@ with sync_client() as memory:
 ### 1. Start the server
 
 ```bash
-pip install memorylayer-server[local]
+# Cloud embeddings (pick one)
+pip install "memorylayer-server[openai]"   # or [google], [all]
+
+# Optional: self-hosted embeddings on GPU
+pip install "memorylayer-embed-server[gpu]" && memorylayer-embed serve --port 61051 &
+
 memorylayer serve
 ```
+
+The default embedding provider is `embed_server` (HTTP to a `memorylayer-embed-server` peer). For cloud, set `MEMORYLAYER_EMBEDDING_PROVIDER=openai` (or `google`) and the matching API key. For a no-deps smoke test, set `MEMORYLAYER_EMBEDDING_PROVIDER=mock`.
 
 Or with Docker (no setup required):
 
@@ -123,7 +130,7 @@ Add `.mcp.json` to your project root:
 }
 ```
 
-The MCP server auto-detects your workspace from the git repo name. Claude gets 21 memory tools -- remember, recall, reflect, associate, graph queries, sessions, and a full context sandbox.
+The MCP server auto-detects your workspace from the git repo name. Claude gets 25 tools by default (38 in the `full` profile) -- remember, recall, reflect, sessions, context sandbox / RLM, chat threads, and skills/MCP-server registry helpers.
 
 For the full Claude Code experience, also install the **[MemoryLayer plugin](./memorylayer-cc-plugin)** which adds pre-compaction memory capture, session briefings, and automatic memory triggers:
 

@@ -1,0 +1,133 @@
+# Embed-server integration test (docker chain)
+
+End-to-end test that exercises the chain:
+
+```
+pytest driver ──► memorylayer-server (61101) ──► memorylayer-embed-server
+                                    private docker network
+```
+
+Two variants are supported.
+
+---
+
+## Fast variant — mock providers (default; CI-friendly)
+
+Uses ``Dockerfile.test`` for the embed-server, which runs with
+``MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=true`` (deterministic numpy
+providers, no torch, no GPU, no model downloads). Build is seconds,
+runtime is seconds.
+
+```bash
+# From repo root
+pytest -m integration oss/memorylayer-embed-server/tests/integration/
+```
+
+The pytest fixture takes care of ``docker compose up --build -d`` and
+``docker compose down -v``. Set ``KEEP_STACK=1`` to leave the stack
+running after the test for inspection:
+
+```bash
+KEEP_STACK=1 pytest -m integration -k test_memorylayer_server_health \
+    oss/memorylayer-embed-server/tests/integration/
+docker compose -f oss/memorylayer-embed-server/tests/integration/docker-compose.embed-chain.yml ps
+```
+
+Compose surface:
+
+| service             | host port | network port | image                          |
+|---------------------|-----------|--------------|--------------------------------|
+| `memorylayer-server`| 61101     | 61001        | built from local `oss/`        |
+| `embed-server`      | —         | 61051        | `memorylayer-embed-server:test`|
+
+---
+
+## Variant — real ColPali + OpenAI-compat single (no vLLM)
+
+Useful when the operator wants self-hosted multi-vector retrieval
+(ColPali) but the lighter HTTP-out path for single-vector embeddings —
+no vLLM dependency, no in-process LLM. The embed-server's
+``EMBED_SERVER_SINGLE_VECTOR_PROVIDER`` selects between ``vllm``,
+``openai``, ``google``, ``colpali`` (shared multi-vector provider), and
+``mock``.
+
+```bash
+OPENAI_API_KEY=sk-... \
+COMPOSE_FILE_OVERRIDE=docker-compose.embed-chain.real-openai-single.yml \
+    pytest -m integration oss/memorylayer-embed-server/tests/integration/
+```
+
+Or point at an OpenAI-compatible endpoint (a sibling vLLM server,
+LocalAI, Ollama, …) for fully self-hosted single-vector:
+
+```bash
+MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL=http://host.docker.internal:8000/v1 \
+MEMORYLAYER_EMBEDDING_OPENAI_API_KEY=x \
+MEMORYLAYER_EMBEDDING_MODEL=BAAI/bge-large-en-v1.5 \
+MEMORYLAYER_EMBEDDING_DIMENSIONS=1024 \
+COMPOSE_FILE_OVERRIDE=docker-compose.embed-chain.real-openai-single.yml \
+    pytest -m integration oss/memorylayer-embed-server/tests/integration/
+```
+
+---
+
+## Heavy variant — real ColPali + Qwen3-VL (manual)
+
+For validating model behavior end-to-end (not run in CI). Reuses the
+production ``oss/memorylayer-embed-server/Dockerfile`` (CUDA + torch +
+colpali-engine + vLLM) and a tiny memory-light ColPali model.
+
+1. Build the production embed-server image (this can take a while and
+   needs a working sibling checkout of ``scitrera-aether3-go`` staged
+   at ``proprietary/.build-staging/`` — see the production Dockerfile
+   for the exact requirements):
+
+   ```bash
+   docker build -f oss/memorylayer-embed-server/Dockerfile \
+                -t memorylayer-embed-server:real .
+   ```
+
+2. Override the compose file's `embed-server.image` and disable the
+   build context override:
+
+   ```yaml
+   # docker-compose.embed-chain.override.yml
+   services:
+     embed-server:
+       image: memorylayer-embed-server:real
+       build: null   # disable the test-image build
+       environment:
+         EMBED_SERVER_RUN_SIDECAR: "false"   # still skip the Aether sidecar for the chain test
+         MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS: "false"
+         MEMORYLAYER_EMBEDDING_MODEL: "ModernVBERT/colmodernvbert"  # smallest ColPali
+         MEMORYLAYER_EMBED_PRELOAD_MODELS: "false"                  # skip warm-up on first request
+   ```
+
+3. Run the same pytest tests against the heavy stack:
+
+   ```bash
+   docker compose \
+       -f oss/memorylayer-embed-server/tests/integration/docker-compose.embed-chain.yml \
+       -f docker-compose.embed-chain.override.yml \
+       up --build -d
+   KEEP_STACK=1 pytest -m integration -k test_create_memory \
+       oss/memorylayer-embed-server/tests/integration/
+   docker compose ... down -v
+   ```
+
+Expect the first request to be slow (model download + warm-up). The
+mock-provider variant remains the right tool for CI.
+
+---
+
+## Troubleshooting
+
+* **Compose build fails on aether staging**: the `Dockerfile.test`
+  variant does NOT need ``proprietary/.build-staging/`` — only the heavy
+  production Dockerfile does. If you see ``COPY proprietary/.build-staging/...``
+  fail you're building the wrong file.
+* **Port 61101 in use**: edit the host port in the compose file or stop
+  whatever else is listening on it.
+* **Tests time out waiting for `/health`**: run
+  ``docker compose -f ... logs memorylayer-server embed-server`` to see
+  why one of the containers crashed at boot.

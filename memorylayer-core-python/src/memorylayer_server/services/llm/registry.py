@@ -61,18 +61,26 @@ def create_provider_from_config(
     api_key: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    embed_server_url: str | None = None,
+    embed_server_transport: str | None = None,
+    embed_server_aether_target: str | None = None,
+    embed_server_timeout: float | None = None,
     v: Variables = None,
 ) -> LLMProvider:
     """Create an LLM provider instance from configuration values.
 
     Args:
         name: Profile name (for logging).
-        provider_type: One of 'openai', 'anthropic', 'google', 'noop'.
+        provider_type: One of 'openai', 'anthropic', 'google', 'embed_server', 'noop'.
         model: Model identifier. If None, the provider's built-in default is used.
         base_url: Optional base URL (OpenAI-compatible only).
         api_key: Optional API key.
         max_tokens: Optional default max tokens.
         temperature: Optional default temperature for this profile.
+        embed_server_url: Per-profile embed-server URL (``embed_server`` type only).
+        embed_server_transport: Per-profile ``'http'`` or ``'aether'`` (``embed_server`` only).
+        embed_server_aether_target: Per-profile Aether target (``embed_server`` only).
+        embed_server_timeout: Per-profile request timeout (``embed_server`` only).
         v: Optional Variables instance for framework logging.
 
     Returns:
@@ -115,6 +123,19 @@ def create_provider_from_config(
             default_temperature=temperature,
             v=v,
         )
+    elif provider_type == "embed_server":
+        from .embed_server import EmbedServerLLMProvider
+
+        return EmbedServerLLMProvider(
+            model=model,
+            embed_server_url=embed_server_url,
+            embed_server_transport=embed_server_transport,
+            embed_server_aether_target=embed_server_aether_target,
+            embed_server_timeout=embed_server_timeout,
+            default_max_tokens=max_tokens,
+            default_temperature=temperature,
+            v=v,
+        )
     elif provider_type == "noop":
         return NoOpLLMProvider(v=v)
     else:
@@ -145,7 +166,18 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
         from either real environment variables **or** values already loaded
         into the ``Variables`` instance (converged configuration).
         """
-        known_fields = {"provider", "base_url", "api_key", "model", "max_tokens", "temperature"}
+        # Multi-word fields must be checked before their shorter prefixes
+        # (we sort by length descending below). For example,
+        # ``embed_server_aether_target`` must win over ``base_url`` /
+        # ``api_key`` even though we iterate a set in undefined order.
+        known_fields = {
+            "provider", "base_url", "api_key", "model", "max_tokens", "temperature",
+            "embed_server_url", "embed_server_transport",
+            "embed_server_aether_target", "embed_server_timeout",
+        }
+        # Longest first ensures specific multi-word fields are stripped
+        # rather than a shorter trailing word collapsing into the profile name.
+        fields_sorted = sorted(known_fields, key=len, reverse=True)
 
         # Import MEMORYLAYER_LLM_PROFILE_* into Variables and get flattened dict.
         # Keys are lowercased with prefix stripped, e.g. "default_provider".
@@ -154,7 +186,7 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
         # Discover profile names by stripping known field suffixes from keys
         profile_names: set[str] = set()
         for key in profile_vars:
-            for fld in known_fields:
+            for fld in fields_sorted:
                 if key.endswith(f"_{fld}"):
                     name = key[: -(len(fld) + 1)]
                     if name:
@@ -177,6 +209,11 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
             temp_raw = profile_vars.get(f"{name}_temperature")
             temperature = float(temp_raw) if temp_raw is not None else None
 
+            embed_server_timeout_raw = profile_vars.get(f"{name}_embed_server_timeout")
+            embed_server_timeout = (
+                float(embed_server_timeout_raw) if embed_server_timeout_raw is not None else None
+            )
+
             provider = create_provider_from_config(
                 name=name,
                 provider_type=provider_type,
@@ -185,6 +222,10 @@ class DefaultLLMProviderRegistryPlugin(LLMProviderRegistryPluginBase):
                 api_key=profile_vars.get(f"{name}_api_key"),
                 max_tokens=max_tokens,
                 temperature=temperature,
+                embed_server_url=profile_vars.get(f"{name}_embed_server_url"),
+                embed_server_transport=profile_vars.get(f"{name}_embed_server_transport"),
+                embed_server_aether_target=profile_vars.get(f"{name}_embed_server_aether_target"),
+                embed_server_timeout=embed_server_timeout,
                 v=v,
             )
 

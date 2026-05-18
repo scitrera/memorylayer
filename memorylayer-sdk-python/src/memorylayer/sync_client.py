@@ -9,6 +9,9 @@ from typing import Any
 import httpx
 from pydantic import TypeAdapter
 
+from .knowledgebase import SyncKnowledgebaseAPI
+from .mcp_servers import SyncMcpServersAPI
+from .skills import SyncSkillsAPI
 from .exceptions import (
     AuthenticationError,
     EnterpriseRequiredError,
@@ -39,7 +42,6 @@ from .models import (
     Workspace,
 )
 from .types import (
-    MemorySubtype,
     MemoryType,
     RecallMode,
     RelationshipType,
@@ -102,6 +104,9 @@ class SyncMemoryLayerClient:
         self.session_id = session_id
         self.timeout = timeout
         self._client: httpx.Client | None = None
+        self.skills = SyncSkillsAPI(self)
+        self.mcp_servers = SyncMcpServersAPI(self)
+        self.kb = SyncKnowledgebaseAPI(self)
 
     def __enter__(self) -> "SyncMemoryLayerClient":
         """Context manager entry."""
@@ -248,7 +253,7 @@ class SyncMemoryLayerClient:
         self,
         content: str,
         type: str | MemoryType | None = None,
-        subtype: str | MemorySubtype | None = None,
+        subtype: str | None = None,
         importance: float = 0.5,
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -263,7 +268,7 @@ class SyncMemoryLayerClient:
             type: Cognitive memory type (episodic, semantic, procedural, working).
                 Accepts MemoryType enum or plain string.
             subtype: Domain subtype (Solution, Problem, etc.).
-                Accepts MemorySubtype enum or plain string.
+                Plain string subtype identifier.
             importance: Importance score 0.0-1.0 (default: 0.5)
             tags: Tags for categorization
             metadata: Additional metadata
@@ -276,7 +281,7 @@ class SyncMemoryLayerClient:
             memory = client.remember(
                 content="User prefers concise code comments",
                 type=MemoryType.SEMANTIC,
-                subtype=MemorySubtype.PREFERENCE,
+                subtype="preference",
                 importance=0.8,
                 tags=["preferences", "coding-style"]
             )
@@ -305,7 +310,7 @@ class SyncMemoryLayerClient:
         self,
         query: str,
         types: list[str | MemoryType] | None = None,
-        subtypes: list[str | MemorySubtype] | None = None,
+        subtypes: list[str] | None = None,
         tags: list[str] | None = None,
         mode: str | RecallMode | None = None,
         limit: int = 10,
@@ -1147,6 +1152,7 @@ class SyncMemoryLayerClient:
         title: str | None = None,
         metadata: dict[str, Any] | None = None,
         expires_at: str | None = None,
+        scope: str | None = None,
     ) -> ChatThread:
         """
         Create a new chat thread.
@@ -1161,6 +1167,7 @@ class SyncMemoryLayerClient:
             title: Optional thread title
             metadata: Additional metadata
             expires_at: Optional expiry timestamp (ISO 8601 string)
+            scope: Surface scope: 'web' | 'office' | None (≡ 'web')
 
         Returns:
             Created ChatThread
@@ -1188,6 +1195,8 @@ class SyncMemoryLayerClient:
             payload["metadata"] = metadata
         if expires_at is not None:
             payload["expires_at"] = expires_at
+        if scope is not None:
+            payload["scope"] = scope
 
         data = self._request("POST", "/threads", json=payload)
         return ChatThread(**data)
@@ -1199,6 +1208,7 @@ class SyncMemoryLayerClient:
         user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        scope_filter: str | None = None,
     ) -> list[ChatThread]:
         """
         List chat threads.
@@ -1221,6 +1231,8 @@ class SyncMemoryLayerClient:
             params["workspace_id"] = ws_id
         if user_id is not None:
             params["user_id"] = user_id
+        if scope_filter is not None:
+            params["scope_filter"] = scope_filter
 
         data = self._request("GET", "/threads", params=params)
         threads_adapter = TypeAdapter(list[ChatThread])

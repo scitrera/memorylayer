@@ -1,12 +1,12 @@
 [project]
 name = "memorylayer-client"
-version = "0.0.6"
+version = "0.1.22"
 description = "Python SDK for MemoryLayer.ai - memory infrastructure for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache 2.0" }
 authors = [
-    { name = "Scitrera", email = "open-source-team@scitrera.com" }
+    { name = "scitrera.ai", email = "open-source-team@scitrera.com" }
 ]
 keywords = ["ai", "memory", "agents", "llm", "vector-search"]
 classifiers = [
@@ -19,10 +19,16 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.26.0",
-    "pydantic>=2.5.0",
+    "pydantic==2.13.4",
 ]
 
 [project.optional-dependencies]
+# Optional Aether transport. Pulls in scitrera-aether-client so SDK callers
+# (cowork, enterprise integrations) can route through proxy_http_async on
+# a shared Aether SDK connection. Default httpx transport stays dep-light.
+aether = [
+    "scitrera-aether-client>=0.1.59",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

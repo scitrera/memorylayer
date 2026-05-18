@@ -15,6 +15,7 @@ from ...config import (
     MEMORYLAYER_EMBEDDING_PRELOAD_ENABLED,
     MEMORYLAYER_EMBEDDING_PROVIDER,
     MEMORYLAYER_EMBEDDING_SERVICE,
+    assert_supported_embedding_provider,
 )
 from .._constants import EXT_CACHE_SERVICE, EXT_EMBEDDING_PROVIDER, EXT_EMBEDDING_SERVICE
 from .._plugin_factory import make_service_plugin_base
@@ -156,6 +157,8 @@ class EmbeddingProviderPluginBase(Plugin):
         return EXT_EMBEDDING_PROVIDER
 
     def is_enabled(self, v: Variables) -> bool:
+        configured = v.environ(MEMORYLAYER_EMBEDDING_PROVIDER, default=DEFAULT_MEMORYLAYER_EMBEDDING_PROVIDER)
+        assert_supported_embedding_provider(str(configured))
         return enabled_option_pattern(self, v, MEMORYLAYER_EMBEDDING_PROVIDER, self_attr="PROVIDER_NAME")
 
     def on_registration(self, v: Variables) -> None:

@@ -576,4 +576,74 @@ export class MemoryLayerClient {
     await this.rawRequest<void>("DELETE", `/v1/chat/threads/${threadId}`);
     return { success: true, thread_id: threadId };
   }
+
+  // ============================================================================
+  // MCP Server Registry
+  // ============================================================================
+
+  async mcpServersList(options: {
+    transport?: string;
+    enabled?: boolean;
+    name?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams();
+    if (options.transport) params.set("transport", options.transport);
+    if (options.enabled !== undefined) params.set("enabled", String(options.enabled));
+    if (options.name) params.set("name", options.name);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.rawRequest<Record<string, unknown>>(
+      "GET",
+      `/v1/mcp-servers${query ? `?${query}` : ""}`
+    );
+  }
+
+  async mcpServersGet(options: {
+    server_id?: string;
+    name?: string;
+  }): Promise<Record<string, unknown>> {
+    if (options.server_id) {
+      return this.rawRequest<Record<string, unknown>>("GET", `/v1/mcp-servers/${options.server_id}`);
+    }
+    // resolve by name via list + filter
+    const params = new URLSearchParams({ name: options.name! });
+    return this.rawRequest<Record<string, unknown>>("GET", `/v1/mcp-servers?${params.toString()}`);
+  }
+
+  async mcpServersSave(options: {
+    name: string;
+    transport: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
+    description?: string;
+    enabled?: boolean;
+    metadata?: Record<string, unknown>;
+  }): Promise<Record<string, unknown>> {
+    // Check if a server with this name already exists; upsert via list+create or update
+    const listResult = await this.mcpServersList({ name: options.name }) as { mcp_servers?: Array<{ id: string }> };
+    const existing = listResult.mcp_servers?.[0];
+
+    if (existing?.id) {
+      // Update existing server
+      const { name: _name, transport: _transport, ...updateFields } = options;
+      return this.rawRequest<Record<string, unknown>>("PUT", `/v1/mcp-servers/${existing.id}`, updateFields);
+    }
+    // Create new server
+    return this.rawRequest<Record<string, unknown>>("POST", "/v1/mcp-servers", options);
+  }
+
+  async mcpServersDelete(serverId: string): Promise<Record<string, unknown>> {
+    await this.rawRequest<void>("DELETE", `/v1/mcp-servers/${serverId}`);
+    return { success: true, server_id: serverId };
+  }
+
+  async mcpServersImport(mcpServers: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.rawRequest<Record<string, unknown>>("POST", "/v1/mcp-servers/import", { mcpServers });
+  }
 }

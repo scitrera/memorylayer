@@ -1,0 +1,59 @@
+# Compose override for the HEAVY (real-model) integration test variant.
+#
+# Stacks on top of docker-compose.embed-chain.yml and swaps the embed-server
+# build/runtime for the real CUDA image (Dockerfile.real-test) with
+# ColPali serving both single- and multi-vector requests. GPU is exposed
+# via the CDI runtime ("nvidia.com/gpu=all").
+#
+# Run from repo root:
+#   docker compose \
+#       -f oss/memorylayer-embed-server/tests/integration/docker-compose.embed-chain.yml \
+#       -f oss/memorylayer-embed-server/tests/integration/docker-compose.embed-chain.real.yml \
+#       up --build -d
+#
+# Or, drive the existing pytest suite against the heavy stack via the
+# COMPOSE_FILE env var (the test harness reads $COMPOSE_FILE if set):
+#   COMPOSE_FILE_OVERRIDE=docker-compose.embed-chain.real.yml \
+#   pytest -m integration oss/memorylayer-embed-server/tests/integration/
+
+services:
+  embed-server:
+    image: memorylayer-embed-server:real-test
+    build:
+      context: ../../../..
+      dockerfile: oss/memorylayer-embed-server/Dockerfile.real-test
+    # Increase start_period — first request triggers model download +
+    # warm-up which can take several minutes on a fresh image.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:61051/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    # Expose all GPUs via CDI. Requires docker-compose v2.27+ with CDI
+    # support. Alternatively use the deprecated `runtime: nvidia`.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              capabilities: [gpu]
+              device_ids:
+                - nvidia.com/gpu=all
+    environment:
+      # Inherit defaults from the image, but override the model if the
+      # caller wants to test a different ColPali variant.
+      MEMORYLAYER_EMBEDDING_MODEL: "${MEMORYLAYER_EMBEDDING_MODEL:-ModernVBERT/colmodernvbert}"
+      MEMORYLAYER_EMBEDDING_DEVICE: "${MEMORYLAYER_EMBEDDING_DEVICE:-cuda}"
+
+  memorylayer-server:
+    # First memory create can be slow on a cold model — give it room.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:61001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 90s
+    environment:
+      # ColPali ModernVBert default is 128 dims; match it on the OSS side.
+      MEMORYLAYER_EMBEDDING_DIMENSIONS: "128"

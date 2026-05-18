@@ -89,6 +89,7 @@ EXT_ASSOCIATION_SERVICE = "memorylayer-association-service"
 # Ontology
 # ============================================
 EXT_ONTOLOGY_SERVICE = "memorylayer-ontology-service"
+EXT_MULTI_ONTOLOGY_CONTRIBUTORS = "memorylayer-multi-ontology-contributors"
 
 # ============================================
 # Reflect
@@ -130,3 +131,44 @@ EXT_RATE_LIMIT_SERVICE = "memorylayer-rate-limit-service"
 # Metrics / Observability
 # ============================================
 EXT_METRICS_SERVICE = "memorylayer-metrics-service"
+
+# ============================================
+# Document Ingestion
+# ============================================
+EXT_DOCUMENT_SERVICE = "memorylayer-document-service"
+
+# Embed-server REST client (relocated from enterprise → OSS in Phase 3).
+EXT_EMBED_SERVER_CLIENT = "memorylayer-embed-server-client"
+
+# ============================================
+# Data Provider
+# ============================================
+EXT_DATA_PROVIDER_SERVICE = "memorylayer-data-provider-service"
+
+# ============================================
+# Skills
+# ============================================
+EXT_SKILLS_SERVICE = "memorylayer-skills-service"
+
+# ============================================
+# Graph Analysis
+# ============================================
+EXT_GRAPH_ANALYSIS_SERVICE = "memorylayer-graph-analysis-service"
+
+# ============================================
+# Knowledgebase
+# ============================================
+EXT_KNOWLEDGEBASE_SERVICE = "memorylayer-knowledgebase-service"
+
+# ============================================
+# Aether Service connection (shared gRPC client)
+# ============================================
+# Phase 1 (Aether convergence): MemoryLayer's in-process Aether connection
+# now registers as a Service principal (sv::memorylayer::*) instead of an
+# Agent.  The extension key was renamed to reflect that.  The legacy name
+# is kept as an alias for one release so external callers (and any not-yet
+# migrated code paths) continue to resolve the same extension instance.
+EXT_AETHER_SERVICE_CONNECTION = "memorylayer-aether-service-connection"
+# Deprecated alias — points at the same extension instance.  Slated for
+# removal once enterprise + cowork are off the old name.
+EXT_AETHER_AGENT_SERVICE = EXT_AETHER_SERVICE_CONNECTION

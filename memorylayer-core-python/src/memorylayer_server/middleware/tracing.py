@@ -73,14 +73,20 @@ class TracingMiddleware(BaseHTTPMiddleware):
 class TracingMiddlewarePlugin(Plugin):
     """Plugin that adds :class:`TracingMiddleware` to the FastAPI app.
 
-    Registers only when the ``opentelemetry-api`` package is installed.
+    DISABLED: Replaced by ``FastAPIInstrumentor.instrument_app()`` registered
+    in ``lifecycle/fastapi.py``.  The instrumentor provides proper OpenTelemetry
+    semconv (``http.route``, ``http.method``, ``http.status_code``, etc.) and
+    covers every current and future route uniformly.  ``TracingMiddleware`` is
+    kept here for backward-compatibility in case external code imports it, but
+    the plugin no longer wires it into the app.
     """
 
     def extension_point_name(self, v: Variables) -> str:
         return EXT_TRACING_MIDDLEWARE
 
     def is_enabled(self, v: Variables) -> bool:
-        return HAS_OTEL
+        # Always disabled — FastAPIInstrumentor supersedes this middleware.
+        return False
 
     def initialize(self, v: Variables, logger) -> None:
         app = self.get_extension(EXT_FASTAPI_SERVER, v)

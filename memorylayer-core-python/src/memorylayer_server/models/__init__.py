@@ -25,6 +25,28 @@ from .chat import (
     DecompositionResult,
     MessageInput,
 )
+from .data_provider import (
+    DataProvider,
+    DataProviderType,
+)
+from .document import (
+    Document,
+    DocumentChunk,
+    DocumentExtractionOptions,
+    DocumentPage,
+    DocumentStatus,
+    DocumentType,
+    IngestionJob,
+    JobStatus,
+)
+from .graph_analysis import (
+    Bridge,
+    CentralNode,
+    Community,
+    GraphAnalysis,
+    GraphSnapshot,
+    GraphStats,
+)
 from .memory import (
     DetailLevel,
     Memory,
@@ -105,4 +127,23 @@ __all__ = [
     "AppendMessagesInput",
     "MessageInput",
     "DecompositionResult",
+    # Data provider models
+    "DataProvider",
+    "DataProviderType",
+    # Document models
+    "Document",
+    "DocumentChunk",
+    "DocumentExtractionOptions",
+    "DocumentPage",
+    "DocumentStatus",
+    "DocumentType",
+    "IngestionJob",
+    "JobStatus",
+    # Graph analysis models
+    "Bridge",
+    "CentralNode",
+    "Community",
+    "GraphAnalysis",
+    "GraphSnapshot",
+    "GraphStats",
 ]

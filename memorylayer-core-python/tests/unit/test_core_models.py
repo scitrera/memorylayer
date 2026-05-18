@@ -87,7 +87,8 @@ class TestMemoryEnums:
         # v3: inference subtype
         assert MemorySubtype.INFERENCE.value == "inference"
 
-        # Verify all expected values exist
+        # Verify all expected values exist (RPG subtypes live in the RPG
+        # plugin contributor, not the OSS enum).
         assert set(MemorySubtype) == {
             MemorySubtype.SOLUTION,
             MemorySubtype.PROBLEM,

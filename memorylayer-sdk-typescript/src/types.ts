@@ -219,6 +219,8 @@ export interface RememberOptions {
   metadata?: Record<string, unknown>;
   associations?: string[];
   contextId?: string;
+  userId?: string;
+  authority?: AuthorityContext;
 }
 
 export interface RecallOptions {
@@ -241,6 +243,8 @@ export interface RecallOptions {
   conversationContext?: Array<{ role: string; content: string }>;
   ragThreshold?: number;
   detailLevel?: DetailLevel | 'abstract' | 'overview' | 'full';
+  userId?: string;
+  authority?: AuthorityContext;
 }
 
 export interface ReflectOptions {
@@ -253,6 +257,19 @@ export interface ReflectOptions {
   subtypes?: (MemorySubtype | string)[];
   tags?: string[];
   contextId?: string;
+  userId?: string;
+  authority?: AuthorityContext;
+}
+
+// OBO / authority types
+export interface PrincipalRef {
+  type: string;
+  id: string;
+}
+
+export interface AuthorityContext {
+  grantId: string;
+  subject: PrincipalRef;
 }
 
 export interface ClientConfig {
@@ -261,6 +278,7 @@ export interface ClientConfig {
   workspaceId?: string;
   sessionId?: string;
   timeout?: number;
+  defaultAuthority?: AuthorityContext;
 }
 
 // Session options

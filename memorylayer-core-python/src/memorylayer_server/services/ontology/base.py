@@ -2,22 +2,6 @@ from ...config import DEFAULT_MEMORYLAYER_ONTOLOGY_SERVICE, MEMORYLAYER_ONTOLOGY
 from .._constants import EXT_ONTOLOGY_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
-# All valid relationship categories
-RELATIONSHIP_CATEGORIES = {
-    "hierarchical",
-    "causal",
-    "temporal",
-    "similarity",
-    "learning",
-    "refinement",
-    "reference",
-    "solution",
-    "context",
-    "workflow",
-    "quality",
-}
-
-
 class FeatureRequiresUpgradeError(Exception):
     """Raised when a feature requires enterprise upgrade."""
 
@@ -26,7 +10,7 @@ class FeatureRequiresUpgradeError(Exception):
         super().__init__(f"Feature '{feature}' requires MemoryLayer Enterprise. Visit https://memorylayer.ai/enterprise to upgrade.")
 
 
-# Unified ontology with 45 relationship types across 11 categories
+# Unified ontology with 63 relationship types across 11 categories
 BASE_ONTOLOGY = {
     # --- Hierarchical relationships ---
     "parent_of": {
@@ -537,6 +521,92 @@ class OntologyService(ABC):
         workspace_id: str | None = None,
     ) -> list[str]:
         """Get all relationship types in a category."""
+        pass
+
+    @abstractmethod
+    def extend_ontology(
+        self,
+        relationship_types: dict[str, dict] | None = None,
+        *,
+        source: str = "runtime",
+    ) -> None:
+        """Push relationship types into the ontology after init.
+
+        Use cases: test fixtures, runtime feature toggles, plugins that
+        compute contributions dynamically. For static contributions, prefer
+        subclassing :class:`OntologyContributorPlugin` instead.
+
+        Collisions with the base ontology or with previously contributed
+        types from a different source are logged at WARNING level and the
+        new metadata replaces the old. The ``source`` argument is recorded
+        for diagnostics and is exposed via :meth:`list_contributors`.
+        """
+        pass
+
+    @abstractmethod
+    def list_categories(self, tenant_id: str, workspace_id: str | None = None) -> list[str]:
+        """List relationship categories present in the merged ontology."""
+        pass
+
+    @abstractmethod
+    def list_contributors(self) -> list[dict]:
+        """List relationship type and subtype contributions and their sources.
+
+        Returns a list of dicts. Each entry has a ``kind`` field
+        (``"relationship"`` or ``"subtype"``) plus kind-specific fields:
+
+        - relationship: ``{"type_name": str, "kind": "relationship", "source": str}``
+        - subtype: ``{"memory_type": str, "subtype": str, "kind": "subtype", "source": str}``
+        """
+        pass
+
+    @abstractmethod
+    def extend_subtypes(
+        self,
+        subtypes: dict[str, set[str]] | None = None,
+        *,
+        source: str = "runtime",
+    ) -> None:
+        """Push memory subtypes into the ontology after init.
+
+        Mirrors :meth:`extend_ontology` for memory subtypes. The
+        ``subtypes`` argument maps memory_type -> set of subtype strings.
+        Use ``"*"`` as the memory_type key to contribute subtypes that
+        apply to any memory type.
+
+        Collisions with the OSS-known subtype set are logged at WARNING
+        level (the new entry is recorded for diagnostics regardless).
+        The ``source`` argument is recorded and exposed via
+        :meth:`list_contributors`.
+        """
+        pass
+
+    @abstractmethod
+    def list_subtypes(
+        self,
+        memory_type: str | None = None,
+        tenant_id: str = "_default",
+        workspace_id: str | None = None,
+    ) -> list[str]:
+        """List valid subtypes for the given memory type.
+
+        Returns the union of OSS-known subtypes and contributed
+        subtypes. If ``memory_type`` is provided, returns only the
+        subtypes that apply to that memory type (subtypes contributed
+        with the ``"*"`` key always apply). If ``memory_type`` is None,
+        returns the union across all memory types.
+        """
+        pass
+
+    @abstractmethod
+    def validate_subtype(
+        self,
+        memory_type: str,
+        subtype: str,
+        tenant_id: str = "_default",
+        workspace_id: str | None = None,
+    ) -> bool:
+        """Return True if ``subtype`` is valid for ``memory_type``."""
         pass
 
 

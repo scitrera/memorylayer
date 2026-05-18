@@ -51,6 +51,25 @@ class FastApiPlugin(Plugin):
             # store variables in app state
             app.state.v = v
 
+            # Attach the fully-built FastAPI app to the Aether service
+            # connection. This unblocks the in-process ProxyHttpTerminator,
+            # which exposes MemoryLayer's REST surface over Aether (Phase 2c
+            # of the Aether convergence). Skipped if the aether_service
+            # extension is disabled or the connection isn't loaded.
+            try:
+                from ..services._constants import EXT_AETHER_SERVICE_CONNECTION
+                aether_svc = _saf_get_extension(v, EXT_AETHER_SERVICE_CONNECTION)
+            except Exception:
+                aether_svc = None
+            if aether_svc is not None and hasattr(aether_svc, "attach_fastapi_app"):
+                try:
+                    await aether_svc.attach_fastapi_app(app)
+                except Exception:  # noqa: BLE001
+                    _saf_get_logger(v).exception(
+                        "Failed to attach FastAPI app to Aether service connection; "
+                        "REST-over-Aether front door will be unavailable"
+                    )
+
             try:
                 yield
             finally:
@@ -76,6 +95,22 @@ class FastApiPlugin(Plugin):
                 "version": __version__,
                 "description": "API-first memory infrastructure for LLM-powered agents",
             }
+
+        # Wire FastAPIInstrumentor for full OpenTelemetry coverage of every route.
+        # This replaces the bespoke TracingMiddleware (see middleware/tracing.py —
+        # TracingMiddlewarePlugin is now disabled via is_enabled=False there).
+        # instrument_app() is a no-op when the OTel SDK is not installed, so it is
+        # safe to call unconditionally here.
+        try:
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+            FastAPIInstrumentor.instrument_app(
+                app,
+                excluded_urls="health,metrics-internal,metrics",
+            )
+            import logging as _logging
+            _logging.getLogger(__name__).debug("FastAPIInstrumentor registered for memorylayer app")
+        except ImportError:
+            pass
 
         return app
 

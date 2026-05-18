@@ -52,8 +52,9 @@ class ChatService(ABC):
         user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        scope_filter: str | None = None,
     ) -> list[ChatThread]:
-        """List threads in a workspace, optionally filtered by user."""
+        """List threads in a workspace, optionally filtered by user and scope."""
         pass
 
     @abstractmethod
@@ -81,8 +82,9 @@ class ChatService(ABC):
         workspace_id: str,
         thread_id: str,
         input: AppendMessagesInput,
+        tenant_id: str = "",
     ) -> list[ChatMessage]:
-        """Append messages to a thread. Returns the created messages with IDs and indexes."""
+        """Append messages to a thread. Auto-creates the thread if it doesn't exist."""
         pass
 
     @abstractmethod
@@ -108,6 +110,20 @@ class ChatService(ABC):
         order: str = "asc",
     ) -> ChatThreadWithMessages | None:
         """Get thread metadata with messages inlined."""
+        pass
+
+    @abstractmethod
+    async def delete_message(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        message_id: str,
+    ) -> bool:
+        """Delete a single message from a thread.
+
+        Returns True if found and deleted, False if not found.
+        Idempotent: a missing message returns False without raising.
+        """
         pass
 
     @abstractmethod

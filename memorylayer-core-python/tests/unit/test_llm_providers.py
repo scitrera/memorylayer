@@ -107,7 +107,7 @@ class TestAnthropicLLMProvider:
     @pytest.mark.asyncio
     async def test_complete(self, provider):
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="Hello there!")]
+        mock_response.content = [MagicMock(type="text", text="Hello there!")]
         mock_response.model = "claude-sonnet-4-20250514"
         mock_response.usage.input_tokens = 10
         mock_response.usage.output_tokens = 5
@@ -137,7 +137,7 @@ class TestAnthropicLLMProvider:
     @pytest.mark.asyncio
     async def test_complete_with_system_message(self, provider):
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="I'm fine!")]
+        mock_response.content = [MagicMock(type="text", text="I'm fine!")]
         mock_response.model = "claude-sonnet-4-20250514"
         mock_response.usage.input_tokens = 20
         mock_response.usage.output_tokens = 3
@@ -158,7 +158,7 @@ class TestAnthropicLLMProvider:
     @pytest.mark.asyncio
     async def test_complete_with_stop_sequences(self, provider):
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="result")]
+        mock_response.content = [MagicMock(type="text", text="result")]
         mock_response.model = "claude-sonnet-4-20250514"
         mock_response.usage.input_tokens = 5
         mock_response.usage.output_tokens = 1
@@ -178,7 +178,7 @@ class TestAnthropicLLMProvider:
     @pytest.mark.asyncio
     async def test_complete_max_tokens_finish(self, provider):
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="truncated")]
+        mock_response.content = [MagicMock(type="text", text="truncated")]
         mock_response.model = "claude-sonnet-4-20250514"
         mock_response.usage.input_tokens = 10
         mock_response.usage.output_tokens = 100
@@ -196,7 +196,7 @@ class TestAnthropicLLMProvider:
     @pytest.mark.asyncio
     async def test_complete_model_override(self, provider):
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="hi")]
+        mock_response.content = [MagicMock(type="text", text="hi")]
         mock_response.model = "claude-haiku-4-20250514"
         mock_response.usage.input_tokens = 5
         mock_response.usage.output_tokens = 1
@@ -217,7 +217,7 @@ class TestAnthropicLLMProvider:
     async def test_complete_no_temperature(self, provider):
         """Temperature=None should not be passed to the API."""
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="hi")]
+        mock_response.content = [MagicMock(type="text", text="hi")]
         mock_response.model = "claude-sonnet-4-20250514"
         mock_response.usage.input_tokens = 5
         mock_response.usage.output_tokens = 1

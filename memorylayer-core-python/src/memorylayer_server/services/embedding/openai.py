@@ -7,6 +7,11 @@ from .base import EmbeddingProvider, EmbeddingProviderPluginBase
 
 MEMORYLAYER_EMBEDDING_OPENAI_API_KEY = "MEMORYLAYER_EMBEDDING_OPENAI_API_KEY"
 MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL = "MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL"
+# Provider-specific model override; wins over MEMORYLAYER_EMBEDDING_MODEL.
+# Useful when the OpenAI provider runs alongside another (e.g. on the
+# embed-server with ColPali for multi-vector — both providers would
+# otherwise collide on the shared MEMORYLAYER_EMBEDDING_MODEL key).
+MEMORYLAYER_EMBEDDING_OPENAI_MODEL = "MEMORYLAYER_EMBEDDING_OPENAI_MODEL"
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMENSIONS = 1536
@@ -54,10 +59,13 @@ class OpenAIEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
     PROVIDER_NAME = EmbeddingProviderType.OPENAI
 
     def initialize(self, v: Variables, logger: Logger) -> object | None:
+        model = v.environ(MEMORYLAYER_EMBEDDING_OPENAI_MODEL, default=None)
+        if not model:
+            model = v.environ(MEMORYLAYER_EMBEDDING_MODEL, default=DEFAULT_EMBEDDING_MODEL)
         return OpenAIEmbeddingProvider(
             v=v,
             api_key=v.environ(MEMORYLAYER_EMBEDDING_OPENAI_API_KEY, default=DEFAULT_OPENAI_API_KEY),
-            model=v.environ(MEMORYLAYER_EMBEDDING_MODEL, default=DEFAULT_EMBEDDING_MODEL),
+            model=model,
             base_url=v.environ(MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL, default=DEFAULT_OPENAI_BASE_URL),
             dimensions=v.environ(MEMORYLAYER_EMBEDDING_DIMENSIONS, default=DEFAULT_EMBEDDING_DIMENSIONS, type_fn=int),
         )

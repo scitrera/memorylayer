@@ -1,0 +1,65 @@
+# Docker compose stack for the embed-server ↔ memorylayer-server chain
+# integration test. Spins up both services on a private network and exposes
+# only memorylayer-server (61001) to the host.
+#
+# Run from repo root:
+#   docker compose -f oss/memorylayer-embed-server/tests/integration/docker-compose.embed-chain.yml up --build
+#
+# The pytest driver (test_embed_chain_docker.py) automates this with
+# subprocess and verifies the chain end-to-end.
+
+name: memorylayer-embed-chain-test
+
+services:
+  embed-server:
+    image: memorylayer-embed-server:test
+    build:
+      context: ../../../..              # repo root
+      dockerfile: oss/memorylayer-embed-server/Dockerfile.test
+    networks:
+      - chain
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:61051/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+    # Internal-only; no host port mapping. memorylayer-server reaches this
+    # via the private docker network at http://embed-server:61051.
+    expose:
+      - "61051"
+
+  memorylayer-server:
+    image: memorylayer-server:test
+    build:
+      context: ../../../..              # repo root
+      dockerfile: oss/memorylayer-embed-server/tests/integration/Dockerfile.memorylayer-server.test
+    networks:
+      - chain
+    depends_on:
+      embed-server:
+        condition: service_healthy
+    environment:
+      MEMORYLAYER_SERVER_HOST: "0.0.0.0"
+      MEMORYLAYER_SERVER_PORT: "61001"
+      MEMORYLAYER_EMBEDDING_PROVIDER: "embed_server"
+      MEMORYLAYER_EMBED_TRANSPORT: "http"
+      MEMORYLAYER_EMBED_SERVER_URL: "http://embed-server:61051"
+      # Use the multivector-capable embedding service so /v1/memories
+      # exercises both single- and multi-vector code paths on the OSS side.
+      MEMORYLAYER_EMBEDDING_SERVICE: "mv"
+      MEMORYLAYER_EMBEDDING_DIMENSIONS: "64"
+      MEMORYLAYER_SQLITE_STORAGE_PATH: "/data/memorylayer.db"
+      MEMORYLAYER_DATA_DIR: "/data"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:61001/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 8s
+    ports:
+      - "61101:61001"                    # host:container — unusual host port to avoid collisions
+
+networks:
+  chain:
+    driver: bridge

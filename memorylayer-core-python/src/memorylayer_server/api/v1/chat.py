@@ -73,8 +73,9 @@ async def create_thread(
         workspace_id = request.workspace_id or ctx.workspace_id
         await authz_service.require_authorization(ctx, "threads", "write", workspace_id=workspace_id)
 
+        # thread_id is server-owned (see ThreadCreateRequest docstring); not
+        # forwarded from the request even if a client tries to sneak one in.
         input_data = CreateThreadInput(
-            thread_id=request.thread_id,
             user_id=request.user_id,
             context_id=request.context_id or "_default",
             observer_id=request.observer_id,
@@ -82,6 +83,7 @@ async def create_thread(
             title=request.title,
             metadata=request.metadata,
             expires_at=request.expires_at,
+            scope=request.scope,
         )
 
         thread = await chat_service.create_thread(
@@ -130,13 +132,14 @@ async def list_threads(
     user_id: str | None = Query(None, description="User filter"),
     limit: int = Query(50, ge=1, le=200, description="Max threads to return"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
+    scope_filter: str | None = Query(None, description="Scope filter: 'web' | 'office' | None (return all)"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     chat_service: ChatService = Depends(get_chat_service),
     audit_service: AuditService = Depends(get_audit_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> ThreadListResponse:
-    """List chat threads, optionally filtered by workspace and user."""
+    """List chat threads, optionally filtered by workspace, user, and scope."""
     try:
         ctx = await auth_service.build_context(http_request, None)
         workspace_id = workspace_id or ctx.workspace_id
@@ -147,6 +150,7 @@ async def list_threads(
             user_id=user_id,
             limit=limit,
             offset=offset,
+            scope_filter=scope_filter,
         )
 
         try:
@@ -424,6 +428,64 @@ async def delete_thread(
         )
 
 
+@router.delete(
+    "/{thread_id}/messages/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"model": ErrorResponse, "description": "Message not found"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+    },
+)
+async def delete_message(
+    http_request: Request,
+    thread_id: str,
+    message_id: str,
+    workspace_id: str | None = Query(None, description="Workspace filter"),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    chat_service: ChatService = Depends(get_chat_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
+):
+    """Delete a single message from a thread by ID. Returns 204 on success, 404 if not found."""
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(ctx, "threads", "write", workspace_id=workspace_id)
+
+        deleted = await chat_service.delete_message(workspace_id, thread_id, message_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message {message_id} not found in thread {thread_id}",
+            )
+
+        try:
+            await audit_service.record(
+                AuditEvent(
+                    event_type="chat",
+                    action="delete",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="message",
+                    resource_id=message_id,
+                )
+            )
+        except Exception:
+            logger.debug("Audit record failed for message delete")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete message %s from thread %s: %s", message_id, thread_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete message",
+        )
+
+
 @router.post(
     "/{thread_id}/messages",
     response_model=MessagesAppendResponse,
@@ -457,6 +519,7 @@ async def append_messages(
                 content = [ChatMessageContent(**block) if isinstance(block, dict) else block for block in content]
             msg_inputs.append(
                 MessageInput(
+                    id=msg.id,
                     role=msg.role,
                     content=content,
                     metadata=msg.metadata,
@@ -469,6 +532,7 @@ async def append_messages(
             workspace_id=workspace_id,
             thread_id=thread_id,
             input=input_data,
+            tenant_id=ctx.tenant_id,
         )
 
         # Get updated thread for message count

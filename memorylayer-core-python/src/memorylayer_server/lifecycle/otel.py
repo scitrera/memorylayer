@@ -85,6 +85,34 @@ class OTelInitPlugin(Plugin):
             logger.info("OTel initialized: exporter=%s (spans stay in-process)", exporter_type)
 
         trace.set_tracer_provider(provider)
+
+        # Auto-instrument DB and cache drivers so every route gets child spans
+        # for DB queries and cache I/O without per-callsite code.
+
+        # SQLAlchemy async (used by Enterprise PostgreSQL backend via asyncpg)
+        try:
+            from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+            SQLAlchemyInstrumentor().instrument()
+            logger.debug("SQLAlchemyInstrumentor registered")
+        except ImportError:
+            pass
+
+        # Redis / Valkey async client (used by Enterprise cache layer)
+        try:
+            from opentelemetry.instrumentation.redis import RedisInstrumentor
+            RedisInstrumentor().instrument()
+            logger.debug("RedisInstrumentor registered")
+        except ImportError:
+            pass
+
+        # httpx outbound client (used by OSS for various HTTP calls)
+        try:
+            from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+            HTTPXClientInstrumentor().instrument()
+            logger.debug("HTTPXClientInstrumentor registered")
+        except ImportError:
+            pass
+
         return provider
 
     def shutdown(self, v: Variables, logger: logging.Logger, value: object | None) -> None:

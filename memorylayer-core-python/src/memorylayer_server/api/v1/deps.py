@@ -14,6 +14,10 @@ from ...services.chat import EXT_CHAT_SERVICE, ChatService
 from ...services.inference import EXT_INFERENCE_SERVICE, DefaultInferenceService
 from ...services.memory import EXT_MEMORY_SERVICE, MemoryService
 from ...services.metrics import EXT_METRICS_SERVICE, MetricsService
+from ...services.mcp_servers import EXT_MCP_SERVERS_SERVICE, McpServerService
+from ...services.mcp_servers.resolution import McpServerResolutionService
+from ...services.skills import EXT_SKILLS_SERVICE, SkillsService
+from ...services.skills.resolution import SkillsResolutionService
 from ...services.reflect import EXT_REFLECT_SERVICE
 from ...services.session import EXT_SESSION_SERVICE, SessionService
 from ...services.tasks import EXT_TASK_SERVICE, TaskService
@@ -95,3 +99,27 @@ def get_audit_service(v: Variables = Depends(get_variables_dep)) -> AuditService
 def get_metrics_service(v: Variables = Depends(get_variables_dep)) -> MetricsService:
     """FastAPI dependency wrapper for metrics service."""
     return get_extension(EXT_METRICS_SERVICE, v)
+
+
+def get_skills_service(v: Variables = Depends(get_variables_dep)) -> SkillsService:
+    """FastAPI dependency wrapper for skills service."""
+    return get_extension(EXT_SKILLS_SERVICE, v)
+
+
+def get_skills_resolution_service(
+    skills_service: SkillsService = Depends(get_skills_service),
+) -> "SkillsResolutionService":
+    """FastAPI dependency that builds a SkillsResolutionService from the active StorageBackend."""
+    return SkillsResolutionService(storage=skills_service._storage)
+
+
+def get_mcp_servers_service(v: Variables = Depends(get_variables_dep)) -> McpServerService:
+    """FastAPI dependency wrapper for MCP servers service."""
+    return get_extension(EXT_MCP_SERVERS_SERVICE, v)
+
+
+def get_mcp_servers_resolution_service(
+    mcp_service: McpServerService = Depends(get_mcp_servers_service),
+) -> "McpServerResolutionService":
+    """FastAPI dependency that builds a McpServerResolutionService from the active StorageBackend."""
+    return McpServerResolutionService(storage=mcp_service._storage)

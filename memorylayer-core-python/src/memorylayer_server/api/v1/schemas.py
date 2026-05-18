@@ -17,7 +17,6 @@ from memorylayer_server.models.association import (
 )
 from memorylayer_server.models.memory import (
     Memory,
-    MemorySubtype,
     MemoryType,
     RecallMode,
     RecallResult,  # noqa: F401 — re-exported for memories.py
@@ -35,7 +34,7 @@ class MemoryCreateRequest(BaseModel):
     content: str = Field(..., description="Memory content to store", min_length=1)
     workspace_id: str | None = Field(None, description="Workspace override (defaults to session workspace or _default)")
     type: MemoryType | None = Field(None, description="Cognitive type (auto-classified if omitted)")
-    subtype: MemorySubtype | None = Field(None, description="Domain-specific classification")
+    subtype: str | None = Field(None, description="Domain-specific classification (OSS-known or plugin-contributed)")
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
@@ -51,7 +50,7 @@ class MemoryUpdateRequest(BaseModel):
 
     content: str | None = Field(None, description="Updated content", min_length=1)
     type: MemoryType | None = Field(None, description="Updated cognitive type")
-    subtype: MemorySubtype | None = Field(None, description="Updated domain classification")
+    subtype: str | None = Field(None, description="Updated domain classification")
     importance: float | None = Field(None, ge=0.0, le=1.0, description="Updated importance")
     tags: list[str] | None = Field(None, description="Updated tags")
     metadata: dict[str, Any] | None = Field(None, description="Updated metadata")
@@ -64,7 +63,7 @@ class MemoryRecallRequest(BaseModel):
     query: str = Field(..., description="Natural language query", min_length=1)
     workspace_id: str | None = Field(None, description="Workspace override (defaults to session workspace or _default)")
     types: list[MemoryType] = Field(default_factory=list, description="Filter by cognitive types")
-    subtypes: list[MemorySubtype] = Field(default_factory=list, description="Filter by domain subtypes")
+    subtypes: list[str] = Field(default_factory=list, description="Filter by domain subtypes")
     tags: list[str] = Field(default_factory=list, description="Filter by tags (AND logic)")
     context_id: str | None = Field(None, description="Filter by memory context")
     observer_id: str | None = Field(None, description="Filter by observer entity")
@@ -98,7 +97,7 @@ class MemoryReflectRequest(BaseModel):
     include_sources: bool = Field(True, description="Include source memory references")
     depth: int = Field(2, ge=1, le=5, description="Association traversal depth")
     types: list[MemoryType] = Field(default_factory=list, description="Filter by types")
-    subtypes: list[MemorySubtype] = Field(default_factory=list, description="Filter by subtypes")
+    subtypes: list[str] = Field(default_factory=list, description="Filter by subtypes")
     tags: list[str] = Field(default_factory=list, description="Filter by tags")
     context_id: str | None = Field(None, description="Filter by memory context")
     observer_id: str | None = Field(None, description="Filter by observer entity")
@@ -117,7 +116,7 @@ class BatchCreateOp(BaseModel):
     op: Literal["create"] = Field(..., description="Operation type")
     content: str = Field(..., description="Memory content", min_length=1)
     type: MemoryType | None = Field(None, description="Cognitive type")
-    subtype: MemorySubtype | None = Field(None, description="Domain classification")
+    subtype: str | None = Field(None, description="Domain classification")
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Importance")
     tags: list[str] = Field(default_factory=list, description="Tags")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Metadata")
@@ -132,7 +131,7 @@ class BatchUpdateOp(BaseModel):
     memory_id: str = Field(..., description="Memory ID to update")
     content: str | None = Field(None, description="Updated content", min_length=1)
     type: MemoryType | None = Field(None, description="Updated type")
-    subtype: MemorySubtype | None = Field(None, description="Updated subtype")
+    subtype: str | None = Field(None, description="Updated subtype")
     importance: float | None = Field(None, ge=0.0, le=1.0, description="Updated importance")
     tags: list[str] | None = Field(None, description="Updated tags")
     metadata: dict[str, Any] | None = Field(None, description="Updated metadata")
@@ -343,6 +342,7 @@ class SessionBriefingResponse(BaseModel):
 class WorkspaceCreateRequest(BaseModel):
     """Request schema for creating a workspace."""
 
+    id: str | None = Field(None, description="Optional workspace ID. If omitted, a unique ID is generated.")
     name: str = Field(..., description="Workspace name", min_length=1)
     settings: dict[str, Any] = Field(default_factory=dict, description="Workspace-level settings")
 
@@ -674,9 +674,16 @@ from memorylayer_server.models.chat import (
 
 
 class ThreadCreateRequest(BaseModel):
-    """Request schema for creating a chat thread."""
+    """Request schema for creating a chat thread.
 
-    thread_id: str | None = Field(None, description="Client-provided thread ID (auto-generated if omitted)")
+    ``thread_id`` intentionally NOT exposed: ids are server-owned. Letting
+    callers supply ids forces global PK collision handling on a key that
+    has no business being globally unique (workspace already isolates
+    every other resource), and a malicious or careless caller could trip
+    creates in unrelated workspaces. Server always generates via
+    ``generate_id("thread")``.
+    """
+
     workspace_id: str | None = Field(None, description="Workspace override (defaults to session workspace or _default)")
     user_id: str | None = Field(None, description="User scope for this thread")
     context_id: str | None = Field(None, description="Context within workspace (defaults to _default)")
@@ -685,6 +692,7 @@ class ThreadCreateRequest(BaseModel):
     title: str | None = Field(None, description="Optional display title")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
     expires_at: datetime | None = Field(None, description="Optional expiration (None = permanent)")
+    scope: str | None = Field(None, description="Surface scope: 'web' | 'office' | None (≡ 'web')")
 
 
 class ThreadUpdateRequest(BaseModel):
@@ -710,6 +718,7 @@ class ThreadListResponse(BaseModel):
 class MessageCreateRequest(BaseModel):
     """A single message in an append request."""
 
+    id: str | None = Field(default=None, description="Optional client-supplied id; server generates one when omitted.")
     role: str = Field(..., description="Message role: user, assistant, system, tool")
     content: Any = Field(..., description="Message content — string or structured content blocks")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
@@ -754,3 +763,4 @@ class ThreadDecomposeResponse(BaseModel):
     memories_created: int
     from_index: int
     to_index: int
+

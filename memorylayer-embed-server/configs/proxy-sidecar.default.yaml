@@ -1,0 +1,64 @@
+# Aether Proxy Sidecar — embed server default configuration
+#
+# Baked into the embed-server container image as /etc/aether-sidecar.yaml.
+# Operators can override via bind-mount, e.g.:
+#   docker run -v /path/to/my-sidecar.yaml:/etc/aether-sidecar.yaml ...
+#
+# All fields are also overridable via environment variables (see the
+# scitrera-aether3-go README for the full env-name list, e.g.
+# AETHER_GATEWAY_ADDRESS, AETHER_API_KEY, AETHER_TENANT_ID).
+#
+# To run the embed-server without the sidecar entirely (plain HTTP only —
+# useful for dev / CI / docker-compose tests), set
+# ``EMBED_SERVER_RUN_SIDECAR=false`` and the container entrypoint will
+# exec ``memorylayer-embed serve`` directly.
+
+# ---------------------------------------------------------------------------
+# Shared: gateway connection + service identity
+# ---------------------------------------------------------------------------
+
+gateway:
+  address: localhost:50051          # env: AETHER_GATEWAY_ADDRESS
+  insecure: true                    # env: AETHER_GATEWAY_INSECURE
+  # api_key: <set via AETHER_API_KEY at runtime>
+  # tls:
+  #   cert_file: /etc/aether/tls/cert.pem
+  #   key_file:  /etc/aether/tls/key.pem
+  #   ca_file:   /etc/aether/tls/ca.pem
+
+service:
+  implementation: memorylayer-embed
+  specifier: default
+
+# Tenant identifier injected as X-Auth-Tenant-ID by header_mode=strict|both.
+tenant_id: dev-tenant               # env: AETHER_TENANT_ID
+
+# ---------------------------------------------------------------------------
+# Terminator surface (gateway → local embed FastAPI on 127.0.0.1:61051)
+# ---------------------------------------------------------------------------
+
+terminator:
+  enabled: true
+  backends:
+    - name: default
+      kind: http
+      url: http://127.0.0.1:61051
+      allow_paths:
+        - "/v1/*"
+        - "/health"
+        - "/health/*"
+      allow_methods:
+        - GET
+        - POST
+      max_body_bytes: 104857600     # 100 MiB (images may be large)
+      idle_timeout_ms: 60000
+      header_mode: strict           # strip inbound X-Auth-* spoofs
+
+# ---------------------------------------------------------------------------
+# Initiator / relay surfaces disabled — the embed-server is read-only from
+# the gateway's perspective.
+# ---------------------------------------------------------------------------
+
+logging:
+  level: info
+  format: console

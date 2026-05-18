@@ -19,7 +19,7 @@ from scitrera_app_framework import Variables as Variables
 
 from ...config import DEFAULT_CONTEXT_ID, DEFAULT_MEMORYLAYER_SQLITE_STORAGE_PATH, DEFAULT_TENANT_ID, MEMORYLAYER_SQLITE_STORAGE_PATH
 from ...models.association import AssociateInput, Association, GraphPath, GraphQueryResult
-from ...models.memory import Memory, MemoryStatus, MemorySubtype, MemoryType, RememberInput
+from ...models.memory import Memory, MemoryStatus, MemoryType, RememberInput
 from ...models.session import Session, WorkingMemory
 from ...models.workspace import Context, Workspace
 from ...utils import cosine_similarity, generate_id, parse_datetime_utc, utc_now_iso
@@ -547,9 +547,20 @@ class SQLiteStorageBackend(StorageBackend):
                 expires_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
+                scope TEXT,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces (id)
             )
         """)
+        # Migrate: add scope column to existing databases (idempotent — ALTER TABLE
+        # fails silently if the column is already present in SQLite 3.37+; we catch
+        # the OperationalError for older runtimes).
+        try:
+            await self._connection.execute(
+                "ALTER TABLE chat_threads ADD COLUMN scope TEXT"
+            )
+            await self._connection.commit()
+        except Exception:
+            pass  # Column already exists — expected on databases created after the schema update
         await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_threads_workspace ON chat_threads(workspace_id)")
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_threads_user ON chat_threads(workspace_id, user_id) WHERE user_id IS NOT NULL"
@@ -572,11 +583,222 @@ class SQLiteStorageBackend(StorageBackend):
         await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, message_index)")
         await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_workspace ON chat_messages(workspace_id, thread_id)")
 
+        # Documents
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS documents (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                document_type TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                mime_type TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                target_context_id TEXT NOT NULL DEFAULT '_default',
+                extraction_options TEXT DEFAULT '{}',
+                page_count INTEGER DEFAULT 0,
+                chunk_count INTEGER DEFAULT 0,
+                memory_ids TEXT DEFAULT '[]',
+                deduplicated_count INTEGER DEFAULT 0,
+                error_message TEXT,
+                metadata TEXT DEFAULT '{}',
+                extracted_metadata TEXT DEFAULT '{}',
+                raw_content BLOB,
+                created_at TEXT NOT NULL,
+                processing_started_at TEXT,
+                processing_completed_at TEXT,
+                UNIQUE (workspace_id, content_hash)
+            )
+        """)
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(workspace_id, status)")
+
+        # Document pages
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS document_pages (
+                id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL REFERENCES documents(id),
+                workspace_id TEXT NOT NULL,
+                page_no INTEGER NOT NULL,
+                transcript TEXT,
+                multivector TEXT,
+                transcript_model TEXT,
+                metadata TEXT DEFAULT '{}',
+                created_at TEXT,
+                UNIQUE (document_id, page_no)
+            )
+        """)
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_document_pages_workspace ON document_pages(workspace_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_document_pages_document ON document_pages(document_id)")
+
+        # Ingestion jobs
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS ingestion_jobs (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                document_ids TEXT DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'queued',
+                progress_percent INTEGER DEFAULT 0,
+                documents_processed INTEGER DEFAULT 0,
+                total_memories_created INTEGER DEFAULT 0,
+                errors TEXT DEFAULT '[]',
+                metadata TEXT DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT
+            )
+        """)
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_workspace ON ingestion_jobs(workspace_id)")
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status ON ingestion_jobs(workspace_id, status)")
+
+        # Data providers
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS data_providers (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                provider_type TEXT NOT NULL,
+                description TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                connection_args TEXT DEFAULT '{}',
+                schedule TEXT,
+                last_sync_at TEXT,
+                metadata TEXT DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_data_providers_workspace ON data_providers(workspace_id)")
+
+        # Skills
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS skills (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL DEFAULT '',
+                workspace_id TEXT NOT NULL,
+                user_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                version TEXT NOT NULL DEFAULT '0.1.0',
+                license TEXT,
+                compatibility TEXT,
+                allowed_tools TEXT,
+                body TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '{}',
+                source_mode TEXT NOT NULL DEFAULT 'server',
+                manifest_hash TEXT NOT NULL DEFAULT '',
+                bundle_hash TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skills_workspace ON skills(workspace_id)"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skills_workspace_name ON skills(workspace_id, name)"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skills_workspace_user ON skills(workspace_id, user_id)"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)"
+        )
+
+        # Skill files
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS skill_files (
+                id TEXT PRIMARY KEY,
+                skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                path TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                content BLOB NOT NULL,
+                content_hash TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                mime_type TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(skill_id, path)
+            )
+        """)
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skill_files_skill ON skill_files(skill_id)"
+        )
+
+        # Knowledgebase articles
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS knowledgebase_articles (
+                workspace_id TEXT NOT NULL,
+                article_id TEXT NOT NULL,
+                article_type TEXT,
+                title TEXT,
+                content_md TEXT,
+                metadata TEXT DEFAULT '{}',
+                generated_at TEXT,
+                PRIMARY KEY (workspace_id, article_id)
+            )
+        """)
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kb_articles_workspace ON knowledgebase_articles(workspace_id)"
+        )
+
+        # Graph analyses
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS graph_analyses (
+                workspace_id TEXT PRIMARY KEY,
+                analysis_json TEXT NOT NULL,
+                generated_at TEXT NOT NULL
+            )
+        """)
+
+        # MCP servers
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL DEFAULT '_default',
+                workspace_id TEXT NOT NULL,
+                user_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT,
+                transport TEXT NOT NULL,
+                command TEXT,
+                args TEXT NOT NULL DEFAULT '[]',
+                env TEXT NOT NULL DEFAULT '{}',
+                url TEXT,
+                headers TEXT NOT NULL DEFAULT '{}',
+                metadata TEXT NOT NULL DEFAULT '{}',
+                source_mode TEXT NOT NULL DEFAULT 'server',
+                manifest_hash TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_ws_name ON mcp_servers(workspace_id, name) WHERE user_id IS NULL"
+        )
+        await self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_ws_user_name ON mcp_servers(workspace_id, user_id, name) WHERE user_id IS NOT NULL"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name)"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mcp_servers_tenant_ws ON mcp_servers(tenant_id, workspace_id)"
+        )
+
         await self._connection.commit()
 
     async def _ensure_reserved_entities(self) -> None:
-        """Ensure reserved entities exist (_default workspace, _global workspace, _default contexts)."""
-        from ...config import DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, GLOBAL_WORKSPACE_ID
+        """Ensure reserved entities exist (_default workspace, _global workspace,
+        _global_user workspace, _default contexts)."""
+        from ...config import (
+            DEFAULT_TENANT_ID,
+            DEFAULT_WORKSPACE_ID,
+            GLOBAL_USER_WORKSPACE_ID,
+            GLOBAL_WORKSPACE_ID,
+        )
 
         now = utc_now_iso()
 
@@ -600,6 +822,18 @@ class SQLiteStorageBackend(StorageBackend):
                                        VALUES (?, ?, 'Global Workspace', '{}', ?, ?)
                                        """,
             (GLOBAL_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now),
+        )
+
+        # Create _global_user workspace (per-user cross-workspace preferences:
+        # stored with user_id filter, recalled via include_global_user=True)
+        await self._connection.execute(
+            """
+                                       INSERT
+                                           OR IGNORE
+                                       INTO workspaces (id, tenant_id, name, settings, created_at, updated_at)
+                                       VALUES (?, ?, 'Global User Workspace', '{}', ?, ?)
+                                       """,
+            (GLOBAL_USER_WORKSPACE_ID, DEFAULT_TENANT_ID, now, now),
         )
 
         # Get all workspaces
@@ -655,7 +889,7 @@ class SQLiteStorageBackend(StorageBackend):
                 input.content,
                 content_hash,
                 input.type.value if input.type else MemoryType.SEMANTIC.value,
-                input.subtype.value if input.subtype else None,
+                input.subtype if input.subtype else None,
                 getattr(input, "category", None),
                 input.importance,
                 json.dumps(input.tags),
@@ -882,6 +1116,54 @@ class SQLiteStorageBackend(StorageBackend):
         cursor = await self._connection.execute("SELECT id FROM workspaces")
         rows = await cursor.fetchall()
         return [row["id"] for row in rows]
+
+    async def search_memories_by_filter(
+        self,
+        workspace_id: str,
+        *,
+        subtypes: list[str] | None = None,
+        tags: list[str] | None = None,
+        metadata_filter: dict[str, str] | None = None,
+        status: str = "active",
+        context_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Memory]:
+        """Search memories by subtype, tags, and/or metadata without requiring embeddings."""
+        where_parts = ["workspace_id = ?", "deleted_at IS NULL"]
+        params: list = [workspace_id]
+
+        if context_id is not None:
+            where_parts.append("context_id = ?")
+            params.append(context_id)
+
+        if status:
+            where_parts.append("(status IS NULL OR status = ?)")
+            params.append(status)
+
+        if subtypes:
+            placeholders = ",".join("?" * len(subtypes))
+            where_parts.append(f"subtype IN ({placeholders})")
+            params.extend(subtypes)
+
+        if tags:
+            for tag in tags:
+                where_parts.append("tags LIKE ?")
+                params.append(f'%"{tag}"%')
+
+        if metadata_filter:
+            for key, value in metadata_filter.items():
+                where_parts.append("json_extract(metadata, ?) = ?")
+                params.append(f"$.{key}")
+                params.append(value)
+
+        where_clause = " AND ".join(where_parts)
+        query = f"SELECT * FROM memories WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_memory(row) for row in rows]
 
     async def search_memories(
         self,
@@ -1118,20 +1400,27 @@ class SQLiteStorageBackend(StorageBackend):
         query: str,
         limit: int = 10,
         offset: int = 0,
+        context_id: str | None = None,
     ) -> list[Memory]:
         """Full-text search using SQLite FTS5."""
-        cursor = await self._connection.execute(
-            """
+        sql = """
             SELECT m.*
             FROM memories m
                      INNER JOIN memories_fts fts ON m.id = fts.id
             WHERE fts.workspace_id = ?
               AND fts.content MATCH ?
               AND m.deleted_at IS NULL
-            LIMIT ? OFFSET ?
-            """,
-            (workspace_id, self._sanitize_fts5_query(query), limit, offset),
-        )
+        """
+        params: list = [workspace_id, self._sanitize_fts5_query(query)]
+
+        if context_id is not None:
+            sql += "  AND m.context_id = ?\n"
+            params.append(context_id)
+
+        sql += "LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await self._connection.execute(sql, params)
         rows = await cursor.fetchall()
 
         return [self._row_to_memory(row) for row in rows]
@@ -1298,6 +1587,83 @@ class SQLiteStorageBackend(StorageBackend):
         rows = await cursor.fetchall()
 
         return [self._row_to_association(row) for row in rows]
+
+    async def get_associations_batch(
+        self,
+        workspace_id: str,
+        memory_ids: list[str],
+        direction: str = "outgoing",
+        relationships: list[str] | None = None,
+    ) -> list[Association]:
+        """Get associations for multiple memories in a single query."""
+        if not memory_ids:
+            return []
+
+        where_parts = ["workspace_id = ?"]
+        params: list = [workspace_id]
+
+        # Build direction filter with IN clause for batch
+        placeholders = ",".join("?" * len(memory_ids))
+        if direction == "outgoing":
+            where_parts.append(f"source_id IN ({placeholders})")
+            params.extend(memory_ids)
+        elif direction == "incoming":
+            where_parts.append(f"target_id IN ({placeholders})")
+            params.extend(memory_ids)
+        else:  # both
+            where_parts.append(f"(source_id IN ({placeholders}) OR target_id IN ({placeholders}))")
+            params.extend(memory_ids)
+            params.extend(memory_ids)
+
+        if relationships:
+            rel_placeholders = ",".join("?" * len(relationships))
+            where_parts.append(f"relationship IN ({rel_placeholders})")
+            params.extend(relationships)
+
+        where_clause = " AND ".join(where_parts)
+        cursor = await self._connection.execute(
+            f"SELECT * FROM memory_associations WHERE {where_clause}",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_association(row) for row in rows]
+
+    async def delete_association(self, workspace_id: str, association_id: str) -> bool:
+        """Delete an association by ID."""
+        cursor = await self._connection.execute(
+            "DELETE FROM memory_associations WHERE id = ? AND workspace_id = ?",
+            (association_id, workspace_id),
+        )
+        await self._connection.commit()
+        return cursor.rowcount > 0
+
+    async def update_association(
+        self,
+        workspace_id: str,
+        association_id: str,
+        metadata: dict | None = None,
+        strength: float | None = None,
+    ) -> bool:
+        """Update an existing association's metadata and/or strength."""
+        set_parts = []
+        values = []
+
+        if metadata is not None:
+            set_parts.append("metadata = ?")
+            values.append(json.dumps(metadata))
+
+        if strength is not None:
+            set_parts.append("strength = ?")
+            values.append(strength)
+
+        if not set_parts:
+            return False
+
+        values.extend([association_id, workspace_id])
+        query = f"UPDATE memory_associations SET {', '.join(set_parts)} WHERE id = ? AND workspace_id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+        return cursor.rowcount > 0
 
     async def traverse_graph(
         self,
@@ -1469,6 +1835,33 @@ class SQLiteStorageBackend(StorageBackend):
         )
         rows = await cursor.fetchall()
         return [self._row_to_workspace(row) for row in rows]
+
+    async def update_workspace(self, workspace_id: str, **updates) -> Workspace | None:
+        """Update workspace fields."""
+        if not updates:
+            return await self.get_workspace(workspace_id)
+
+        set_parts = []
+        values = []
+        for key, value in updates.items():
+            if key == "settings":
+                set_parts.append(f"{key} = ?")
+                values.append(json.dumps(value))
+            else:
+                set_parts.append(f"{key} = ?")
+                values.append(value)
+
+        set_parts.append("updated_at = datetime('now')")
+        values.extend([workspace_id])
+
+        query = f"UPDATE workspaces SET {', '.join(set_parts)} WHERE id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+
+        if cursor.rowcount == 0:
+            return None
+
+        return await self.get_workspace(workspace_id)
 
     # Context operations (formerly Memory Space)
     async def create_context(self, workspace_id: str, context: Context) -> Context:
@@ -1939,7 +2332,7 @@ class SQLiteStorageBackend(StorageBackend):
             content=row["content"],
             content_hash=row["content_hash"],
             type=MemoryType(row["type"]),
-            subtype=MemorySubtype(row["subtype"]) if row["subtype"] else None,
+            subtype=row["subtype"] if row["subtype"] else None,
             category=row["category"] if "category" in row.keys() and row["category"] else None,
             importance=row["importance"],
             tags=json.loads(row["tags"]) if row["tags"] else [],
@@ -2040,8 +2433,8 @@ class SQLiteStorageBackend(StorageBackend):
                (id, workspace_id, tenant_id, user_id, context_id,
                 observer_id, subject_id, title, metadata,
                 message_count, last_decomposed_at, last_decomposed_index,
-                expires_at, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                expires_at, created_at, updated_at, scope)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 thread.id,
                 thread.workspace_id,
@@ -2058,6 +2451,7 @@ class SQLiteStorageBackend(StorageBackend):
                 thread.expires_at.isoformat() if thread.expires_at else None,
                 thread.created_at.isoformat(),
                 thread.updated_at.isoformat(),
+                thread.scope,
             ),
         )
         await self._connection.commit()
@@ -2079,24 +2473,32 @@ class SQLiteStorageBackend(StorageBackend):
         user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        scope_filter: str | None = None,
     ) -> list:
         now = utc_now_iso()
+        conditions = ["workspace_id = ?", "(expires_at IS NULL OR expires_at > ?)"]
+        params: list = [workspace_id, now]
+
         if user_id:
-            cursor = await self._connection.execute(
-                """SELECT * FROM chat_threads
-                   WHERE workspace_id = ? AND user_id = ?
-                     AND (expires_at IS NULL OR expires_at > ?)
-                   ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
-                (workspace_id, user_id, now, limit, offset),
-            )
-        else:
-            cursor = await self._connection.execute(
-                """SELECT * FROM chat_threads
-                   WHERE workspace_id = ?
-                     AND (expires_at IS NULL OR expires_at > ?)
-                   ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
-                (workspace_id, now, limit, offset),
-            )
+            conditions.append("user_id = ?")
+            params.append(user_id)
+
+        # scope_filter="web"  → rows where scope='web' OR scope IS NULL (NULL ≡ web)
+        # scope_filter="office" → rows where scope='office'
+        # scope_filter=None   → no scope restriction (return all)
+        if scope_filter == "web":
+            conditions.append("(scope = ? OR scope IS NULL)")
+            params.append("web")
+        elif scope_filter is not None:
+            conditions.append("scope = ?")
+            params.append(scope_filter)
+
+        where = " AND ".join(conditions)
+        params.extend([limit, offset])
+        cursor = await self._connection.execute(
+            f"SELECT * FROM chat_threads WHERE {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            params,
+        )
         rows = await cursor.fetchall()
         return [self._row_to_chat_thread(row) for row in rows]
 
@@ -2190,7 +2592,7 @@ class SQLiteStorageBackend(StorageBackend):
         now = utc_now_iso()
 
         for i, msg_input in enumerate(messages):
-            msg_id = generate_id("msg")
+            msg_id = msg_input.id or generate_id("msg")
             msg_index = current_count + i
             content = msg_input.content
             if not isinstance(content, str):
@@ -2270,8 +2672,22 @@ class SQLiteStorageBackend(StorageBackend):
         row = await cursor.fetchone()
         return row["message_count"] if row else 0
 
+    async def delete_message(self, workspace_id: str, thread_id: str, message_id: str) -> bool:
+        cursor = await self._connection.execute(
+            "DELETE FROM chat_messages WHERE id = ? AND thread_id = ? AND workspace_id = ?",
+            (message_id, thread_id, workspace_id),
+        )
+        await self._connection.commit()
+        return cursor.rowcount > 0
+
     def _row_to_chat_thread(self, row: aiosqlite.Row) -> "ChatThread":
         from ...models.chat import ChatThread
+
+        # scope: column may not exist in very old databases (pre-migration); default to None.
+        try:
+            scope = row["scope"]
+        except (IndexError, KeyError):
+            scope = None
 
         return ChatThread(
             id=row["id"],
@@ -2289,6 +2705,7 @@ class SQLiteStorageBackend(StorageBackend):
             expires_at=parse_datetime_utc(row["expires_at"]) if row["expires_at"] else None,
             created_at=parse_datetime_utc(row["created_at"]),
             updated_at=parse_datetime_utc(row["updated_at"]),
+            scope=scope,
         )
 
     def _row_to_chat_message(self, row: aiosqlite.Row) -> "ChatMessage":
@@ -2313,6 +2730,1220 @@ class SQLiteStorageBackend(StorageBackend):
             content=content,
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=parse_datetime_utc(row["created_at"]),
+        )
+
+
+    # ============================================
+    # Document Operations
+    # ============================================
+
+    async def create_document(self, workspace_id: str, doc: "Document") -> "Document":
+        """Store a new document record."""
+        from ...models.document import Document
+
+        await self._connection.execute(
+            """
+            INSERT INTO documents (
+                id, workspace_id, filename, document_type, content_hash, size_bytes,
+                mime_type, status, target_context_id, extraction_options,
+                page_count, chunk_count, memory_ids, deduplicated_count,
+                error_message, metadata, extracted_metadata,
+                created_at, processing_started_at, processing_completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                doc.id,
+                workspace_id,
+                doc.filename,
+                doc.document_type.value if hasattr(doc.document_type, "value") else doc.document_type,
+                doc.content_hash,
+                doc.size_bytes,
+                doc.mime_type,
+                doc.status.value if hasattr(doc.status, "value") else doc.status,
+                doc.target_context_id,
+                json.dumps(doc.extraction_options.model_dump() if doc.extraction_options else {}),
+                doc.page_count,
+                doc.chunk_count,
+                json.dumps(doc.memory_ids),
+                doc.deduplicated_count,
+                doc.error_message,
+                json.dumps(doc.metadata),
+                json.dumps(doc.extracted_metadata),
+                doc.created_at.isoformat() if doc.created_at else utc_now_iso(),
+                doc.processing_started_at.isoformat() if doc.processing_started_at else None,
+                doc.processing_completed_at.isoformat() if doc.processing_completed_at else None,
+            ),
+        )
+        await self._connection.commit()
+        self.logger.debug("Created document: %s in workspace: %s", doc.id, workspace_id)
+        return await self.get_document(workspace_id, doc.id)
+
+    async def get_document(self, workspace_id: str, doc_id: str) -> "Document | None":
+        """Get document by ID within a workspace."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM documents WHERE id = ? AND workspace_id = ?",
+            (doc_id, workspace_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return self._row_to_document(row)
+
+    async def list_documents(
+        self,
+        workspace_id: str,
+        status: str | None = None,
+        document_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list["Document"], int]:
+        """List documents in a workspace. Returns (documents, total_count)."""
+        where_parts = ["workspace_id = ?"]
+        params: list = [workspace_id]
+
+        if status is not None:
+            where_parts.append("status = ?")
+            params.append(status)
+
+        if document_type is not None:
+            where_parts.append("document_type = ?")
+            params.append(document_type)
+
+        where_clause = " AND ".join(where_parts)
+
+        # Get total count
+        count_cursor = await self._connection.execute(
+            f"SELECT COUNT(*) FROM documents WHERE {where_clause}", params
+        )
+        count_row = await count_cursor.fetchone()
+        total = count_row[0] if count_row else 0
+
+        # Get paginated results
+        query = f"SELECT * FROM documents WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_document(row) for row in rows], total
+
+    async def update_document(self, workspace_id: str, doc_id: str, **updates) -> "Document | None":
+        """Update document fields."""
+        if not updates:
+            return await self.get_document(workspace_id, doc_id)
+
+        set_parts = []
+        values = []
+        json_fields = {"extraction_options", "memory_ids", "metadata", "extracted_metadata"}
+        datetime_fields = {"created_at", "processing_started_at", "processing_completed_at"}
+
+        for key, value in updates.items():
+            set_parts.append(f"{key} = ?")
+            if key in json_fields:
+                if hasattr(value, "model_dump"):
+                    values.append(json.dumps(value.model_dump()))
+                else:
+                    values.append(json.dumps(value))
+            elif key in datetime_fields and isinstance(value, datetime):
+                values.append(value.isoformat())
+            elif key in ("status", "document_type") and hasattr(value, "value"):
+                values.append(value.value)
+            else:
+                values.append(value)
+
+        values.extend([doc_id, workspace_id])
+        query = f"UPDATE documents SET {', '.join(set_parts)} WHERE id = ? AND workspace_id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+
+        if cursor.rowcount == 0:
+            return None
+        return await self.get_document(workspace_id, doc_id)
+
+    async def delete_document(self, workspace_id: str, doc_id: str, delete_memories: bool = False) -> bool:
+        """Delete a document and optionally cascade to memories."""
+        if delete_memories:
+            cursor = await self._connection.execute(
+                "SELECT id FROM memories WHERE workspace_id = ? AND source_document_id = ? AND deleted_at IS NULL",
+                (workspace_id, doc_id),
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                await self._connection.execute(
+                    "UPDATE memories SET deleted_at = datetime('now'), status = 'deleted' WHERE id = ?",
+                    (row["id"],),
+                )
+                await self._connection.execute("DELETE FROM memories_fts WHERE id = ?", (row["id"],))
+            self.logger.debug("Soft-deleted %d memories for document: %s", len(rows), doc_id)
+
+        # Delete pages
+        await self._connection.execute("DELETE FROM document_pages WHERE document_id = ?", (doc_id,))
+
+        cursor = await self._connection.execute(
+            "DELETE FROM documents WHERE id = ? AND workspace_id = ?",
+            (doc_id, workspace_id),
+        )
+        await self._connection.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            self.logger.debug("Deleted document: %s", doc_id)
+        return deleted
+
+    async def find_document_by_hash(self, workspace_id: str, content_hash: str) -> "Document | None":
+        """Find document by content hash for deduplication."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM documents WHERE workspace_id = ? AND content_hash = ? LIMIT 1",
+            (workspace_id, content_hash),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_document(row) if row else None
+
+    async def get_document_memories(self, workspace_id: str, doc_id: str) -> list[Memory]:
+        """Get all memories created from a document."""
+        cursor = await self._connection.execute(
+            """
+            SELECT * FROM memories
+            WHERE workspace_id = ? AND source_document_id = ? AND deleted_at IS NULL
+            ORDER BY created_at ASC
+            """,
+            (workspace_id, doc_id),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_memory(row) for row in rows]
+
+    def _row_to_document(self, row: aiosqlite.Row) -> "Document":
+        """Convert database row to Document domain model."""
+        from ...models.document import Document, DocumentExtractionOptions, DocumentStatus, DocumentType
+
+        raw_opts = row["extraction_options"]
+        try:
+            opts_dict = json.loads(raw_opts) if raw_opts else {}
+            extraction_options = DocumentExtractionOptions(**opts_dict)
+        except Exception:
+            extraction_options = DocumentExtractionOptions()
+
+        return Document(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            filename=row["filename"],
+            document_type=DocumentType(row["document_type"]),
+            content_hash=row["content_hash"],
+            size_bytes=row["size_bytes"],
+            mime_type=row["mime_type"],
+            status=DocumentStatus(row["status"]) if row["status"] else DocumentStatus.PENDING,
+            target_context_id=row["target_context_id"] or "_default",
+            extraction_options=extraction_options,
+            page_count=row["page_count"] or 0,
+            chunk_count=row["chunk_count"] or 0,
+            memory_ids=json.loads(row["memory_ids"]) if row["memory_ids"] else [],
+            deduplicated_count=row["deduplicated_count"] or 0,
+            error_message=row["error_message"],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            extracted_metadata=json.loads(row["extracted_metadata"]) if row["extracted_metadata"] else {},
+            created_at=parse_datetime_utc(row["created_at"]),
+            processing_started_at=parse_datetime_utc(row["processing_started_at"]) if row["processing_started_at"] else None,
+            processing_completed_at=parse_datetime_utc(row["processing_completed_at"]) if row["processing_completed_at"] else None,
+        )
+
+    # ============================================
+    # Document Page Operations
+    # ============================================
+
+    async def create_page(self, workspace_id: str, document_id: str, page: "DocumentPage") -> "DocumentPage":
+        """Store a document page."""
+        from ...models.document import DocumentPage
+        from ...utils import generate_id
+
+        page_id = page.id or generate_id("page")
+        now = utc_now_iso()
+
+        await self._connection.execute(
+            """
+            INSERT INTO document_pages (id, document_id, workspace_id, page_no, transcript,
+                multivector, transcript_model, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                page_id,
+                document_id,
+                workspace_id,
+                page.page_no,
+                page.transcript,
+                json.dumps(page.multivector) if page.multivector is not None else None,
+                page.transcript_model,
+                json.dumps(page.metadata),
+                page.created_at.isoformat() if page.created_at else now,
+            ),
+        )
+        await self._connection.commit()
+        self.logger.debug("Created page %d for document: %s", page.page_no, document_id)
+        return await self.get_page(page_id)
+
+    async def get_pages(self, document_id: str, workspace_id: str | None = None) -> list["DocumentPage"]:
+        """Get all pages for a document, ordered by page_no."""
+        if workspace_id is not None:
+            cursor = await self._connection.execute(
+                "SELECT * FROM document_pages WHERE document_id = ? AND workspace_id = ? ORDER BY page_no ASC",
+                (document_id, workspace_id),
+            )
+        else:
+            cursor = await self._connection.execute(
+                "SELECT * FROM document_pages WHERE document_id = ? ORDER BY page_no ASC",
+                (document_id,),
+            )
+        rows = await cursor.fetchall()
+        return [self._row_to_document_page(row) for row in rows]
+
+    async def get_page(self, page_id: str) -> "DocumentPage | None":
+        """Get a single page by ID."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM document_pages WHERE id = ?",
+            (page_id,),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_document_page(row) if row else None
+
+    async def update_page(self, page_id: str, **updates) -> "DocumentPage | None":
+        """Update page fields (transcript, embedding, etc.)."""
+        if not updates:
+            return await self.get_page(page_id)
+
+        set_parts = []
+        values = []
+        json_fields = {"multivector", "metadata"}
+
+        for key, value in updates.items():
+            set_parts.append(f"{key} = ?")
+            if key in json_fields:
+                values.append(json.dumps(value) if value is not None else None)
+            else:
+                values.append(value)
+
+        values.append(page_id)
+        query = f"UPDATE document_pages SET {', '.join(set_parts)} WHERE id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+
+        if cursor.rowcount == 0:
+            return None
+        return await self.get_page(page_id)
+
+    def _row_to_document_page(self, row: aiosqlite.Row) -> "DocumentPage":
+        """Convert database row to DocumentPage domain model."""
+        from ...models.document import DocumentPage
+
+        return DocumentPage(
+            id=row["id"],
+            document_id=row["document_id"],
+            workspace_id=row["workspace_id"],
+            page_no=row["page_no"],
+            transcript=row["transcript"],
+            multivector=json.loads(row["multivector"]) if row["multivector"] else None,
+            transcript_model=row["transcript_model"],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=parse_datetime_utc(row["created_at"]) if row["created_at"] else None,
+        )
+
+    async def search_pages_by_maxsim(
+        self,
+        workspace_id: str,
+        query_multivector: list[list[float]],
+        limit: int = 10,
+        doc_ids: list[str] | None = None,
+    ) -> list[tuple["DocumentPage", float]]:
+        """Score pages in Python after a filtered fetch.
+
+        SQLite has no native MaxSim, so candidate pages are loaded, then ``maxsim_score`` from
+        ``services.embedding._maxsim`` is applied per page. Suitable for workspaces with tens to a few thousand multi-vector pages; larger
+        deployments should use enterprise.
+        """
+        from ..embedding._maxsim import MultiVectorEmbedding, maxsim_score
+
+        sql = (
+            "SELECT * FROM document_pages "
+            "WHERE workspace_id = ? AND multivector IS NOT NULL"
+        )
+        params: list[object] = [workspace_id]
+
+        if doc_ids:
+            placeholders = ",".join("?" for _ in doc_ids)
+            sql += f" AND document_id IN ({placeholders})"
+            params.extend(doc_ids)
+
+        cursor = await self._connection.execute(sql, params)
+        rows = await cursor.fetchall()
+
+        if not rows:
+            return []
+
+        query_embedding = MultiVectorEmbedding(vectors=query_multivector)
+
+        scored: list[tuple[DocumentPage, float]] = []
+        for row in rows:
+            page = self._row_to_document_page(row)
+            if not page.multivector:
+                continue
+            try:
+                score = maxsim_score(
+                    query_embedding,
+                    MultiVectorEmbedding(vectors=page.multivector),
+                )
+            except Exception:
+                self.logger.debug(
+                    "MaxSim scoring failed for page %s; skipping", page.id, exc_info=True,
+                )
+                continue
+            scored.append((page, score))
+
+        scored.sort(key=lambda item: item[1], reverse=True)
+        return scored[:limit]
+
+    # ============================================
+    # Ingestion Job Operations
+    # ============================================
+
+    async def create_job(self, job: "IngestionJob") -> "IngestionJob":
+        """Store an ingestion job."""
+        await self._connection.execute(
+            """
+            INSERT INTO ingestion_jobs (id, workspace_id, document_ids, status,
+                progress_percent, documents_processed, total_memories_created,
+                errors, metadata, created_at, started_at, completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                job.id,
+                job.workspace_id,
+                json.dumps(job.document_ids),
+                job.status.value if hasattr(job.status, "value") else job.status,
+                job.progress_percent,
+                job.documents_processed,
+                job.total_memories_created,
+                json.dumps(job.errors),
+                json.dumps(job.metadata),
+                job.created_at.isoformat() if job.created_at else utc_now_iso(),
+                job.started_at.isoformat() if job.started_at else None,
+                job.completed_at.isoformat() if job.completed_at else None,
+            ),
+        )
+        await self._connection.commit()
+        self.logger.debug("Created ingestion job: %s in workspace: %s", job.id, job.workspace_id)
+        return await self.get_job(job.id)
+
+    async def get_job(self, job_id: str, workspace_id: str | None = None) -> "IngestionJob | None":
+        """Get ingestion job by ID."""
+        if workspace_id is not None:
+            cursor = await self._connection.execute(
+                "SELECT * FROM ingestion_jobs WHERE id = ? AND workspace_id = ?",
+                (job_id, workspace_id),
+            )
+        else:
+            cursor = await self._connection.execute(
+                "SELECT * FROM ingestion_jobs WHERE id = ?",
+                (job_id,),
+            )
+        row = await cursor.fetchone()
+        return self._row_to_ingestion_job(row) if row else None
+
+    async def list_jobs(
+        self,
+        workspace_id: str,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list["IngestionJob"]:
+        """List ingestion jobs for a workspace."""
+        where_parts = ["workspace_id = ?"]
+        params: list = [workspace_id]
+
+        if status is not None:
+            where_parts.append("status = ?")
+            params.append(status)
+
+        where_clause = " AND ".join(where_parts)
+        query = f"SELECT * FROM ingestion_jobs WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_ingestion_job(row) for row in rows]
+
+    async def update_job(self, job_id: str, **updates) -> "IngestionJob | None":
+        """Update ingestion job fields (status, progress, etc.)."""
+        if not updates:
+            return await self.get_job(job_id)
+
+        set_parts = []
+        values = []
+        json_fields = {"document_ids", "errors", "metadata"}
+        datetime_fields = {"created_at", "started_at", "completed_at"}
+
+        for key, value in updates.items():
+            set_parts.append(f"{key} = ?")
+            if key in json_fields:
+                values.append(json.dumps(value))
+            elif key in datetime_fields and isinstance(value, datetime):
+                values.append(value.isoformat())
+            elif key == "status" and hasattr(value, "value"):
+                values.append(value.value)
+            else:
+                values.append(value)
+
+        values.append(job_id)
+        query = f"UPDATE ingestion_jobs SET {', '.join(set_parts)} WHERE id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+
+        if cursor.rowcount == 0:
+            return None
+        return await self.get_job(job_id)
+
+    def _row_to_ingestion_job(self, row: aiosqlite.Row) -> "IngestionJob":
+        """Convert database row to IngestionJob domain model."""
+        from ...models.document import IngestionJob, JobStatus
+
+        return IngestionJob(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            document_ids=json.loads(row["document_ids"]) if row["document_ids"] else [],
+            status=JobStatus(row["status"]) if row["status"] else JobStatus.QUEUED,
+            progress_percent=row["progress_percent"] or 0,
+            documents_processed=row["documents_processed"] or 0,
+            total_memories_created=row["total_memories_created"] or 0,
+            errors=json.loads(row["errors"]) if row["errors"] else [],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=parse_datetime_utc(row["created_at"]),
+            started_at=parse_datetime_utc(row["started_at"]) if row["started_at"] else None,
+            completed_at=parse_datetime_utc(row["completed_at"]) if row["completed_at"] else None,
+        )
+
+    # ============================================
+    # Data Provider Operations
+    # ============================================
+
+    async def create_data_provider(self, workspace_id: str, provider: "DataProvider") -> "DataProvider":
+        """Store a data provider."""
+        await self._connection.execute(
+            """
+            INSERT INTO data_providers (id, workspace_id, name, provider_type, description,
+                enabled, connection_args, schedule, last_sync_at, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                provider.id,
+                workspace_id,
+                provider.name,
+                provider.provider_type.value if hasattr(provider.provider_type, "value") else provider.provider_type,
+                provider.description,
+                1 if provider.enabled else 0,
+                json.dumps(provider.connection_args),
+                provider.schedule,
+                provider.last_sync_at.isoformat() if provider.last_sync_at else None,
+                json.dumps(provider.metadata),
+                provider.created_at.isoformat() if provider.created_at else utc_now_iso(),
+                provider.updated_at.isoformat() if provider.updated_at else utc_now_iso(),
+            ),
+        )
+        await self._connection.commit()
+        self.logger.debug("Created data provider: %s in workspace: %s", provider.id, workspace_id)
+        return await self.get_data_provider(workspace_id, provider.id)
+
+    async def get_data_provider(self, workspace_id: str, provider_id: str) -> "DataProvider | None":
+        """Get data provider by ID."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM data_providers WHERE id = ? AND workspace_id = ?",
+            (provider_id, workspace_id),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_data_provider(row) if row else None
+
+    async def list_data_providers(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list["DataProvider"], int]:
+        """List data providers for a workspace. Returns (providers, total_count)."""
+        count_cursor = await self._connection.execute(
+            "SELECT COUNT(*) as count FROM data_providers WHERE workspace_id = ?",
+            (workspace_id,),
+        )
+        count_row = await count_cursor.fetchone()
+        total = count_row["count"] if count_row else 0
+
+        cursor = await self._connection.execute(
+            "SELECT * FROM data_providers WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (workspace_id, limit, offset),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_data_provider(row) for row in rows], total
+
+    async def update_data_provider(self, workspace_id: str, provider_id: str, **updates) -> "DataProvider | None":
+        """Update data provider fields."""
+        if not updates:
+            return await self.get_data_provider(workspace_id, provider_id)
+
+        set_parts = []
+        values = []
+        json_fields = {"connection_args", "metadata"}
+
+        for key, value in updates.items():
+            set_parts.append(f"{key} = ?")
+            if key in json_fields:
+                values.append(json.dumps(value))
+            elif key == "enabled":
+                values.append(1 if value else 0)
+            elif key in ("last_sync_at", "created_at", "updated_at") and isinstance(value, datetime):
+                values.append(value.isoformat())
+            elif key == "provider_type" and hasattr(value, "value"):
+                values.append(value.value)
+            else:
+                values.append(value)
+
+        set_parts.append("updated_at = ?")
+        values.append(utc_now_iso())
+        values.extend([provider_id, workspace_id])
+
+        query = f"UPDATE data_providers SET {', '.join(set_parts)} WHERE id = ? AND workspace_id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+
+        if cursor.rowcount == 0:
+            return None
+        return await self.get_data_provider(workspace_id, provider_id)
+
+    async def delete_data_provider(self, workspace_id: str, provider_id: str) -> bool:
+        """Delete a data provider."""
+        cursor = await self._connection.execute(
+            "DELETE FROM data_providers WHERE id = ? AND workspace_id = ?",
+            (provider_id, workspace_id),
+        )
+        await self._connection.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            self.logger.debug("Deleted data provider: %s", provider_id)
+        return deleted
+
+    def _row_to_data_provider(self, row: aiosqlite.Row) -> "DataProvider":
+        """Convert database row to DataProvider domain model."""
+        from ...models.data_provider import DataProvider
+
+        return DataProvider(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            name=row["name"],
+            provider_type=row["provider_type"],
+            description=row["description"],
+            enabled=bool(row["enabled"]) if row["enabled"] is not None else True,
+            connection_args=json.loads(row["connection_args"]) if row["connection_args"] else {},
+            schedule=row["schedule"],
+            last_sync_at=parse_datetime_utc(row["last_sync_at"]) if row["last_sync_at"] else None,
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=parse_datetime_utc(row["created_at"]),
+            updated_at=parse_datetime_utc(row["updated_at"]),
+        )
+
+    # ============================================
+    # Knowledgebase Article Operations
+    # ============================================
+
+    async def store_kb_article(
+        self,
+        workspace_id: str,
+        article_id: str,
+        article_type: str,
+        title: str,
+        content_md: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Store a knowledgebase article (upsert)."""
+        now = utc_now_iso()
+        await self._connection.execute(
+            """
+            INSERT INTO knowledgebase_articles
+                (workspace_id, article_id, article_type, title, content_md, metadata, generated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id, article_id) DO UPDATE SET
+                article_type = excluded.article_type,
+                title = excluded.title,
+                content_md = excluded.content_md,
+                metadata = excluded.metadata,
+                generated_at = excluded.generated_at
+            """,
+            (
+                workspace_id,
+                article_id,
+                article_type,
+                title,
+                content_md,
+                json.dumps(metadata or {}),
+                now,
+            ),
+        )
+        await self._connection.commit()
+        self.logger.debug("Stored KB article: %s in workspace: %s", article_id, workspace_id)
+        return await self.get_kb_article(workspace_id, article_id)
+
+    async def get_kb_article(self, workspace_id: str, article_id: str) -> dict | None:
+        """Get a knowledgebase article by ID."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM knowledgebase_articles WHERE workspace_id = ? AND article_id = ?",
+            (workspace_id, article_id),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_kb_article(row) if row else None
+
+    async def list_kb_articles(
+        self,
+        workspace_id: str,
+        article_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List knowledgebase articles for a workspace."""
+        where_parts = ["workspace_id = ?"]
+        params: list = [workspace_id]
+
+        if article_type is not None:
+            where_parts.append("article_type = ?")
+            params.append(article_type)
+
+        where_clause = " AND ".join(where_parts)
+        query = f"SELECT * FROM knowledgebase_articles WHERE {where_clause} ORDER BY generated_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_kb_article(row) for row in rows]
+
+    async def delete_kb_articles(self, workspace_id: str) -> int:
+        """Delete all knowledgebase articles for a workspace (for regeneration)."""
+        cursor = await self._connection.execute(
+            "DELETE FROM knowledgebase_articles WHERE workspace_id = ?",
+            (workspace_id,),
+        )
+        await self._connection.commit()
+        count = cursor.rowcount
+        self.logger.debug("Deleted %d KB articles for workspace: %s", count, workspace_id)
+        return count
+
+    def _row_to_kb_article(self, row: aiosqlite.Row) -> dict:
+        """Convert database row to knowledgebase article dict."""
+        return {
+            "workspace_id": row["workspace_id"],
+            "article_id": row["article_id"],
+            "article_type": row["article_type"],
+            "title": row["title"],
+            "content_md": row["content_md"],
+            "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+            "generated_at": row["generated_at"],
+        }
+
+    # ============================================
+    # Graph Analysis Operations
+    # ============================================
+
+    async def store_graph_analysis(self, workspace_id: str, analysis_json: dict) -> dict:
+        """Cache a graph analysis result (upsert)."""
+        now = utc_now_iso()
+        await self._connection.execute(
+            """
+            INSERT INTO graph_analyses (workspace_id, analysis_json, generated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(workspace_id) DO UPDATE SET
+                analysis_json = excluded.analysis_json,
+                generated_at = excluded.generated_at
+            """,
+            (workspace_id, json.dumps(analysis_json), now),
+        )
+        await self._connection.commit()
+        self.logger.debug("Stored graph analysis for workspace: %s", workspace_id)
+        return {"workspace_id": workspace_id, "analysis_json": analysis_json, "generated_at": now}
+
+    async def get_graph_analysis(self, workspace_id: str) -> dict | None:
+        """Get cached graph analysis for a workspace."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM graph_analyses WHERE workspace_id = ?",
+            (workspace_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        try:
+            analysis_json = json.loads(row["analysis_json"]) if row["analysis_json"] else {}
+        except (json.JSONDecodeError, TypeError):
+            analysis_json = {}
+        return {
+            "workspace_id": row["workspace_id"],
+            "analysis_json": analysis_json,
+            "generated_at": row["generated_at"],
+        }
+
+
+    # ============================================
+    # Skill Operations
+    # ============================================
+
+    async def create_skill(self, skill: "Skill") -> "Skill":
+        """Store a new skill."""
+        await self._connection.execute(
+            """
+            INSERT INTO skills (id, tenant_id, workspace_id, user_id, name, description, version,
+                license, compatibility, allowed_tools, body, metadata, source_mode,
+                manifest_hash, bundle_hash, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                skill.id,
+                skill.tenant_id,
+                skill.workspace_id,
+                skill.user_id,
+                skill.name,
+                skill.description,
+                skill.version,
+                skill.license,
+                skill.compatibility,
+                skill.allowed_tools,
+                skill.body,
+                json.dumps(skill.metadata),
+                skill.source_mode,
+                skill.manifest_hash,
+                skill.bundle_hash,
+                1 if skill.enabled else 0,
+                skill.created_at.isoformat() if skill.created_at else utc_now_iso(),
+                skill.updated_at.isoformat() if skill.updated_at else utc_now_iso(),
+            ),
+        )
+        await self._connection.commit()
+        self.logger.debug("Created skill: %s in workspace: %s", skill.id, skill.workspace_id)
+        return await self.get_skill(skill.workspace_id, skill.id)
+
+    async def get_skill(self, workspace_id: str, skill_id: str) -> "Skill | None":
+        """Get skill by ID within a workspace."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM skills WHERE id = ? AND workspace_id = ?",
+            (skill_id, workspace_id),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_skill(row) if row else None
+
+    async def get_skill_by_name(
+        self, workspace_id: str, name: str, user_id: str | None = None
+    ) -> "Skill | None":
+        """Get skill by name within a workspace, optionally scoped to a user."""
+        if user_id is not None:
+            cursor = await self._connection.execute(
+                "SELECT * FROM skills WHERE workspace_id = ? AND name = ? AND user_id = ?",
+                (workspace_id, name, user_id),
+            )
+        else:
+            cursor = await self._connection.execute(
+                "SELECT * FROM skills WHERE workspace_id = ? AND name = ? AND user_id IS NULL",
+                (workspace_id, name),
+            )
+        row = await cursor.fetchone()
+        return self._row_to_skill(row) if row else None
+
+    async def list_skills(
+        self,
+        workspace_id: str,
+        user_id: str | None = None,
+        name: str | None = None,
+        tags: list[str] | None = None,
+        enabled: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list["Skill"]:
+        """List skills for a workspace with optional filters."""
+        where_parts = ["workspace_id = ?"]
+        params: list = [workspace_id]
+
+        if user_id is not None:
+            where_parts.append("user_id = ?")
+            params.append(user_id)
+        if name is not None:
+            where_parts.append("name = ?")
+            params.append(name)
+        if enabled is not None:
+            where_parts.append("enabled = ?")
+            params.append(1 if enabled else 0)
+
+        where_clause = " AND ".join(where_parts)
+        query = f"SELECT * FROM skills WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_skill(row) for row in rows]
+
+    async def find_skills_by_name(self, name: str, scope_filters: list[dict]) -> list["Skill"]:
+        """Find skills by name across multiple scope filters for resolution.
+
+        Each filter dict has workspace_id and optional user_id keys.
+        Returns all matches; the resolution service handles precedence ordering.
+        """
+        if not scope_filters:
+            return []
+
+        conditions = []
+        params: list = [name]
+        for sf in scope_filters:
+            ws = sf.get("workspace_id")
+            uid = sf.get("user_id")
+            if uid is not None:
+                conditions.append("(workspace_id = ? AND user_id = ?)")
+                params.extend([ws, uid])
+            else:
+                conditions.append("(workspace_id = ? AND user_id IS NULL)")
+                params.append(ws)
+
+        where_clause = f"name = ? AND ({' OR '.join(conditions)})"
+        query = f"SELECT * FROM skills WHERE {where_clause} ORDER BY updated_at DESC"
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_skill(row) for row in rows]
+
+    async def update_skill(self, workspace_id: str, skill_id: str, updates: dict) -> "Skill | None":
+        """Update skill fields."""
+        if not updates:
+            return await self.get_skill(workspace_id, skill_id)
+
+        set_parts = []
+        values = []
+        json_fields = {"metadata"}
+
+        for key, value in updates.items():
+            set_parts.append(f"{key} = ?")
+            if key in json_fields:
+                values.append(json.dumps(value))
+            elif key == "enabled":
+                values.append(1 if value else 0)
+            elif key in ("created_at", "updated_at") and isinstance(value, datetime):
+                values.append(value.isoformat())
+            else:
+                values.append(value)
+
+        set_parts.append("updated_at = ?")
+        values.append(utc_now_iso())
+        values.extend([skill_id, workspace_id])
+
+        query = f"UPDATE skills SET {', '.join(set_parts)} WHERE id = ? AND workspace_id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+
+        if cursor.rowcount == 0:
+            return None
+        return await self.get_skill(workspace_id, skill_id)
+
+    async def delete_skill(self, workspace_id: str, skill_id: str) -> bool:
+        """Delete a skill and cascade to skill_files via FK constraint."""
+        cursor = await self._connection.execute(
+            "DELETE FROM skills WHERE id = ? AND workspace_id = ?",
+            (skill_id, workspace_id),
+        )
+        await self._connection.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            self.logger.debug("Deleted skill: %s", skill_id)
+        return deleted
+
+    async def upsert_skill_file(self, skill_file: "SkillFile") -> "SkillFile":
+        """Insert or update a skill file by (skill_id, path)."""
+        now = utc_now_iso()
+        await self._connection.execute(
+            """
+            INSERT INTO skill_files (id, skill_id, path, kind, content, content_hash,
+                size_bytes, mime_type, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(skill_id, path) DO UPDATE SET
+                id = excluded.id,
+                kind = excluded.kind,
+                content = excluded.content,
+                content_hash = excluded.content_hash,
+                size_bytes = excluded.size_bytes,
+                mime_type = excluded.mime_type,
+                updated_at = excluded.updated_at
+            """,
+            (
+                skill_file.id,
+                skill_file.skill_id,
+                skill_file.path,
+                skill_file.kind,
+                skill_file.content,
+                skill_file.content_hash,
+                skill_file.size_bytes,
+                skill_file.mime_type,
+                skill_file.created_at.isoformat() if skill_file.created_at else now,
+                skill_file.updated_at.isoformat() if skill_file.updated_at else now,
+            ),
+        )
+        await self._connection.commit()
+        return await self.get_skill_file(skill_file.skill_id, skill_file.path)
+
+    async def get_skill_file(self, skill_id: str, path: str) -> "SkillFile | None":
+        """Get a skill file by skill_id and path."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM skill_files WHERE skill_id = ? AND path = ?",
+            (skill_id, path),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_skill_file(row) if row else None
+
+    async def list_skill_files(self, skill_id: str) -> list["SkillFile"]:
+        """List all files in a skill bundle ordered by path."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM skill_files WHERE skill_id = ? ORDER BY path",
+            (skill_id,),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_skill_file(row) for row in rows]
+
+    async def delete_skill_file(self, skill_id: str, path: str) -> bool:
+        """Delete a single skill file by path."""
+        cursor = await self._connection.execute(
+            "DELETE FROM skill_files WHERE skill_id = ? AND path = ?",
+            (skill_id, path),
+        )
+        await self._connection.commit()
+        return cursor.rowcount > 0
+
+    def _row_to_skill(self, row: aiosqlite.Row) -> "Skill":
+        """Convert database row to Skill domain model."""
+        from ...models.skill import Skill
+
+        return Skill(
+            id=row["id"],
+            tenant_id=row["tenant_id"] or "",
+            workspace_id=row["workspace_id"],
+            user_id=row["user_id"],
+            name=row["name"],
+            description=row["description"],
+            version=row["version"],
+            license=row["license"],
+            compatibility=row["compatibility"],
+            allowed_tools=row["allowed_tools"],
+            body=row["body"] or "",
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            source_mode=row["source_mode"],
+            manifest_hash=row["manifest_hash"] or "",
+            bundle_hash=row["bundle_hash"] or "",
+            enabled=bool(row["enabled"]) if row["enabled"] is not None else True,
+            created_at=parse_datetime_utc(row["created_at"]),
+            updated_at=parse_datetime_utc(row["updated_at"]),
+        )
+
+    def _row_to_skill_file(self, row: aiosqlite.Row) -> "SkillFile":
+        """Convert database row to SkillFile domain model."""
+        from ...models.skill import SkillFile
+
+        return SkillFile(
+            id=row["id"],
+            skill_id=row["skill_id"],
+            path=row["path"],
+            kind=row["kind"],
+            content=bytes(row["content"]) if row["content"] is not None else b"",
+            content_hash=row["content_hash"],
+            size_bytes=row["size_bytes"],
+            mime_type=row["mime_type"],
+            created_at=parse_datetime_utc(row["created_at"]),
+            updated_at=parse_datetime_utc(row["updated_at"]),
+        )
+
+
+    # ============================================
+    # MCP Server Operations
+    # ============================================
+
+    async def create_mcp_server(self, server: "McpServer") -> "McpServer":
+        """Store a new MCP server record."""
+        await self._connection.execute(
+            """
+            INSERT INTO mcp_servers (id, tenant_id, workspace_id, user_id, name, description,
+                transport, command, args, env, url, headers, metadata, source_mode,
+                manifest_hash, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                server.id,
+                server.tenant_id,
+                server.workspace_id,
+                server.user_id,
+                server.name,
+                server.description,
+                server.transport,
+                server.command,
+                json.dumps(server.args),
+                json.dumps(server.env),
+                server.url,
+                json.dumps(server.headers),
+                json.dumps(server.metadata),
+                server.source_mode,
+                server.manifest_hash,
+                1 if server.enabled else 0,
+                server.created_at.isoformat() if server.created_at else utc_now_iso(),
+                server.updated_at.isoformat() if server.updated_at else utc_now_iso(),
+            ),
+        )
+        await self._connection.commit()
+        self.logger.debug("Created MCP server: %s in workspace: %s", server.id, server.workspace_id)
+        return await self.get_mcp_server(server.workspace_id, server.id)
+
+    async def get_mcp_server(self, workspace_id: str, server_id: str) -> "McpServer | None":
+        """Get MCP server by ID within a workspace."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM mcp_servers WHERE id = ? AND workspace_id = ?",
+            (server_id, workspace_id),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_mcp_server(row) if row else None
+
+    async def get_mcp_server_by_name(
+        self, workspace_id: str, name: str, user_id: str | None = None
+    ) -> "McpServer | None":
+        """Get MCP server by name within a workspace, optionally scoped to a user."""
+        if user_id is not None:
+            cursor = await self._connection.execute(
+                "SELECT * FROM mcp_servers WHERE workspace_id = ? AND name = ? AND user_id = ?",
+                (workspace_id, name, user_id),
+            )
+        else:
+            cursor = await self._connection.execute(
+                "SELECT * FROM mcp_servers WHERE workspace_id = ? AND name = ? AND user_id IS NULL",
+                (workspace_id, name),
+            )
+        row = await cursor.fetchone()
+        return self._row_to_mcp_server(row) if row else None
+
+    async def list_mcp_servers(
+        self,
+        workspace_id: str,
+        user_id: str | None = None,
+        name: str | None = None,
+        transport: str | None = None,
+        enabled: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list["McpServer"]:
+        """List MCP servers for a workspace with optional filters."""
+        where_parts = ["workspace_id = ?"]
+        params: list = [workspace_id]
+
+        if user_id is not None:
+            where_parts.append("user_id = ?")
+            params.append(user_id)
+        if name is not None:
+            where_parts.append("name = ?")
+            params.append(name)
+        if transport is not None:
+            where_parts.append("transport = ?")
+            params.append(transport)
+        if enabled is not None:
+            where_parts.append("enabled = ?")
+            params.append(1 if enabled else 0)
+
+        where_clause = " AND ".join(where_parts)
+        query = f"SELECT * FROM mcp_servers WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_mcp_server(row) for row in rows]
+
+    async def find_mcp_servers_by_name(self, name: str, scope_filters: list[dict]) -> list["McpServer"]:
+        """Find MCP servers by name across multiple scope filters for resolution.
+
+        Each filter dict has workspace_id and optional user_id keys.
+        Returns all matches; the resolution service handles precedence ordering.
+        """
+        if not scope_filters:
+            return []
+
+        conditions = []
+        params: list = [name]
+        for sf in scope_filters:
+            ws = sf.get("workspace_id")
+            uid = sf.get("user_id")
+            if uid is not None:
+                conditions.append("(workspace_id = ? AND user_id = ?)")
+                params.extend([ws, uid])
+            else:
+                conditions.append("(workspace_id = ? AND user_id IS NULL)")
+                params.append(ws)
+
+        where_clause = f"name = ? AND ({' OR '.join(conditions)})"
+        query = f"SELECT * FROM mcp_servers WHERE {where_clause} ORDER BY updated_at DESC"
+        cursor = await self._connection.execute(query, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_mcp_server(row) for row in rows]
+
+    async def update_mcp_server(
+        self, workspace_id: str, server_id: str, updates: dict
+    ) -> "McpServer | None":
+        """Update MCP server fields."""
+        if not updates:
+            return await self.get_mcp_server(workspace_id, server_id)
+
+        set_parts = []
+        values = []
+        json_fields = {"args", "env", "headers", "metadata"}
+
+        for key, value in updates.items():
+            set_parts.append(f"{key} = ?")
+            if key in json_fields:
+                values.append(json.dumps(value))
+            elif key == "enabled":
+                values.append(1 if value else 0)
+            elif key in ("created_at", "updated_at") and isinstance(value, datetime):
+                values.append(value.isoformat())
+            else:
+                values.append(value)
+
+        set_parts.append("updated_at = ?")
+        values.append(utc_now_iso())
+        values.extend([server_id, workspace_id])
+
+        query = f"UPDATE mcp_servers SET {', '.join(set_parts)} WHERE id = ? AND workspace_id = ?"
+        cursor = await self._connection.execute(query, values)
+        await self._connection.commit()
+
+        if cursor.rowcount == 0:
+            return None
+        return await self.get_mcp_server(workspace_id, server_id)
+
+    async def delete_mcp_server(self, workspace_id: str, server_id: str) -> bool:
+        """Delete an MCP server record."""
+        cursor = await self._connection.execute(
+            "DELETE FROM mcp_servers WHERE id = ? AND workspace_id = ?",
+            (server_id, workspace_id),
+        )
+        await self._connection.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            self.logger.debug("Deleted MCP server: %s", server_id)
+        return deleted
+
+    def _row_to_mcp_server(self, row: aiosqlite.Row) -> "McpServer":
+        """Convert database row to McpServer domain model."""
+        from ...models.mcp_server import McpServer
+
+        return McpServer(
+            id=row["id"],
+            tenant_id=row["tenant_id"] or "_default",
+            workspace_id=row["workspace_id"],
+            user_id=row["user_id"],
+            name=row["name"],
+            description=row["description"],
+            transport=row["transport"],
+            command=row["command"],
+            args=json.loads(row["args"]) if row["args"] else [],
+            env=json.loads(row["env"]) if row["env"] else {},
+            url=row["url"],
+            headers=json.loads(row["headers"]) if row["headers"] else {},
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            source_mode=row["source_mode"],
+            manifest_hash=row["manifest_hash"] or "",
+            enabled=bool(row["enabled"]) if row["enabled"] is not None else True,
+            created_at=parse_datetime_utc(row["created_at"]),
+            updated_at=parse_datetime_utc(row["updated_at"]),
         )
 
 

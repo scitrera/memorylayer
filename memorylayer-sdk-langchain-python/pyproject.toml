@@ -1,12 +1,12 @@
 [project]
 name = "memorylayer-langchain"
-version = "0.0.5"
+version = "0.1.22"
 description = "LangChain memory integration for MemoryLayer.ai - persistent memory for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache 2.0" }
 authors = [
-    { name = "Scitrera", email = "open-source-team@scitrera.com" }
+    { name = "scitrera.ai", email = "open-source-team@scitrera.com" }
 ]
 keywords = ["ai", "memory", "agents", "llm", "langchain", "memorylayer"]
 classifiers = [
@@ -18,11 +18,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "memorylayer-client>=0.0.1",
+    "memorylayer-client==0.1.22",
     "langchain-core>=0.3.0",
     "langchain>=0.3.0",
     "httpx>=0.24.0",
-    "pydantic>=2.0.0",
+    "pydantic==2.13.4",
 ]
 
 [project.optional-dependencies]

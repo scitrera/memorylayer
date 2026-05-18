@@ -1,15 +1,111 @@
 # Authoritative Versions for all MemoryLayer packages
 # scripts/update-versions.py can check all versions against this file and update all package to be in sync
 
-memorylayer-core-python: 0.0.6
+memorylayer-core-python: 0.1.22
+memorylayer-embed-server: 0.1.22
 
-memorylayer-sdk-python: 0.0.6
-memorylayer-sdk-typescript: 0.0.6
+memorylayer-sdk-python: 0.1.22
+memorylayer-sdk-typescript: 0.1.22
 
-memorylayer-mcp-typescript: 0.0.6
-memorylayer-cc-plugin: 0.0.5
+memorylayer-mcp-typescript: 0.1.22
+memorylayer-cc-plugin: 0.1.22
+memorylayer-opencode-plugin: 0.1.22
 
-memorylayer-sdk-langchain-python: 0.0.5
-memorylayer-sdk-llamaindex-python: 0.0.5
+memorylayer-sdk-langchain-python: 0.1.22
+memorylayer-sdk-llamaindex-python: 0.1.22
 
-memorylayer-explorer: 0.0.5
+memorylayer-explorer: 0.0.6
+
+# maintain a central registry of preferred versions for our external dependencies for security and consistency purposes
+preferred_versions:
+  python:
+    "scitrera-app-framework": "0.0.69"
+    "scitrera-ext-cachetools": "0.0.1"
+    "scitrera-rt-data[all]": "0.0.7"
+    "scitrera-aether-client": ">=0.1.59" # TODO: pin later (heavy dev right now)
+    "aiosqlite": "0.22.1"
+    "sqlite-vec": "0.1.9"
+    "sqlalchemy[asyncio]": "2.0.46"
+    "pydantic": "2.13.4"
+    "pydantic-settings": "2.14.0"
+    "fastapi": "0.136.1"
+    "uvicorn[standard]": "0.46.0"
+    "python-multipart": "0.0.27"
+    "click": "8.3.3"
+    # TODO: opentelemetry versions
+  typescript:
+    "@modelcontextprotocol/sdk": "^1.26.0"
+
+sources:
+  python:
+    - "memorylayer-core-python/uv.lock"
+    - "memorylayer-sdk-python/uv.lock"
+  typescript:
+    - "memorylayer-sdk-typescript/package-lock.json"
+    - "memorylayer-mcp-typescript/package-lock.json"
+    - "memorylayer-cc-plugin/package-lock.json"
+    - "memorylayer-opencode-plugin/package-lock.json"
+    - "memorylayer-explorer/package-lock.json"
+
+project_rules:
+  memorylayer-cc-plugin:
+    - { type: package,     path: memorylayer-cc-plugin/package.json }
+    - { type: plugin,      path: memorylayer-cc-plugin/.claude-plugin/plugin.json }
+    - { type: marketplace, path: .claude-plugin/marketplace.json, args: [ memorylayer-cc-plugin ] }
+  memorylayer-core-python:
+    - { type: pyproject, path: memorylayer-core-python/pyproject.toml }
+    - { type: init_py,   path: memorylayer-core-python/src/memorylayer_server/__init__.py }
+  memorylayer-embed-server:
+    - { type: pyproject, path: memorylayer-embed-server/pyproject.toml }
+    - { type: init_py,   path: memorylayer-embed-server/src/memorylayer_embed_server/__init__.py }
+  memorylayer-mcp-typescript:
+    - { type: package, path: memorylayer-mcp-typescript/package.json }
+  memorylayer-sdk-langchain-python:
+    - { type: pyproject, path: memorylayer-sdk-langchain-python/pyproject.toml }
+    - { type: init_py,   path: memorylayer-sdk-langchain-python/src/memorylayer_langchain/__init__.py }
+  memorylayer-sdk-llamaindex-python:
+    - { type: pyproject, path: memorylayer-sdk-llamaindex-python/pyproject.toml }
+    - { type: init_py,   path: memorylayer-sdk-llamaindex-python/src/memorylayer_llamaindex/__init__.py }
+  memorylayer-sdk-python:
+    - { type: pyproject, path: memorylayer-sdk-python/pyproject.toml }
+    - { type: init_py,   path: memorylayer-sdk-python/src/memorylayer/__init__.py }
+  memorylayer-sdk-typescript:
+    - { type: package, path: memorylayer-sdk-typescript/package.json }
+  memorylayer-explorer:
+    - { type: package, path: memorylayer-explorer/package.json }
+  memorylayer-opencode-plugin:
+    - { type: package, path: memorylayer-opencode-plugin/package.json }
+
+# Pin neighbor (internal sibling) dependencies so cross-package references
+# track the canonical version above.
+dependency_mappings:
+  python:
+    packages:
+      "memorylayer-sdk-python": "memorylayer-client"
+      "memorylayer-core-python": "memorylayer-server"
+
+    dependencies:
+      memorylayer-embed-server:
+        - "memorylayer-core-python"
+      memorylayer-sdk-langchain-python:
+        - "memorylayer-sdk-python"
+      memorylayer-sdk-llamaindex-python:
+        - "memorylayer-sdk-python"
+
+  typescript:
+    packages:
+      "memorylayer-sdk-typescript": "@scitrera/memorylayer-sdk"
+      "memorylayer-mcp-typescript": "@scitrera/memorylayer-mcp-server"
+      "memorylayer-cc-plugin": "@scitrera/memorylayer-cc-plugin"
+      "memorylayer-opencode-plugin": "@scitrera/memorylayer-opencode-plugin"
+      "memorylayer-explorer": "@scitrera/memorylayer-explorer"
+
+    dependencies:
+      memorylayer-mcp-typescript:
+        - "memorylayer-sdk-typescript"
+      memorylayer-cc-plugin:
+        - "memorylayer-mcp-typescript"
+      memorylayer-opencode-plugin:
+        - "memorylayer-mcp-typescript"
+      memorylayer-explorer:
+        - "memorylayer-sdk-typescript"

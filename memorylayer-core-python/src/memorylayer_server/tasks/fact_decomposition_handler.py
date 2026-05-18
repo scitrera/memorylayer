@@ -18,7 +18,7 @@ from logging import Logger
 from scitrera_app_framework import Variables, get_logger
 
 from ..models.association import AssociateInput
-from ..models.memory import MemoryStatus, MemorySubtype, MemoryType, RememberInput
+from ..models.memory import MemoryStatus, MemoryType, RememberInput
 from ..services.extraction import EXT_EXTRACTION_SERVICE, ExtractionService
 from ..services.memory import EXT_MEMORY_SERVICE, MemoryService
 from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
@@ -100,11 +100,8 @@ class FactDecompositionTaskHandler(TaskHandlerPlugin):
                     fact_type = MemoryType(fact["type"])
             except ValueError:
                 pass
-            try:
-                if fact.get("subtype"):
-                    fact_subtype = MemorySubtype(fact["subtype"])
-            except ValueError:
-                pass
+            if fact.get("subtype"):
+                fact_subtype = fact["subtype"]
 
             fact_input = RememberInput(
                 content=fact["content"],

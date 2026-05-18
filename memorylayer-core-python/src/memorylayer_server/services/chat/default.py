@@ -69,7 +69,7 @@ class DefaultChatService(ChatService):
         tenant_id: str,
         input: CreateThreadInput,
     ) -> ChatThread:
-        thread_id = input.thread_id or generate_id()
+        thread_id = input.thread_id or generate_id("thread")
         now = datetime.now(UTC)
 
         thread = ChatThread(
@@ -88,6 +88,7 @@ class DefaultChatService(ChatService):
             expires_at=input.expires_at,
             created_at=now,
             updated_at=now,
+            scope=input.scope,
         )
 
         result = await self.storage.create_thread(thread)
@@ -111,12 +112,14 @@ class DefaultChatService(ChatService):
         user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        scope_filter: str | None = None,
     ) -> list[ChatThread]:
         return await self.storage.list_threads(
             workspace_id=workspace_id,
             user_id=user_id,
             limit=limit,
             offset=offset,
+            scope_filter=scope_filter,
         )
 
     async def update_thread(
@@ -148,11 +151,17 @@ class DefaultChatService(ChatService):
         workspace_id: str,
         thread_id: str,
         input: AppendMessagesInput,
+        tenant_id: str = "",
     ) -> list[ChatMessage]:
-        # Verify thread exists and is not expired
+        # Get or auto-create thread on first append
         thread = await self.get_thread(workspace_id, thread_id)
         if not thread:
-            raise ValueError(f"Thread {thread_id} not found in workspace {workspace_id}")
+            self.logger.info("Auto-creating thread %s in workspace %s", thread_id, workspace_id)
+            thread = await self.create_thread(
+                workspace_id=workspace_id,
+                tenant_id=tenant_id,
+                input=CreateThreadInput(thread_id=thread_id, title=thread_id),
+            )
 
         result = await self.storage.append_messages(workspace_id, thread_id, input.messages)
 
@@ -167,6 +176,14 @@ class DefaultChatService(ChatService):
         await self._maybe_schedule_decomposition(workspace_id, thread_id, thread, len(result))
 
         return result
+
+    async def delete_message(
+        self,
+        workspace_id: str,
+        thread_id: str,
+        message_id: str,
+    ) -> bool:
+        return await self.storage.delete_message(workspace_id, thread_id, message_id)
 
     async def get_messages(
         self,

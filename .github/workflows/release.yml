@@ -2,14 +2,6 @@
 #
 # Trigger: push a tag matching 'v*' (e.g., v0.0.3) to main
 #
-# Required setup:
-#   PyPI  - Configure trusted publishing for each Python package at
-#           https://pypi.org/manage/project/<name>/settings/publishing/
-#           Set: Owner=scitrera, Repo=memorylayer, Workflow=release.yml, Environment=pypi
-#   npm   - Create an automation token at https://www.npmjs.com/settings/<user>/tokens
-#           Add as repository secret: NPM_TOKEN
-#   Docker Hub - Create an access token at https://hub.docker.com/settings/security
-#                Add as repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
 
 name: Release
 
@@ -47,7 +39,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/${{ matrix.package.name }}/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
@@ -72,11 +64,11 @@ jobs:
     name: "npm: @scitrera/memorylayer-sdk"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
@@ -101,11 +93,11 @@ jobs:
     needs: publish-npm-sdk
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Replace local SDK reference with registry version
@@ -150,11 +142,11 @@ jobs:
     needs: publish-npm-mcp
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Replace local MCP reference with registry version
@@ -192,6 +184,55 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────
+  # OpenCode plugin → npm (after MCP server is published)
+  # ──────────────────────────────────────────────────────────────────
+  publish-npm-opencode-plugin:
+    name: "npm: @scitrera/memorylayer-opencode-plugin"
+    needs: publish-npm-mcp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Replace local MCP reference with registry version
+        working-directory: memorylayer-opencode-plugin
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i 's|"file:../memorylayer-mcp-typescript"|"^'"${VERSION}"'"|' package.json
+
+      - name: Wait for MCP server availability on npm
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            if npm view "@scitrera/memorylayer-mcp-server@${VERSION}" version 2>/dev/null; then
+              echo "MCP server v${VERSION} is available on npm"
+              exit 0
+            fi
+            echo "Waiting for @scitrera/memorylayer-mcp-server@${VERSION} (attempt ${i}/30)..."
+            sleep 10
+          done
+          echo "::error::MCP server not available on npm after 5 minutes"
+          exit 1
+
+      - name: Install dependencies
+        working-directory: memorylayer-opencode-plugin
+        run: npm install
+
+      - name: Build
+        working-directory: memorylayer-opencode-plugin
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: memorylayer-opencode-plugin
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────────────
   # Docker image → Docker Hub (after memorylayer-server is on PyPI)
   # ──────────────────────────────────────────────────────────────────
   publish-docker:
@@ -199,7 +240,7 @@ jobs:
     needs: publish-python
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Wait for memorylayer-server on PyPI
         run: |

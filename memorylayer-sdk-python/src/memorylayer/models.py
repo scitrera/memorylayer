@@ -1,11 +1,28 @@
 """Pydantic models for MemoryLayer.ai SDK."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .types import MemorySubtype, MemoryType
+from .types import MemoryType
+
+
+@dataclass
+class PrincipalRef:
+    """A reference to a principal (user, service, agent, task)."""
+
+    type: str
+    id: str
+
+
+@dataclass
+class AuthorityContext:
+    """OBO authority context emitted as X-Aether-* headers."""
+
+    grant_id: str
+    subject: PrincipalRef | None = None
 
 
 class Memory(BaseModel):
@@ -19,7 +36,7 @@ class Memory(BaseModel):
     user_id: str | None = None
     content: str
     type: MemoryType
-    subtype: MemorySubtype | None = None
+    subtype: str | None = None
     importance: float = Field(ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -46,6 +46,9 @@ class WorkspaceSettings(BaseModel):
     # Session behavior (v2)
     session_auto_commit: bool = Field(True, description="Auto-commit sessions on close")
 
+    # Skills indexing
+    skills_index_references: bool = Field(True, description="Auto-index skill reference files as skill_reference memories")
+
     # Scope boosts for locality ranking (v2)
     scope_boosts: ScopeBoosts = Field(default_factory=ScopeBoosts, description="Locality ranking boosts")
 

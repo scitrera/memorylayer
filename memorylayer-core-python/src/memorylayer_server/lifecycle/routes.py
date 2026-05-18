@@ -14,7 +14,7 @@ EXT_ROUTES = "memorylayer-server-fastapi-routes"
 # Prefixes that are enterprise-only.  When no enterprise plugin registers
 # the real router the fallback below will respond with 501 (Not Implemented)
 # so SDKs can distinguish "endpoint doesn't exist" from "resource not found".
-_ENTERPRISE_PREFIXES = ("/v1/documents", "/v1/datasets")
+_ENTERPRISE_PREFIXES = ("/v1/datasets",)
 
 
 class RoutesPlugin(Plugin):

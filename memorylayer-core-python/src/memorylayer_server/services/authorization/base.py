@@ -52,6 +52,8 @@ class AuthorizationService(ABC):
         Raises:
             HTTPException: 403 Forbidden if authorization denied
         """
+        authority = getattr(ctx, "authority", None)
+        actor = getattr(ctx, "actor", None)
         authz_ctx = AuthorizationContext(
             tenant_id=ctx.tenant_id,
             workspace_id=workspace_id or ctx.workspace_id,
@@ -60,6 +62,13 @@ class AuthorizationService(ABC):
             action=action,
             resource_id=resource_id,
             metadata=getattr(ctx, "metadata", None) or {},
+            actor_type=actor.type if actor else None,
+            actor_id=actor.id if actor else None,
+            subject_type=authority.subject.type if authority and authority.subject else None,
+            subject_id=authority.subject.id if authority and authority.subject else None,
+            authority_mode=authority.mode if authority else None,
+            grant_id=authority.grant_id if authority else None,
+            max_access_level=authority.max_access_level if authority else None,
         )
 
         decision = await self.authorize(authz_ctx)

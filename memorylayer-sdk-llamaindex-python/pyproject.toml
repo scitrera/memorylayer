@@ -1,12 +1,12 @@
 [project]
 name = "memorylayer-llamaindex"
-version = "0.0.5"
+version = "0.1.22"
 description = "LlamaIndex integration for MemoryLayer.ai - persistent memory for LlamaIndex applications"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache 2.0" }
 authors = [
-    { name = "Scitrera", email = "open-source-team@scitrera.com" }
+    { name = "scitrera.ai", email = "open-source-team@scitrera.com" }
 ]
 keywords = ["ai", "memory", "agents", "llm", "llamaindex", "rag", "vector-search"]
 classifiers = [
@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "memorylayer-client>=0.0.1",
+    "memorylayer-client==0.1.22",
     "llama-index-core>=0.10.0",
 ]
 

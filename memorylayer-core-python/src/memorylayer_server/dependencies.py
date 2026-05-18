@@ -77,6 +77,27 @@ def preconfigure(v: Variables = None, test_mode: bool = False, test_logger: Logg
     logger.debug("Registering Middleware")
     register_package_plugins(middleware.__package__, v, recursive=True)
 
+    # Discover third-party plugin packages that opt into memorylayer_server's
+    # recursive plugin scan via the "memorylayer_server.plugin_packages" entry
+    # point group. Each entry point must resolve to an importable Python
+    # package; we register that package's tree with the framework so its
+    # Plugin subclasses are picked up exactly like the in-tree services /
+    # api / tasks / lifecycle / middleware modules.
+    logger.debug("Discovering third-party plugin packages")
+    try:
+        from importlib.metadata import entry_points
+
+        for ep in entry_points(group="memorylayer_server.plugin_packages"):
+            try:
+                pkg = ep.load()
+                pkg_name = getattr(pkg, "__package__", None) or pkg.__name__
+                logger.debug("Registering third-party plugin package: %s", pkg_name)
+                register_package_plugins(pkg_name, v, recursive=True)
+            except Exception:
+                logger.exception("Failed to load memorylayer_server plugin package %s", ep.name)
+    except Exception:
+        logger.exception("Plugin package discovery failed")
+
     # handle preconfiguration hooks
     logger.debug("Evaluating preconfigure hooks")
     global _preconfigure_hooks

@@ -1,0 +1,77 @@
+# MemoryLayer Embed Server — real-model test image (CUDA, no Aether sidecar)
+#
+# Build context: repo root (scitrera-memorylayer-ai-cc/)
+#   docker build -f oss/memorylayer-embed-server/Dockerfile.real-test \
+#                -t memorylayer-embed-server:real-test .
+#
+# Compared with the production Dockerfile, this variant:
+#   * Skips the Go proxy-sidecar build stage (plain HTTP only; no Aether
+#     terminator). The integration test stack reaches the embed-server
+#     over the private docker bridge.
+#   * Skips the .build-staging copy (no aether-server / aether-python-client
+#     dependency).
+#   * Installs the [colpali] extra (torch + colpali-engine) but NOT [vllm].
+#     With ``EMBED_SERVER_USE_MULTI_FOR_SINGLE=true`` the ColPali provider
+#     also serves single-vector requests, so vLLM is optional.
+#
+# Compared with Dockerfile.test (mock providers), this variant:
+#   * Uses a real CUDA base + real torch + real ColPali (ModernVBERT model
+#     by default — the smallest supported, MIT licensed).
+#   * Pulls model weights on first request (no preload).
+
+FROM nvidia/cuda:13.1.1-runtime-ubuntu24.04 AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.12 python3.12-venv python3.12-dev \
+        build-essential curl ca-certificates && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN groupadd --gid 65532 memorylayer && \
+    useradd --uid 65532 --gid memorylayer --create-home memorylayer
+
+# Create a system venv to install into.
+RUN python3 -m venv /opt/memorylayer-embed
+ENV PATH="/opt/memorylayer-embed/bin:$PATH" \
+    VIRTUAL_ENV="/opt/memorylayer-embed"
+
+# Copy source packages
+COPY oss/memorylayer-core-python /src/memorylayer-core-python
+COPY oss/memorylayer-embed-server /src/memorylayer-embed-server
+
+# Install the OSS server (with the openai + google extras so the
+# embed-server can dispatch single-vector requests to those HTTP providers
+# when EMBED_SERVER_SINGLE_VECTOR_PROVIDER=openai|google), then the
+# embed-server with the colpali extra.
+# --torch-backend=auto lets uv pick the correct CUDA wheel for the host.
+RUN uv pip install --python /opt/memorylayer-embed/bin/python --torch-backend=auto \
+        "/src/memorylayer-core-python[openai,google]" \
+        "/src/memorylayer-embed-server[colpali]"
+
+WORKDIR /app
+USER memorylayer
+
+# Plain-HTTP mode; ColPali serves both single and multi-vector via
+# EMBED_SERVER_USE_MULTI_FOR_SINGLE so vLLM is optional.
+ENV EMBED_SERVER_RUN_SIDECAR=false \
+    MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=false \
+    MEMORYLAYER_EMBED_USE_MULTI_FOR_SINGLE=true \
+    MEMORYLAYER_EMBED_PRELOAD_MODELS=false \
+    MEMORYLAYER_EMBEDDING_MODEL="ModernVBERT/colmodernvbert" \
+    MEMORYLAYER_EMBEDDING_DEVICE="cuda"
+
+EXPOSE 61051
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=12 \
+    CMD curl -fsS http://localhost:61051/health || exit 1
+
+ENTRYPOINT ["memorylayer-embed", "serve"]

@@ -8,6 +8,11 @@ from ...config import MEMORYLAYER_EMBEDDING_DIMENSIONS, MEMORYLAYER_EMBEDDING_MO
 from .base import EmbeddingProvider, EmbeddingProviderPluginBase
 
 MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY = "MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY"
+# Provider-specific model override; wins over MEMORYLAYER_EMBEDDING_MODEL.
+# Useful when the Google provider runs alongside another (e.g. on the
+# embed-server with ColPali for multi-vector — both providers would
+# otherwise collide on the shared MEMORYLAYER_EMBEDDING_MODEL key).
+MEMORYLAYER_EMBEDDING_GOOGLE_MODEL = "MEMORYLAYER_EMBEDDING_GOOGLE_MODEL"
 
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 DEFAULT_EMBEDDING_DIMENSIONS = 768
@@ -88,9 +93,12 @@ class GoogleEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
     PROVIDER_NAME = EmbeddingProviderType.GOOGLE
 
     def initialize(self, v: Variables, logger: Logger) -> object | None:
+        model = v.environ(MEMORYLAYER_EMBEDDING_GOOGLE_MODEL, default=None)
+        if not model:
+            model = v.environ(MEMORYLAYER_EMBEDDING_MODEL, default=DEFAULT_EMBEDDING_MODEL)
         return GoogleEmbeddingProvider(
             v=v,
             api_key=v.environ(MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY, default=None),
-            model=v.environ(MEMORYLAYER_EMBEDDING_MODEL, default=DEFAULT_EMBEDDING_MODEL),
+            model=model,
             dimensions=v.environ(MEMORYLAYER_EMBEDDING_DIMENSIONS, default=DEFAULT_EMBEDDING_DIMENSIONS, type_fn=int),
         )

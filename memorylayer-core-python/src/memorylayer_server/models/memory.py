@@ -43,6 +43,38 @@ class MemorySubtype(str, Enum):
     INFERENCE = "inference"  # Derived insight/conclusion from patterns across memories
 
 
+# OSS-known memory subtypes, grouped by memory type. The "*" key means
+# "applies to any memory type" -- the OSS subtypes are flat (any subtype
+# may appear with any memory type) and the ontology service treats this
+# as the default scope for OSS-known subtypes.
+#
+# Plugin contributors (e.g. RPG) may extend this set at startup via
+# OntologyContributorPlugin.get_subtypes(). The 9 RPG-specific subtypes
+# (rpg_directory, rpg_file, rpg_class, rpg_function, rpg_method,
+# rpg_component, rpg_module, rpg_package, rpg_interface) live in the
+# RPG plugin contributor and are no longer part of the OSS enum.
+OSS_KNOWN_SUBTYPES: dict[str, set[str]] = {
+    "*": {
+        "solution",
+        "problem",
+        "code_pattern",
+        "fix",
+        "error",
+        "workflow",
+        "preference",
+        "decision",
+        "profile",
+        "entity",
+        "event",
+        "directive",
+        "inference",
+        "skill",
+        "skill_reference",
+        "mcp_server",
+    },
+}
+
+
 class RecallMode(str, Enum):
     """Retrieval strategy for memory queries."""
 
@@ -108,7 +140,7 @@ class Memory(BaseModel):
 
     # Classification
     type: MemoryType = Field(..., description="Cognitive type of memory")
-    subtype: MemorySubtype | None = Field(None, description="Domain-specific classification")
+    subtype: str | None = Field(None, description="Domain-specific classification (OSS-known or plugin-contributed)")
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0, affects retention/ranking)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
@@ -175,7 +207,7 @@ class RememberInput(BaseModel):
 
     content: str = Field(..., description="The memory content to store")
     type: MemoryType | None = Field(None, description="Cognitive type (auto-classified if omitted)")
-    subtype: MemorySubtype | None = Field(None, description="Domain-specific classification")
+    subtype: str | None = Field(None, description="Domain-specific classification (OSS-known or plugin-contributed)")
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
@@ -203,13 +235,21 @@ class RecallInput(BaseModel):
 
     # Filters
     types: list[MemoryType] = Field(default_factory=list, description="Filter by cognitive types")
-    subtypes: list[MemorySubtype] = Field(default_factory=list, description="Filter by domain subtypes")
+    subtypes: list[str] = Field(default_factory=list, description="Filter by domain subtypes")
     tags: list[str] = Field(default_factory=list, description="Filter by tags (AND logic)")
     context_id: str | None = Field(None, description="Filter by context")
     user_id: str | None = Field(None, description="Filter by user")
     observer_id: str | None = Field(None, description="Filter by observer entity")
     subject_id: str | None = Field(None, description="Filter by subject entity")
     include_global: bool = Field(True, description="Include _global workspace in search")
+    include_global_user: bool = Field(
+        True,
+        description=(
+            "Include user-scoped global workspace (_global_user) in search, filtered by "
+            "the same user_id. Lets per-user preferences follow the user across workspaces "
+            "without leaking across users. Only effective when user_id is set."
+        ),
+    )
 
     # Retrieval settings
     mode: RecallMode | None = Field(None, description="Retrieval strategy (None = server default)")
@@ -287,7 +327,7 @@ class ReflectInput(BaseModel):
 
     # Optional filters (same as RecallInput)
     types: list[MemoryType] = Field(default_factory=list)
-    subtypes: list[MemorySubtype] = Field(default_factory=list)
+    subtypes: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     context_id: str | None = None
     user_id: str | None = None

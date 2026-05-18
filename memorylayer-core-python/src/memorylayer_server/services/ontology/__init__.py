@@ -1,20 +1,22 @@
 """
 Ontology Service - Provides relationship type definitions and validation.
 
-OSS version includes unified ontology with 65 relationship types across 11 categories.
-Enterprise version supports custom ontologies.
+OSS base ontology includes 63 relationship types across 11 categories.
+Plugin contributors (e.g. RPG) may extend the ontology at startup via OntologyContributorPlugin.
+Enterprise version supports custom tenant/workspace-scoped ontologies.
 """
 
 from scitrera_app_framework import Variables, get_extension
 
+from .._constants import EXT_MULTI_ONTOLOGY_CONTRIBUTORS
 from .base import (
     BASE_ONTOLOGY,
     EXT_ONTOLOGY_SERVICE,
-    RELATIONSHIP_CATEGORIES,
     FeatureRequiresUpgradeError,
     OntologyService,
     OntologyServicePluginBase,
 )
+from .contributor import OntologyContributorPlugin
 
 
 def get_ontology_service(v: Variables = None) -> OntologyService:
@@ -25,9 +27,10 @@ def get_ontology_service(v: Variables = None) -> OntologyService:
 __all__ = (
     "OntologyService",
     "OntologyServicePluginBase",
+    "OntologyContributorPlugin",
     "get_ontology_service",
     "EXT_ONTOLOGY_SERVICE",
+    "EXT_MULTI_ONTOLOGY_CONTRIBUTORS",
     "FeatureRequiresUpgradeError",
     "BASE_ONTOLOGY",
-    "RELATIONSHIP_CATEGORIES",
 )

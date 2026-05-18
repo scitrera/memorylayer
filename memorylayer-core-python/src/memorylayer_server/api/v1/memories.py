@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from scitrera_app_framework import Plugin, Variables, get_extension
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
-from ...models.memory import RecallInput, ReflectInput, RememberInput
+from ...models.memory import DetailLevel, RecallInput, ReflectInput, RememberInput
 from ...services.audit import AuditEvent, AuditService
 from ...services.authentication import AuthenticationError, AuthenticationService
 from ...services.authorization import AuthorizationService
@@ -576,8 +576,6 @@ async def reflect_memories(
         logger.info("Reflecting on memories in workspace: %s, query: %s", ctx.workspace_id, request.query[:50])
 
         # Convert detail_level string to DetailLevel enum
-        from ...models.memory import DetailLevel
-
         detail_level = DetailLevel.FULL
         if request.detail_level:
             detail_level_map = {

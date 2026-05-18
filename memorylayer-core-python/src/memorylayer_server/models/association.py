@@ -1,9 +1,11 @@
 """
 Association and relationship models for MemoryLayer.ai semantic graph.
 
-Defines 65 relationship types organized by 11 categories for rich knowledge graphs.
+Defines relationship types organized by category for rich knowledge graphs.
 Relationship types are plain strings validated against the unified ontology in
 ``memorylayer_server.services.ontology.base.BASE_ONTOLOGY``.
+Additional types may be contributed by plugins (e.g. the RPG plugin adds
+``code_structure`` types via ``OntologyContributorPlugin``).
 """
 
 from datetime import UTC, datetime

@@ -1,11 +1,12 @@
 """Google GenAI (Gemini) LLM provider."""
 
+import json as _json
 from collections.abc import AsyncIterator
 
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
+from ...models.llm import LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
 from .base import LLMProvider
 
 DEFAULT_LLM_GOOGLE_MODEL = "gemini-3-flash-preview"
@@ -20,11 +21,29 @@ _FINISH_REASON_MAP = {
     "PROHIBITED_CONTENT": "content_filter",
 }
 
+# OpenAI o-series reasoning_effort → Google "thinking budget" tokens.
+_REASONING_EFFORT_TO_BUDGET = {
+    "minimal": 256,
+    "low": 1024,
+    "medium": 4096,
+    "high": 8192,
+}
+
+
+def _role_str(role) -> str:
+    return role.value if isinstance(role, LLMRole) else str(role)
+
 
 class GoogleLLMProvider(LLMProvider):
     """Google GenAI (Gemini) LLM provider.
 
     Uses the google-genai SDK for completions and streaming.
+
+    Note on tools / structured output: Google's SDK uses native ``Tool`` /
+    ``FunctionDeclaration`` types and is not OpenAI-compatible at the
+    SDK layer. The provider forwards :attr:`LLMRequest.tools` to the
+    SDK as-is; callers must construct Google-shape tools (or merge them
+    in via ``extra_body``).
     """
 
     def __init__(
@@ -67,19 +86,26 @@ class GoogleLLMProvider(LLMProvider):
         system_text = None
         messages = []
         for msg in request.messages:
-            if msg.role == "system":
+            role_str = _role_str(msg.role)
+            if role_str == "system":
                 if system_text is None:
                     system_text = msg.content
                 else:
                     system_text += "\n" + msg.content
             else:
-                # Google uses "model" instead of "assistant"
-                role = "model" if msg.role == "assistant" else msg.role
+                # Google uses "model" instead of "assistant".
+                role = "model" if role_str == "assistant" else role_str
                 messages.append((role, msg.content))
         return system_text, messages
 
     @staticmethod
-    def _build_request(system_text, messages, request: LLMRequest, max_tokens: int | None = None, temperature: float | None = None):
+    def _build_request(
+        system_text,
+        messages,
+        request: LLMRequest,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ):
         """Build Google GenAI SDK types from extracted messages.
 
         Requires google-genai to be installed. Called only at API call time.
@@ -94,7 +120,7 @@ class GoogleLLMProvider(LLMProvider):
             for role, content in messages
         ]
 
-        config_kwargs = {}
+        config_kwargs: dict = {}
         if system_text is not None:
             config_kwargs["system_instruction"] = system_text
         if max_tokens is not None:
@@ -103,6 +129,34 @@ class GoogleLLMProvider(LLMProvider):
             config_kwargs["temperature"] = temperature
         if request.stop:
             config_kwargs["stop_sequences"] = request.stop
+        if request.tools is not None:
+            # Caller is responsible for providing Google-shape Tool
+            # objects (or dicts the SDK will coerce).
+            config_kwargs["tools"] = request.tools
+        if request.response_format is not None:
+            # Map OpenAI-shape {"type": "json_object"} / {"type": "json_schema", ...}
+            # to Google's response_mime_type / response_schema fields.
+            rf = request.response_format
+            if isinstance(rf, dict):
+                if rf.get("type") == "json_object":
+                    config_kwargs["response_mime_type"] = "application/json"
+                elif rf.get("type") == "json_schema":
+                    config_kwargs["response_mime_type"] = "application/json"
+                    schema = rf.get("json_schema", {}).get("schema")
+                    if schema is not None:
+                        config_kwargs["response_schema"] = schema
+        if request.reasoning_effort is not None:
+            budget = _REASONING_EFFORT_TO_BUDGET.get(request.reasoning_effort, 2048)
+            try:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(
+                    thinking_budget=budget,
+                )
+            except (AttributeError, TypeError):
+                # Older google-genai versions don't expose ThinkingConfig;
+                # silently skip rather than break the call.
+                pass
+        if request.extra_body is not None:
+            config_kwargs.update(request.extra_body)
 
         config = types.GenerateContentConfig(**config_kwargs)
         return contents, config
@@ -115,17 +169,53 @@ class GoogleLLMProvider(LLMProvider):
         reason_str = str(finish_reason)
         return _FINISH_REASON_MAP.get(reason_str, "stop")
 
+    @staticmethod
+    def _extract_tool_calls(response) -> list[dict] | None:
+        """Pull ``function_call`` parts out of a Gemini response → OpenAI-shape tool_calls."""
+        out: list[dict] = []
+        candidates = getattr(response, "candidates", None) or []
+        for cand in candidates:
+            content = getattr(cand, "content", None)
+            if content is None:
+                continue
+            parts = getattr(content, "parts", None) or []
+            for part in parts:
+                fc = getattr(part, "function_call", None)
+                if fc is None:
+                    continue
+                name = getattr(fc, "name", "") or ""
+                args = getattr(fc, "args", None) or {}
+                # Gemini sometimes hands back a Mapping-like object.
+                try:
+                    args_dict = dict(args)
+                except (TypeError, ValueError):
+                    args_dict = {}
+                out.append({
+                    "id": getattr(fc, "id", None) or f"call_{len(out)}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": _json.dumps(args_dict),
+                    },
+                })
+        return out or None
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Generate completion using Google GenAI API."""
         client = self._get_client()
 
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)
+        effective_max = (
+            request.max_completion_tokens
+            if request.max_completion_tokens is not None
+            else max_tokens
+        )
         contents, config = self._build_request(
             system_text,
             messages,
             request,
-            max_tokens=max_tokens,
+            max_tokens=effective_max,
             temperature=temperature,
         )
         model = request.model or self.model
@@ -151,6 +241,10 @@ class GoogleLLMProvider(LLMProvider):
         if response.candidates:
             finish_reason = self._map_finish_reason(response.candidates[0].finish_reason)
 
+        tool_calls = self._extract_tool_calls(response)
+        if tool_calls and finish_reason == "stop":
+            finish_reason = "tool_calls"
+
         return LLMResponse(
             content=content,
             model=model,
@@ -158,22 +252,35 @@ class GoogleLLMProvider(LLMProvider):
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             finish_reason=finish_reason,
+            tool_calls=tool_calls,
         )
 
     async def complete_stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
-        """Generate streaming completion using Google GenAI API."""
+        """Generate streaming completion using Google GenAI API.
+
+        Text deltas stream as they arrive. Tool calls are aggregated and
+        emitted on the terminal chunk (Gemini's streaming surface is
+        primarily text-oriented).
+        """
         client = self._get_client()
 
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)
+        effective_max = (
+            request.max_completion_tokens
+            if request.max_completion_tokens is not None
+            else max_tokens
+        )
         contents, config = self._build_request(
             system_text,
             messages,
             request,
-            max_tokens=max_tokens,
+            max_tokens=effective_max,
             temperature=temperature,
         )
         model = request.model or self.model
+
+        tool_call_accum: list[dict] = []
 
         async for chunk in await client.aio.models.generate_content_stream(
             model=model,
@@ -186,12 +293,22 @@ class GoogleLLMProvider(LLMProvider):
                     content=text,
                     is_final=False,
                 )
+            chunk_tool_calls = self._extract_tool_calls(chunk)
+            if chunk_tool_calls:
+                tool_call_accum.extend(chunk_tool_calls)
 
-        # Final chunk to signal completion
+        if tool_call_accum:
+            yield LLMStreamChunk(
+                content="",
+                is_final=False,
+                tool_calls_delta=tool_call_accum,
+            )
+
+        # Final chunk to signal completion.
         yield LLMStreamChunk(
             content="",
             is_final=True,
-            finish_reason="stop",
+            finish_reason="tool_calls" if tool_call_accum else "stop",
         )
 
     @property

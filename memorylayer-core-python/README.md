@@ -12,7 +12,7 @@ MemoryLayer provides cognitive memory capabilities for AI agents, including epis
 - **Context Environment** — Server-side Python sandboxes for memory analysis and computation
 - **Session Management** — Working memory with TTL and commit to long-term storage
 - **REST API** — Full-featured HTTP API for all memory operations
-- **Multiple Embedding Providers** — OpenAI, Google GenAI, sentence-transformers (local), and mock (testing)
+- **Multiple Embedding Providers** — OpenAI, Google GenAI, embed-server (self-hosted GPU via `memorylayer-embed-server`), and mock (testing)
 - **Health Endpoints** — `/health` and `/health/ready` for monitoring and readiness checks
 
 ## Installation
@@ -27,10 +27,11 @@ pip install memorylayer-server[openai]
 # With Google GenAI embeddings
 pip install memorylayer-server[google]
 
-# With local embeddings (sentence-transformers)
-pip install memorylayer-server[local]
+# Self-hosted embeddings: install + run memorylayer-embed-server separately
+# (no extras here — the main server only speaks HTTP to embed-server)
+# pip install memorylayer-embed-server[gpu]
 
-# All embedding providers
+# All cloud embedding providers + LLM + document parsers
 pip install memorylayer-server[all]
 ```
 
@@ -57,7 +58,7 @@ memorylayer serve --verbose
 
 ### Docker
 
-The official Docker image comes with all optional dependencies pre-installed and defaults to `local` embeddings (no API key required):
+The official Docker image comes with all optional dependencies pre-installed. The default embedding provider is `embed_server`, which delegates all GPU/ML work to a peer `memorylayer-embed-server` container — set `MEMORYLAYER_EMBED_SERVER_URL` accordingly, or override the provider entirely (`mock` for tests, `openai`/`google` for cloud):
 
 ```bash
 docker run -d \
@@ -120,17 +121,31 @@ async with MemoryLayerClient(base_url="http://localhost:61001") as client:
 | `MEMORYLAYER_SERVER_PORT` | `61001` | Server port |
 | `MEMORYLAYER_DATA_DIR` | `~/.config/memorylayer-server` | Data directory |
 | `MEMORYLAYER_SQLITE_STORAGE_PATH` | `memorylayer.db` | SQLite database path (relative to data dir) |
-| `MEMORYLAYER_EMBEDDING_PROVIDER` | `local` | Embedding provider (`openai`, `google`, `local`, `mock`) |
+| `MEMORYLAYER_EMBEDDING_PROVIDER` | `embed_server` | Embedding provider (`openai`, `google`, `embed_server`, `mock`) |
 | `MEMORYLAYER_EMBEDDING_OPENAI_API_KEY` | — | OpenAI API key |
 | `MEMORYLAYER_EMBEDDING_GOOGLE_API_KEY` | — | Google API key |
+| `MEMORYLAYER_EMBED_SERVER_URL` | `http://localhost:61051` | Base URL for `memorylayer-embed-server` (used by `embed_server` provider) |
+| `MEMORYLAYER_EMBED_TRANSPORT` | `http` | `http` for direct calls or `aether` for cross-DC mTLS via Aether |
 
 ### Embedding Providers
 
-**Local (sentence-transformers)** — Default provider, no API key required:
+The legacy in-process providers `local` (sentence-transformers), `colpali` (colpali-engine),
+and `qwen3-vl` (qwen-vl-utils) were removed. All self-hosted/multi-vector embedding now
+routes through the `embed_server` provider, which delegates to the standalone
+`memorylayer-embed-server` package. Setting any of those legacy values for
+`MEMORYLAYER_EMBEDDING_PROVIDER` raises a startup error with migration guidance.
+
+**Embed-server (self-hosted, default)** — Run `memorylayer-embed-server` as a peer
+process or container; the main server only speaks HTTP to it:
 
 ```bash
-pip install memorylayer-server[local]
-export MEMORYLAYER_EMBEDDING_PROVIDER=local
+# In a GPU-equipped peer:
+pip install memorylayer-embed-server[gpu]
+memorylayer-embed-server serve --port 61051
+
+# In the main server process:
+export MEMORYLAYER_EMBEDDING_PROVIDER=embed_server
+export MEMORYLAYER_EMBED_SERVER_URL=http://embed-host:61051
 memorylayer serve
 ```
 

@@ -2,7 +2,7 @@
 
 TypeScript MCP (Model Context Protocol) server for [MemoryLayer.ai](https://memorylayer.ai).
 
-Provides 21 memory tools for LLM agents to store, recall, synthesize, and manage information across sessions.
+Provides 25 memory tools by default (38 in the `full` profile) for LLM agents to store, recall, synthesize, and manage information across sessions.
 
 ## Installation
 
@@ -105,6 +105,18 @@ const server = await createServer(client);
 // Run server on stdio transport
 await server.run();
 ```
+
+## Tool Profiles
+
+Tools are organized into profiles selected via `MEMORYLAYER_TOOL_PROFILE`:
+
+| Profile | Count | Description |
+|---------|-------|-------------|
+| `cc` *(default)* | 25 | Optimized for Claude Code: core memory + sessions + context environment + chat threads + skills (read) |
+| `full` | 38 | All tools: adds `associate`, `statistics`, `graph_query`, `audit`, `chat_thread_decompose`, `chat_thread_delete`, `skills_save`, and the 5 `mcp_servers_*` tools |
+| `minimal` | 2 | Just `memory_remember` and `memory_recall` |
+
+> `memory_statistics` and `memory_audit` ship as **placeholders** in the current build; their handlers return `not_implemented` server-side.
 
 ## Available Tools
 
@@ -391,7 +403,7 @@ The MCP server wraps the `@scitrera/memorylayer-sdk` TypeScript SDK, providing a
 memorylayer-mcp-typescript/
 ├── src/
 │   ├── types.ts       # TypeScript types for MCP tools
-│   ├── tools.ts       # MCP tool definitions (21 tools)
+│   ├── tools.ts       # MCP tool definitions (25 in cc / 38 in full)
 │   ├── client.ts      # Wrapper around @scitrera/memorylayer-sdk
 │   ├── session.ts     # Local session state management
 │   ├── workspace.ts   # Workspace ID auto-detection

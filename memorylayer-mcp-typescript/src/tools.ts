@@ -655,6 +655,332 @@ export const CHAT_TOOLS = [
 ];
 
 /**
+ * MCP tools for MCP server registry management.
+ *
+ * - mcp_servers_list   = list registered MCP servers
+ * - mcp_servers_get    = fetch a single server by ID or name
+ * - mcp_servers_save   = create or update a server (upsert by name)
+ * - mcp_servers_delete = delete a server by ID
+ * - mcp_servers_import = bulk import from mcpServers JSON object
+ */
+export const MCP_SERVERS_TOOLS = [
+  {
+    name: "mcp_servers_list",
+    description: "List MCP servers registered in MemoryLayer. Returns name, transport, command/url, enabled status, and ID for each server. Use to discover what MCP servers are available in the workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        transport: {
+          type: "string",
+          enum: ["stdio", "http", "sse", "streamable-http"],
+          description: "Filter by transport type"
+        },
+        enabled: {
+          type: "boolean",
+          description: "Filter by enabled status (default: all servers)"
+        },
+        name: {
+          type: "string",
+          description: "Filter by exact server name"
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 500,
+          default: 100,
+          description: "Maximum number of servers to return"
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          default: 0,
+          description: "Pagination offset"
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: "mcp_servers_get",
+    description: "Fetch a single MCP server record by ID or name. Returns full server details including transport, command/url, args, and metadata.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        server_id: {
+          type: "string",
+          description: "Server ID (mcp_...) — use when you have the ID from mcp_servers_list"
+        },
+        name: {
+          type: "string",
+          description: "Server name — resolved by the server if server_id is not provided"
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: "mcp_servers_save",
+    description: "Create or update an MCP server record in MemoryLayer. If a server with the given name already exists it is updated; otherwise a new record is created. Env values and headers are stored as secrets.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Server name (1-64 chars, lowercase letters/digits/hyphens)"
+        },
+        transport: {
+          type: "string",
+          enum: ["stdio", "http", "sse", "streamable-http"],
+          description: "Transport type: stdio (local process) or http/sse/streamable-http (remote)"
+        },
+        command: {
+          type: "string",
+          description: "Executable for stdio transport (e.g. 'npx', 'python')"
+        },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Arguments for the command (stdio transport)"
+        },
+        env: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Environment variables for the server process (stored as secrets)"
+        },
+        url: {
+          type: "string",
+          description: "URL for http/sse/streamable-http transport"
+        },
+        headers: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "HTTP headers for remote transport (stored as secrets)"
+        },
+        description: {
+          type: "string",
+          description: "Human-readable description of what this server provides"
+        },
+        enabled: {
+          type: "boolean",
+          default: true,
+          description: "Whether the server is enabled"
+        },
+        metadata: {
+          type: "object",
+          description: "Arbitrary metadata"
+        }
+      },
+      required: ["name", "transport"]
+    }
+  },
+  {
+    name: "mcp_servers_delete",
+    description: "Delete an MCP server record from MemoryLayer by ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        server_id: {
+          type: "string",
+          description: "Server ID (mcp_...) to delete"
+        }
+      },
+      required: ["server_id"]
+    }
+  },
+  {
+    name: "mcp_servers_import",
+    description: "Bulk-import MCP servers from a mcpServers JSON object (the same format as .mcp.json / claude_desktop_config.json). Creates new records and updates existing ones by name. Returns counts of imported, updated, and any errors.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mcpServers: {
+          type: "object",
+          description: "Map of server name to server config (same schema as .mcp.json mcpServers field)",
+          additionalProperties: {
+            type: "object",
+            properties: {
+              command: { type: "string" },
+              args: { type: "array", items: { type: "string" } },
+              env: { type: "object", additionalProperties: { type: "string" } },
+              url: { type: "string" },
+              type: { type: "string" }
+            }
+          }
+        }
+      },
+      required: ["mcpServers"]
+    }
+  }
+];
+
+/**
+ * MCP tools for Agent Skills management.
+ *
+ * Implements the spec's progressive disclosure tiers:
+ * - skills_list  = metadata tier  (~100 tokens per skill)
+ * - skills_get   = instructions tier (full SKILL.md, ≤5k tokens recommended)
+ * - skills_get_file = resources tier (on-demand file content)
+ * - skills_search = vector recall against skill memory mirror
+ * - skills_save  = upsert a skill (full profile only)
+ */
+export const SKILLS_TOOLS = [
+  {
+    name: "skills_list",
+    description: "List available agent skills from MemoryLayer. Returns name, description, version, and scope for each skill. Use this to discover what skills are available before fetching details.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Filter by exact skill name"
+        },
+        enabled: {
+          type: "boolean",
+          description: "Filter by enabled status (default: only enabled skills)"
+        },
+        include_shadowed: {
+          type: "boolean",
+          description: "Include skills shadowed by higher-scope skills with the same name"
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 500,
+          default: 100,
+          description: "Maximum number of skills to return"
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          default: 0,
+          description: "Pagination offset"
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: "skills_get",
+    description: "Fetch the full SKILL.md body for a named skill. Returns frontmatter (name, description, version) plus the full instructions markdown. Use after skills_list to get actionable skill instructions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        skill_id: {
+          type: "string",
+          description: "Skill ID (skl_...) — use when you have the ID from skills_list"
+        },
+        name: {
+          type: "string",
+          description: "Skill name — resolved via the server if skill_id is not provided"
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: "skills_get_file",
+    description: "Fetch a single file from a skill's bundle (scripts, references, or assets). Returns text content or base64-encoded binary. Use for on-demand access to skill resources.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        skill_id: {
+          type: "string",
+          description: "Skill ID (skl_...)"
+        },
+        path: {
+          type: "string",
+          description: "Relative file path within the skill bundle (e.g. scripts/extract.py)"
+        }
+      },
+      required: ["skill_id", "path"]
+    }
+  },
+  {
+    name: "skills_search",
+    description: "Search for skills by intent or description using vector recall. Use when you want to find a skill by what it does rather than its exact name (e.g. 'how do I extract tables from PDFs?').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Natural language query describing the capability you need"
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 50,
+          default: 10,
+          description: "Maximum number of candidate skills to return"
+        }
+      },
+      required: ["query"]
+    }
+  },
+  {
+    name: "skills_save",
+    description: "Create or update an agent skill in MemoryLayer. Stores the SKILL.md manifest and optional bundle files. The skill becomes available to all agents that share this MemoryLayer workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Skill name (1-64 chars, lowercase letters/digits/hyphens, no leading/trailing/consecutive hyphens)"
+        },
+        description: {
+          type: "string",
+          description: "Skill description (1-1024 chars)"
+        },
+        body: {
+          type: "string",
+          description: "SKILL.md body markdown (the instructions, examples, usage)"
+        },
+        version: {
+          type: "string",
+          default: "0.1.0",
+          description: "Skill version (semver-ish)"
+        },
+        license: {
+          type: "string",
+          description: "License identifier (e.g. MIT)"
+        },
+        compatibility: {
+          type: "string",
+          description: "Compatibility notes (max 500 chars)"
+        },
+        allowed_tools: {
+          type: "string",
+          description: "Space-separated tool allowlist (experimental spec field)"
+        },
+        source_mode: {
+          type: "string",
+          enum: ["server", "filesystem", "mirrored"],
+          default: "server",
+          description: "Where canonical storage lives"
+        },
+        metadata: {
+          type: "object",
+          description: "Arbitrary spec-allowed metadata"
+        },
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Relative path within skill bundle" },
+              content_b64: { type: "string", description: "Base64-encoded file content" },
+              mime_type: { type: "string", description: "MIME type (optional)" }
+            },
+            required: ["path", "content_b64"]
+          },
+          description: "Optional bundle files (scripts, references, assets)"
+        }
+      },
+      required: ["name", "description"]
+    }
+  }
+];
+
+/**
  * Tool profiles for different use cases.
  *
  * The "cc" (Claude Code) profile is the recommended default - it provides
@@ -699,6 +1025,20 @@ export const TOOL_NAMES = {
   chatThreadList: "chat_thread_list",
   chatThreadDecompose: "chat_thread_decompose",
   chatThreadDelete: "chat_thread_delete",
+
+  // Skills (agent harness knowledge units)
+  skillsList: "skills_list",
+  skillsGet: "skills_get",
+  skillsGetFile: "skills_get_file",
+  skillsSearch: "skills_search",
+  skillsSave: "skills_save",
+
+  // MCP server registry
+  mcpServersList: "mcp_servers_list",
+  mcpServersGet: "mcp_servers_get",
+  mcpServersSave: "mcp_servers_save",
+  mcpServersDelete: "mcp_servers_delete",
+  mcpServersImport: "mcp_servers_import",
 } as const;
 
 /**
@@ -750,6 +1090,11 @@ export const TOOL_PROFILES: Record<ToolProfile, string[]> = {
     TOOL_NAMES.chatThreadAppend,
     TOOL_NAMES.chatThreadGet,
     TOOL_NAMES.chatThreadList,
+    // Skills (read-mostly: list, get, get_file, search)
+    TOOL_NAMES.skillsList,
+    TOOL_NAMES.skillsGet,
+    TOOL_NAMES.skillsGetFile,
+    TOOL_NAMES.skillsSearch,
   ],
 
   /**
@@ -789,6 +1134,18 @@ export const TOOL_PROFILES: Record<ToolProfile, string[]> = {
     TOOL_NAMES.chatThreadList,
     TOOL_NAMES.chatThreadDecompose,
     TOOL_NAMES.chatThreadDelete,
+    // Skills (all 5 including save)
+    TOOL_NAMES.skillsList,
+    TOOL_NAMES.skillsGet,
+    TOOL_NAMES.skillsGetFile,
+    TOOL_NAMES.skillsSearch,
+    TOOL_NAMES.skillsSave,
+    // MCP server registry (all 5)
+    TOOL_NAMES.mcpServersList,
+    TOOL_NAMES.mcpServersGet,
+    TOOL_NAMES.mcpServersSave,
+    TOOL_NAMES.mcpServersDelete,
+    TOOL_NAMES.mcpServersImport,
   ],
 
   /**
@@ -819,7 +1176,7 @@ export interface ToolDefinition {
  * Get tools for a given profile.
  */
 export function getToolsForProfile(profile: ToolProfile): ToolDefinition[] {
-  const allTools: ToolDefinition[] = [...TOOLS, ...SESSION_TOOLS, ...CONTEXT_ENVIRONMENT_TOOLS, ...CHAT_TOOLS];
+  const allTools: ToolDefinition[] = [...TOOLS, ...SESSION_TOOLS, ...CONTEXT_ENVIRONMENT_TOOLS, ...CHAT_TOOLS, ...SKILLS_TOOLS, ...MCP_SERVERS_TOOLS];
   const enabledNames = TOOL_PROFILES[profile];
   return allTools.filter(tool => enabledNames.includes(tool.name));
 }

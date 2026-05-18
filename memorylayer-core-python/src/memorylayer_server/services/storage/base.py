@@ -16,6 +16,10 @@ from ...models.workspace import Context, Workspace
 if TYPE_CHECKING:
     from ...models import Session, WorkingMemory
     from ...models.chat import ChatMessage, ChatThread, MessageInput
+    from ...models.data_provider import DataProvider
+    from ...models.document import Document, DocumentPage, IngestionJob
+    from ...models.mcp_server import McpServer
+    from ...models.skill import Skill, SkillFile
 
 from .._constants import EXT_STORAGE_BACKEND
 
@@ -97,8 +101,17 @@ class StorageBackend(ABC):
         query: str,
         limit: int = 10,
         offset: int = 0,
+        context_id: str | None = None,
     ) -> list[Memory]:
-        """Full-text search on memory content."""
+        """Full-text search on memory content.
+
+        Args:
+            workspace_id: Workspace boundary
+            query: Search text
+            limit: Maximum results
+            offset: Pagination offset
+            context_id: If provided, restrict results to this context partition
+        """
         pass
 
     @abstractmethod
@@ -158,6 +171,107 @@ class StorageBackend(ABC):
         """Multi-hop graph traversal."""
         pass
 
+    async def get_associations_batch(
+        self,
+        workspace_id: str,
+        memory_ids: list[str],
+        direction: str = "outgoing",
+        relationships: list[str] | None = None,
+    ) -> list[Association]:
+        """Get associations for multiple memories in one call.
+
+        Default implementation loops over get_associations(). Storage backends
+        should override with a single batched query for efficiency.
+
+        Args:
+            workspace_id: Workspace boundary
+            memory_ids: Memory IDs to fetch associations for
+            direction: outgoing, incoming, or both
+            relationships: Filter to these relationship types
+
+        Returns:
+            Deduplicated list of associations across all requested memories.
+        """
+        seen: set[str] = set()
+        result: list[Association] = []
+        for mem_id in memory_ids:
+            assocs = await self.get_associations(
+                workspace_id=workspace_id,
+                memory_id=mem_id,
+                direction=direction,
+                relationships=relationships,
+            )
+            for a in assocs:
+                if a.id not in seen:
+                    seen.add(a.id)
+                    result.append(a)
+        return result
+
+    async def delete_association(self, workspace_id: str, association_id: str) -> bool:
+        """Delete an association by ID.
+
+        Args:
+            workspace_id: Workspace boundary
+            association_id: Association to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        return False
+
+    async def update_association(
+        self,
+        workspace_id: str,
+        association_id: str,
+        metadata: dict | None = None,
+        strength: float | None = None,
+    ) -> bool:
+        """Update an existing association's metadata and/or strength.
+
+        Args:
+            workspace_id: Workspace boundary
+            association_id: Association to update
+            metadata: New metadata dict (replaces existing if provided)
+            strength: New strength value (replaces existing if provided)
+
+        Returns:
+            True if updated, False if not found
+        """
+        return False
+
+    # Filtered memory search (non-vector)
+    async def search_memories_by_filter(
+        self,
+        workspace_id: str,
+        *,
+        subtypes: list[str] | None = None,
+        tags: list[str] | None = None,
+        metadata_filter: dict[str, str] | None = None,
+        status: str = "active",
+        context_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Memory]:
+        """Search memories by subtype, tags, and/or metadata without requiring embeddings.
+
+        This enables efficient filtered queries (e.g., find all RPG nodes by subtype)
+        without relying on full-text search hacks or fetching all memories.
+
+        Args:
+            workspace_id: Workspace boundary
+            subtypes: Filter to memories with these subtypes
+            tags: Filter to memories containing all of these tags
+            metadata_filter: Exact-match filter on metadata keys (e.g., {"rpg_node_id": "src/main.py"})
+            status: Memory status filter (default "active")
+            context_id: Filter to memories in this context (None = all contexts)
+            limit: Maximum results
+            offset: Pagination offset
+
+        Returns:
+            List of matching Memory objects
+        """
+        return []
+
     # Workspace operations
     @abstractmethod
     async def create_workspace(self, workspace: Workspace) -> Workspace:
@@ -193,6 +307,18 @@ class StorageBackend(ABC):
     async def delete_workspace(self, workspace_id: str) -> bool:
         """Delete a workspace and all associated data. Override in subclasses."""
         return False
+
+    async def update_workspace(self, workspace_id: str, **updates) -> Optional[Workspace]:
+        """Update workspace fields (name, settings, etc.).
+
+        Args:
+            workspace_id: Workspace to update
+            **updates: Fields to update (e.g., name="New Name", settings={...})
+
+        Returns:
+            Updated workspace or None if not found
+        """
+        return None
 
     # Statistics
     @abstractmethod
@@ -365,6 +491,7 @@ class StorageBackend(ABC):
         user_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        scope_filter: str | None = None,
     ) -> list["ChatThread"]:
         """List chat threads in a workspace. Override in subclasses."""
         return []
@@ -402,6 +529,15 @@ class StorageBackend(ABC):
         """Get total message count for a thread. Override in subclasses."""
         return 0
 
+    async def delete_message(self, workspace_id: str, thread_id: str, message_id: str) -> bool:
+        """Delete a single message by ID within a thread and workspace.
+
+        Returns True if the message was found and deleted, False if not found.
+        Idempotent: a missing message returns False without raising.
+        Override in subclasses.
+        """
+        return False
+
     async def list_expired_threads(self, limit: int = 100) -> list["ChatThread"]:
         """List expired chat threads across all workspaces.
 
@@ -415,6 +551,309 @@ class StorageBackend(ABC):
         """
         # Default implementation: empty list (subclasses should override)
         return []
+
+    # Document operations (non-abstract with default NotImplementedError)
+
+    async def create_document(self, workspace_id: str, doc: "Document") -> "Document":
+        """Store a new document record. Override in subclasses."""
+        raise NotImplementedError("Document storage not implemented by this backend")
+
+    async def get_document(self, workspace_id: str, doc_id: str) -> "Document | None":
+        """Get document by ID within a workspace. Override in subclasses."""
+        raise NotImplementedError("Document storage not implemented by this backend")
+
+    async def list_documents(
+        self,
+        workspace_id: str,
+        status: str | None = None,
+        document_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list["Document"], int]:
+        """List documents in a workspace. Returns (documents, total_count). Override in subclasses."""
+        raise NotImplementedError("Document storage not implemented by this backend")
+
+    async def update_document(self, workspace_id: str, doc_id: str, **updates) -> "Document | None":
+        """Update document fields. Override in subclasses."""
+        raise NotImplementedError("Document storage not implemented by this backend")
+
+    async def delete_document(self, workspace_id: str, doc_id: str, delete_memories: bool = False) -> bool:
+        """Delete a document and optionally cascade to memories. Override in subclasses."""
+        raise NotImplementedError("Document storage not implemented by this backend")
+
+    async def find_document_by_hash(self, workspace_id: str, content_hash: str) -> "Document | None":
+        """Find document by content hash for deduplication. Override in subclasses."""
+        raise NotImplementedError("Document storage not implemented by this backend")
+
+    async def get_document_memories(self, workspace_id: str, doc_id: str) -> list[Memory]:
+        """Get all memories created from a document. Override in subclasses."""
+        raise NotImplementedError("Document storage not implemented by this backend")
+
+    # Document page operations
+
+    async def create_page(self, workspace_id: str, document_id: str, page: "DocumentPage") -> "DocumentPage":
+        """Store a document page. Override in subclasses."""
+        raise NotImplementedError("Document page storage not implemented by this backend")
+
+    async def get_pages(self, document_id: str, workspace_id: str | None = None) -> list["DocumentPage"]:
+        """Get all pages for a document, ordered by page_no. Override in subclasses."""
+        raise NotImplementedError("Document page storage not implemented by this backend")
+
+    async def get_page(self, page_id: str) -> "DocumentPage | None":
+        """Get a single page by ID. Override in subclasses."""
+        raise NotImplementedError("Document page storage not implemented by this backend")
+
+    async def update_page(self, page_id: str, **updates) -> "DocumentPage | None":
+        """Update page fields (transcript, embedding, etc.). Override in subclasses."""
+        raise NotImplementedError("Document page storage not implemented by this backend")
+
+    async def search_pages_by_maxsim(
+        self,
+        workspace_id: str,
+        query_multivector: list[list[float]],
+        limit: int = 10,
+        doc_ids: list[str] | None = None,
+    ) -> list[tuple["DocumentPage", float]]:
+        """Search document pages by ColPali MaxSim (ColBERT-style late interaction).
+
+        Returns ``(page, score)`` tuples sorted by descending score. Backends
+        without multi-vector page support should leave this as a
+        ``NotImplementedError``. The OSS SQLite backend scores in Python after
+        loading candidate page multivectors; the Enterprise PostgreSQL backend
+        pushes the scoring into the database for higher throughput at scale.
+
+        Args:
+            workspace_id: Workspace scope.
+            query_multivector: Query multi-vector embedding (list of token vectors).
+            limit: Maximum results to return.
+            doc_ids: Optional list of document IDs to restrict search.
+        """
+        raise NotImplementedError("MaxSim page search not implemented by this backend")
+
+    # Ingestion job operations
+
+    async def create_job(self, job: "IngestionJob") -> "IngestionJob":
+        """Store an ingestion job. Override in subclasses."""
+        raise NotImplementedError("Ingestion job storage not implemented by this backend")
+
+    async def get_job(self, job_id: str, workspace_id: str | None = None) -> "IngestionJob | None":
+        """Get ingestion job by ID. Override in subclasses."""
+        raise NotImplementedError("Ingestion job storage not implemented by this backend")
+
+    async def list_jobs(
+        self,
+        workspace_id: str,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list["IngestionJob"]:
+        """List ingestion jobs for a workspace. Override in subclasses."""
+        raise NotImplementedError("Ingestion job storage not implemented by this backend")
+
+    async def update_job(self, job_id: str, **updates) -> "IngestionJob | None":
+        """Update ingestion job fields (status, progress, etc.). Override in subclasses."""
+        raise NotImplementedError("Ingestion job storage not implemented by this backend")
+
+    # Data provider operations
+
+    async def create_data_provider(self, workspace_id: str, provider: "DataProvider") -> "DataProvider":
+        """Store a data provider. Override in subclasses."""
+        raise NotImplementedError("Data provider storage not implemented by this backend")
+
+    async def get_data_provider(self, workspace_id: str, provider_id: str) -> "DataProvider | None":
+        """Get data provider by ID. Override in subclasses."""
+        raise NotImplementedError("Data provider storage not implemented by this backend")
+
+    async def list_data_providers(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list["DataProvider"], int]:
+        """List data providers for a workspace. Returns (providers, total_count). Override in subclasses."""
+        raise NotImplementedError("Data provider storage not implemented by this backend")
+
+    async def update_data_provider(self, workspace_id: str, provider_id: str, **updates) -> "DataProvider | None":
+        """Update data provider fields. Override in subclasses."""
+        raise NotImplementedError("Data provider storage not implemented by this backend")
+
+    async def delete_data_provider(self, workspace_id: str, provider_id: str) -> bool:
+        """Delete a data provider. Override in subclasses."""
+        raise NotImplementedError("Data provider storage not implemented by this backend")
+
+    # Knowledgebase article operations
+
+    async def store_kb_article(
+        self,
+        workspace_id: str,
+        article_id: str,
+        article_type: str,
+        title: str,
+        content_md: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Store a knowledgebase article. Override in subclasses."""
+        raise NotImplementedError("Knowledgebase storage not implemented by this backend")
+
+    async def get_kb_article(self, workspace_id: str, article_id: str) -> dict | None:
+        """Get a knowledgebase article by ID. Override in subclasses."""
+        raise NotImplementedError("Knowledgebase storage not implemented by this backend")
+
+    async def list_kb_articles(
+        self,
+        workspace_id: str,
+        article_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List knowledgebase articles for a workspace. Override in subclasses."""
+        raise NotImplementedError("Knowledgebase storage not implemented by this backend")
+
+    async def delete_kb_articles(self, workspace_id: str) -> int:
+        """Delete all knowledgebase articles for a workspace (for regeneration). Override in subclasses."""
+        raise NotImplementedError("Knowledgebase storage not implemented by this backend")
+
+    async def store_graph_analysis(self, workspace_id: str, analysis_json: dict) -> dict:
+        """Cache a graph analysis result. Override in subclasses."""
+        raise NotImplementedError("Graph analysis storage not implemented by this backend")
+
+    async def get_graph_analysis(self, workspace_id: str) -> dict | None:
+        """Get cached graph analysis for a workspace. Override in subclasses."""
+        raise NotImplementedError("Graph analysis storage not implemented by this backend")
+
+    # Skill operations
+
+    async def create_skill(self, skill: "Skill") -> "Skill":
+        """Store a new skill. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def get_skill(self, workspace_id: str, skill_id: str) -> "Skill | None":
+        """Get skill by ID within a workspace. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def get_skill_by_name(
+        self,
+        workspace_id: str,
+        name: str,
+        user_id: Optional[str] = None,
+    ) -> "Skill | None":
+        """Get skill by name within a workspace, optionally filtering by user scope. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def list_skills(
+        self,
+        workspace_id: str,
+        user_id: Optional[str] = None,
+        name: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        enabled: Optional[bool] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list["Skill"]:
+        """List skills in a workspace with optional filters. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def find_skills_by_name(
+        self,
+        name: str,
+        scope_filters: list[dict],
+    ) -> list["Skill"]:
+        """Find skills by name across multiple scopes for precedence resolution.
+
+        Each entry in scope_filters is a dict with ``workspace_id`` and
+        optional ``user_id`` keys. Returns all matching skills across the
+        given scopes so the caller can apply precedence ordering.
+        Override in subclasses.
+        """
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def update_skill(
+        self,
+        workspace_id: str,
+        skill_id: str,
+        updates: dict,
+    ) -> "Skill | None":
+        """Update skill fields. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def delete_skill(self, workspace_id: str, skill_id: str) -> bool:
+        """Delete a skill and cascade to its files. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def upsert_skill_file(self, skill_file: "SkillFile") -> "SkillFile":
+        """Insert or update a file within a skill bundle. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def get_skill_file(self, skill_id: str, path: str) -> "SkillFile | None":
+        """Get a single skill file by skill ID and relative path. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def list_skill_files(self, skill_id: str) -> list["SkillFile"]:
+        """List all files belonging to a skill bundle. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    async def delete_skill_file(self, skill_id: str, path: str) -> bool:
+        """Delete a single skill file by path. Override in subclasses."""
+        raise NotImplementedError("Skill storage not implemented by this backend")
+
+    # MCP server operations
+
+    async def create_mcp_server(self, server: "McpServer") -> "McpServer":
+        """Store a new MCP server record. Override in subclasses."""
+        raise NotImplementedError("MCP server storage not implemented by this backend")
+
+    async def get_mcp_server(self, workspace_id: str, server_id: str) -> "McpServer | None":
+        """Get MCP server by ID within a workspace. Override in subclasses."""
+        raise NotImplementedError("MCP server storage not implemented by this backend")
+
+    async def get_mcp_server_by_name(
+        self,
+        workspace_id: str,
+        name: str,
+        user_id: Optional[str] = None,
+    ) -> "McpServer | None":
+        """Get MCP server by name within a workspace, optionally filtering by user scope. Override in subclasses."""
+        raise NotImplementedError("MCP server storage not implemented by this backend")
+
+    async def list_mcp_servers(
+        self,
+        workspace_id: str,
+        user_id: Optional[str] = None,
+        name: Optional[str] = None,
+        transport: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list["McpServer"]:
+        """List MCP servers in a workspace with optional filters. Override in subclasses."""
+        raise NotImplementedError("MCP server storage not implemented by this backend")
+
+    async def find_mcp_servers_by_name(
+        self,
+        name: str,
+        scope_filters: list[dict],
+    ) -> list["McpServer"]:
+        """Find MCP servers by name across multiple scopes for precedence resolution.
+
+        Each entry in scope_filters is a dict with ``workspace_id`` and
+        optional ``user_id`` keys. Returns all matching servers across the
+        given scopes so the caller can apply precedence ordering.
+        Override in subclasses.
+        """
+        raise NotImplementedError("MCP server storage not implemented by this backend")
+
+    async def update_mcp_server(
+        self,
+        workspace_id: str,
+        server_id: str,
+        updates: dict,
+    ) -> "McpServer | None":
+        """Update MCP server fields. Override in subclasses."""
+        raise NotImplementedError("MCP server storage not implemented by this backend")
+
+    async def delete_mcp_server(self, workspace_id: str, server_id: str) -> bool:
+        """Delete an MCP server record. Override in subclasses."""
+        raise NotImplementedError("MCP server storage not implemented by this backend")
 
 
 # noinspection PyAbstractClass

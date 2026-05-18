@@ -1,6 +1,6 @@
 {
   "name": "@scitrera/memorylayer-cc-plugin",
-  "version": "0.0.5",
+  "version": "0.1.22",
   "description": "Claude Code plugin for MemoryLayer.ai - persistent memory hooks",
   "type": "module",
   "main": "dist/src/index.js",
@@ -13,7 +13,8 @@
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build"
   },
-  "author": "Scitrera LLC",
+  "author": "scitrera.ai",
+  "homepage": "https://memorylayer.ai",
   "license": "Apache-2.0",
   "dependencies": {
     "@scitrera/memorylayer-mcp-server": "file:../memorylayer-mcp-typescript"

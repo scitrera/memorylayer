@@ -24,6 +24,7 @@ from ...config import (
     MEMORYLAYER_RERANKER_PRELOAD_ENABLED,
     MEMORYLAYER_RERANKER_PROVIDER,
     MEMORYLAYER_RERANKER_SERVICE,
+    assert_supported_reranker_provider,
 )
 from .._constants import EXT_RERANKER_PROVIDER, EXT_RERANKER_SERVICE
 from .._plugin_factory import make_service_plugin_base
@@ -254,6 +255,8 @@ class RerankerProviderPluginBase(Plugin):
         return EXT_RERANKER_PROVIDER
 
     def is_enabled(self, v: Variables) -> bool:
+        configured = v.environ(MEMORYLAYER_RERANKER_PROVIDER, default=DEFAULT_MEMORYLAYER_RERANKER_PROVIDER)
+        assert_supported_reranker_provider(str(configured))
         return enabled_option_pattern(self, v, MEMORYLAYER_RERANKER_PROVIDER, self_attr="PROVIDER_NAME")
 
     def on_registration(self, v: Variables) -> None:

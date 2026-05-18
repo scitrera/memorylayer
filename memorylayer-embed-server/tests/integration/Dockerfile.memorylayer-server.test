@@ -1,0 +1,38 @@
+# Lightweight memorylayer-server image used only by the docker integration
+# test in this directory. Installs from local source so the test exercises
+# the in-tree code, not whatever happens to be on PyPI.
+#
+# Build context: repo root (scitrera-memorylayer-ai-cc/)
+#   docker build -f oss/memorylayer-embed-server/tests/integration/Dockerfile.memorylayer-server.test \
+#                -t memorylayer-server:test .
+
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential curl && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 1000 memorylayer && \
+    useradd --uid 1000 --gid memorylayer --create-home memorylayer
+
+RUN pip install --no-cache-dir uv==0.9.17
+
+COPY oss/memorylayer-core-python /src/memorylayer-core-python
+
+# Install the OSS server with the cloud-provider extras (no torch).
+RUN uv pip install --system --no-cache "/src/memorylayer-core-python[openai,google,documents]"
+
+RUN mkdir -p /data && chown memorylayer:memorylayer /data
+WORKDIR /app
+USER memorylayer
+
+EXPOSE 61001
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=10 \
+    CMD curl -fsS http://localhost:61001/health || exit 1
+
+ENTRYPOINT ["memorylayer", "serve", "--host", "0.0.0.0"]

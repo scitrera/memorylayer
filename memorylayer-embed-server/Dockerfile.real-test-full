@@ -1,0 +1,70 @@
+# MemoryLayer Embed Server — full real-model integration test image.
+#
+# Build context: repo root (scitrera-memorylayer-ai-cc/)
+#   docker build -f oss/memorylayer-embed-server/Dockerfile.real-test-full \
+#                -t memorylayer-embed-server:real-test-full .
+#
+# Same shape as Dockerfile.real-test but installs BOTH the [vllm] and
+# [colpali] extras so:
+#   * Single-vector requests go through vLLM with ``Qwen/Qwen3-VL-Embedding-2B``
+#     (the real production single-vector provider).
+#   * Multi-vector requests go through ColPali with
+#     ``ModernVBERT/colmodernvbert``.
+#
+# Heaviest of the three test variants. Expect:
+#   * ~5-10 minutes for ``pip install vllm`` (torch + CUDA kernels).
+#   * ~3-5 minutes for first-request vLLM model warm-up.
+#   * Several GB of disk for vLLM wheels + model weights.
+
+FROM nvidia/cuda:13.1.1-runtime-ubuntu24.04 AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.12 python3.12-venv python3.12-dev \
+        build-essential curl ca-certificates && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN groupadd --gid 65532 memorylayer && \
+    useradd --uid 65532 --gid memorylayer --create-home memorylayer
+
+RUN python3 -m venv /opt/memorylayer-embed
+ENV PATH="/opt/memorylayer-embed/bin:$PATH" \
+    VIRTUAL_ENV="/opt/memorylayer-embed"
+
+# Copy source packages
+COPY oss/memorylayer-core-python /src/memorylayer-core-python
+COPY oss/memorylayer-embed-server /src/memorylayer-embed-server
+
+# Install OSS server + embed-server with BOTH vllm and colpali extras.
+# --torch-backend=auto resolves the correct CUDA torch wheels.
+RUN uv pip install --python /opt/memorylayer-embed/bin/python --torch-backend=auto \
+        /src/memorylayer-core-python \
+        "/src/memorylayer-embed-server[vllm,colpali]"
+
+WORKDIR /app
+USER memorylayer
+
+# Plain-HTTP mode; both real providers wired separately.
+ENV EMBED_SERVER_RUN_SIDECAR=false \
+    MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=false \
+    MEMORYLAYER_EMBED_USE_MULTI_FOR_SINGLE=false \
+    MEMORYLAYER_EMBED_PRELOAD_MODELS=false \
+    MEMORYLAYER_EMBEDDING_DEVICE="cuda"
+
+EXPOSE 61051
+
+# Long start_period — both vLLM and ColPali load on first request and
+# vLLM in particular can take several minutes to warm.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=20 \
+    CMD curl -fsS http://localhost:61051/health || exit 1
+
+ENTRYPOINT ["memorylayer-embed", "serve"]

@@ -179,9 +179,6 @@ class WorkspaceService:
         """
         Update workspace settings.
 
-        Note: Storage backend may not have update_workspace yet, so we store
-        the updated workspace directly via create_workspace (upsert behavior).
-
         Args:
             workspace: Workspace with updated fields
 
@@ -193,14 +190,14 @@ class WorkspaceService:
         """
         self.logger.info("Updating workspace: %s", workspace.id)
 
-        # Check if workspace exists
-        existing = await self._storage.get_workspace(workspace.id)
-        if not existing:
-            raise ValueError(f"Workspace not found: {workspace.id}")
+        updated = await self._storage.update_workspace(
+            workspace.id,
+            name=workspace.name,
+            settings=workspace.settings,
+        )
 
-        # Storage backend doesn't have update_workspace yet, so we use create
-        # (assuming upsert behavior - in production, this would be update_workspace)
-        updated = await self._storage.create_workspace(workspace)
+        if not updated:
+            raise ValueError(f"Workspace not found: {workspace.id}")
 
         self.logger.info("Updated workspace: %s", workspace.id)
         return updated

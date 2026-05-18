@@ -630,4 +630,68 @@ export class MCPToolHandlers {
         const result = await this.client.chatThreadDelete(threadId);
         return JSON.stringify(result, null, 2);
     }
+
+    // ============================================================================
+    // MCP Server Registry Handlers
+    // ============================================================================
+
+    async handleMcpServersList(args: Record<string, unknown>): Promise<string> {
+        const result = await this.client.mcpServersList({
+            transport: args.transport as string | undefined,
+            enabled: args.enabled as boolean | undefined,
+            name: args.name as string | undefined,
+            limit: args.limit as number | undefined,
+            offset: args.offset as number | undefined,
+        });
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleMcpServersGet(args: Record<string, unknown>): Promise<string> {
+        const serverId = args.server_id as string | undefined;
+        const name = args.name as string | undefined;
+        if (!serverId && !name) {
+            throw new Error("server_id or name is required");
+        }
+        const result = await this.client.mcpServersGet({ server_id: serverId, name });
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleMcpServersSave(args: Record<string, unknown>): Promise<string> {
+        const name = args.name as string;
+        const transport = args.transport as string;
+        if (!name || !transport) {
+            throw new Error("name and transport are required");
+        }
+        const result = await this.client.mcpServersSave({
+            name,
+            transport,
+            command: args.command as string | undefined,
+            args: args.args as string[] | undefined,
+            env: args.env as Record<string, string> | undefined,
+            url: args.url as string | undefined,
+            headers: args.headers as Record<string, string> | undefined,
+            description: args.description as string | undefined,
+            enabled: args.enabled as boolean | undefined,
+            metadata: args.metadata as Record<string, unknown> | undefined,
+        });
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleMcpServersDelete(args: Record<string, unknown>): Promise<string> {
+        const serverId = args.server_id as string;
+        if (!serverId) {
+            throw new Error("server_id is required");
+        }
+        const result = await this.client.mcpServersDelete(serverId);
+        return JSON.stringify(result, null, 2);
+    }
+
+    async handleMcpServersImport(args: Record<string, unknown>): Promise<string> {
+        const mcpServers = args.mcpServers as Record<string, unknown>;
+        if (!mcpServers || typeof mcpServers !== "object") {
+            throw new Error("mcpServers is required and must be an object");
+        }
+        const result = await this.client.mcpServersImport(mcpServers);
+        return JSON.stringify(result, null, 2);
+    }
 }
