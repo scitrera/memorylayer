@@ -580,7 +580,6 @@ def skills_sync(skill_dir, workspace, server_url, api_key, auto_push, auto_pull)
             click.echo(f"Error during push: {e}", err=True)
             raise SystemExit(1)
     elif action == "pull" and auto_pull:
-
         # Re-use pull logic inline
         try:
             with httpx.Client(timeout=60.0) as client:

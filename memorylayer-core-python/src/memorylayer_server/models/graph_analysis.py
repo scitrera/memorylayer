@@ -4,7 +4,6 @@ Models for community detection, centrality analysis, and graph statistics
 over the workspace association graph.
 """
 
-
 from pydantic import BaseModel, Field
 
 

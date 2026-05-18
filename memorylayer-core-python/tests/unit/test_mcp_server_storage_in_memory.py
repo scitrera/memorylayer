@@ -5,7 +5,6 @@ Tests MCP server CRUD operations against MemoryStorageBackend directly,
 without requiring the full service stack.
 """
 
-
 import pytest
 
 from memorylayer_server.models.mcp_server import McpServer

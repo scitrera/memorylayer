@@ -78,9 +78,7 @@ class SkillResolveRequest(BaseModel):
     name: str | None = Field(None, description="Exact skill name — returns precedence winner")
     query: str | None = Field(None, description="Intent query — runs vector recall against skill memories")
     scope_hint: str | None = Field(None, description="Restrict resolution to a single scope: 'user', 'workspace', or 'global'")
-    workspace_id: str | None = Field(
-        None, description="Workspace to resolve against; defaults to the authenticated context's workspace."
-    )
+    workspace_id: str | None = Field(None, description="Workspace to resolve against; defaults to the authenticated context's workspace.")
 
 
 class SkillResolveResponse(BaseModel):

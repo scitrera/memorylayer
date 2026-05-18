@@ -504,9 +504,7 @@ def test_summary_memory_variables(summary_memory: MemoryLayerConversationSummary
 def test_summary_load_memory_variables_empty(summary_memory: MemoryLayerConversationSummaryMemory, base_url: str) -> None:
     """Test loading summary memory variables when history is empty."""
     # Mock reflect response with empty summary
-    respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": "", "confidence": 0.9})
-    )
+    respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(200, json={"reflection": "", "confidence": 0.9}))
 
     # Test
     result = summary_memory.load_memory_variables({})
@@ -520,9 +518,7 @@ def test_summary_load_memory_variables_with_summary(summary_memory: MemoryLayerC
     """Test loading summary memory variables with existing summary."""
     # Mock reflect response
     summary_text = "The user greeted the assistant and discussed the weather."
-    respx.post(f"{base_url}/v1/memories/reflect").mock(
-        return_value=Response(200, json={"reflection": summary_text, "confidence": 0.9})
-    )
+    respx.post(f"{base_url}/v1/memories/reflect").mock(return_value=Response(200, json={"reflection": summary_text, "confidence": 0.9}))
 
     # Test
     result = summary_memory.load_memory_variables({})

@@ -84,9 +84,7 @@ class McpServerResolveRequest(BaseModel):
     name: str | None = Field(None, description="Exact server name — returns precedence winner")
     query: str | None = Field(None, description="Intent query — runs vector recall against server memories")
     transport: str | None = Field(None, description="Filter by transport")
-    workspace_id: str | None = Field(
-        None, description="Workspace to operate against; defaults to the authenticated context's workspace."
-    )
+    workspace_id: str | None = Field(None, description="Workspace to operate against; defaults to the authenticated context's workspace.")
 
 
 class McpServerResolveResponse(BaseModel):
