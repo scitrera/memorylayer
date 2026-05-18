@@ -84,14 +84,9 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-sdk-typescript
-        # ``--provenance`` publishes a Sigstore attestation built from the
-        # GitHub OIDC token (paired with ``id-token: write`` above). With
-        # npm Trusted Publishing configured on the @scitrera packages,
-        # npm CLI also uses GitHub OIDC for the npm-registry PUT itself —
-        # but only when NODE_AUTH_TOKEN is unset. If a classic token env
-        # var is present, npm CLI commits to that path and won't fall
-        # back to OIDC, which surfaces as 404 (npm's disguised 403).
         run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────
   # TypeScript MCP server → npm (after SDK is published)
@@ -142,14 +137,9 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-mcp-typescript
-        # ``--provenance`` publishes a Sigstore attestation built from the
-        # GitHub OIDC token (paired with ``id-token: write`` above). With
-        # npm Trusted Publishing configured on the @scitrera packages,
-        # npm CLI also uses GitHub OIDC for the npm-registry PUT itself —
-        # but only when NODE_AUTH_TOKEN is unset. If a classic token env
-        # var is present, npm CLI commits to that path and won't fall
-        # back to OIDC, which surfaces as 404 (npm's disguised 403).
         run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────
   # Claude Code plugin → npm (after MCP server is published)
@@ -197,14 +187,9 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-cc-plugin
-        # ``--provenance`` publishes a Sigstore attestation built from the
-        # GitHub OIDC token (paired with ``id-token: write`` above). With
-        # npm Trusted Publishing configured on the @scitrera packages,
-        # npm CLI also uses GitHub OIDC for the npm-registry PUT itself —
-        # but only when NODE_AUTH_TOKEN is unset. If a classic token env
-        # var is present, npm CLI commits to that path and won't fall
-        # back to OIDC, which surfaces as 404 (npm's disguised 403).
         run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────
   # OpenCode plugin → npm (after MCP server is published)

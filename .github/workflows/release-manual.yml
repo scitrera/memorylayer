@@ -1,0 +1,379 @@
+# Manual release workflow — pick exactly which packages to publish.
+#
+# Use this when:
+#   * A previous tag-triggered ``release.yml`` run partially succeeded and
+#     you only need to retry the failed packages (no re-tag required).
+#   * You're shipping a hotfix for a single package without bumping the
+#     others.
+#   * You want to test a publish with a non-tag version string.
+#
+# Each package has its own checkbox. The version is supplied as a single
+# string input (no ``v`` prefix). Downstream npm packages (mcp, plugins)
+# pull their upstream from the registry at the supplied version — so
+# you can re-publish a plugin against an SDK that's already live without
+# re-publishing the SDK.
+#
+# Concurrency: this workflow is NOT cancelled when re-queued — manual
+# runs are explicit and shouldn't preempt each other.
+
+name: Release (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (no 'v' prefix, e.g. 0.1.22)"
+        required: true
+        type: string
+
+      # ── PyPI ──────────────────────────────────────────────────────────
+      pypi_client:
+        description: "PyPI: memorylayer-client (Python SDK)"
+        type: boolean
+        default: false
+      pypi_server:
+        description: "PyPI: memorylayer-server (Python core)"
+        type: boolean
+        default: false
+      pypi_langchain:
+        description: "PyPI: memorylayer-langchain"
+        type: boolean
+        default: false
+      pypi_llamaindex:
+        description: "PyPI: memorylayer-llamaindex"
+        type: boolean
+        default: false
+
+      # ── npm ───────────────────────────────────────────────────────────
+      npm_sdk:
+        description: "npm: @scitrera/memorylayer-sdk"
+        type: boolean
+        default: false
+      npm_mcp:
+        description: "npm: @scitrera/memorylayer-mcp-server"
+        type: boolean
+        default: false
+      npm_cc_plugin:
+        description: "npm: @scitrera/memorylayer-cc-plugin"
+        type: boolean
+        default: false
+      npm_opencode_plugin:
+        description: "npm: @scitrera/memorylayer-opencode-plugin"
+        type: boolean
+        default: false
+
+      # ── Docker ────────────────────────────────────────────────────────
+      docker_server:
+        description: "Docker: scitrera/memorylayer-server"
+        type: boolean
+        default: false
+      # Note: ``scitrera/memorylayer-embed-server`` is handled by its own
+      # workflow (release-embed-server.yml) which is also workflow_dispatch
+      # capable and does proper multi-arch fan-out. Run that separately.
+
+concurrency:
+  group: release-manual-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# ────────────────────────────────────────────────────────────────────────
+# Shared knobs hoisted into env so per-job overrides stay obvious.
+# ────────────────────────────────────────────────────────────────────────
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════
+  # PyPI — Python packages (independent; can publish in any order/subset)
+  # ════════════════════════════════════════════════════════════════════
+  pypi-client:
+    if: ${{ inputs.pypi_client }}
+    name: "PyPI: memorylayer-client"
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/project/memorylayer-client/
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: pip install --upgrade build
+      - name: Build package
+        working-directory: memorylayer-sdk-python
+        run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: memorylayer-sdk-python/dist/
+
+  pypi-server:
+    if: ${{ inputs.pypi_server }}
+    name: "PyPI: memorylayer-server"
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/project/memorylayer-server/
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: pip install --upgrade build
+      - name: Build package
+        working-directory: memorylayer-core-python
+        run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: memorylayer-core-python/dist/
+
+  pypi-langchain:
+    if: ${{ inputs.pypi_langchain }}
+    name: "PyPI: memorylayer-langchain"
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/project/memorylayer-langchain/
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: pip install --upgrade build
+      - name: Build package
+        working-directory: memorylayer-sdk-langchain-python
+        run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: memorylayer-sdk-langchain-python/dist/
+
+  pypi-llamaindex:
+    if: ${{ inputs.pypi_llamaindex }}
+    name: "PyPI: memorylayer-llamaindex"
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/project/memorylayer-llamaindex/
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: pip install --upgrade build
+      - name: Build package
+        working-directory: memorylayer-sdk-llamaindex-python
+        run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: memorylayer-sdk-llamaindex-python/dist/
+
+  # ════════════════════════════════════════════════════════════════════
+  # npm — TypeScript packages.
+  #
+  # Each downstream job (mcp/plugin) pulls its upstream from the registry
+  # via ``npm install pkg@^${VERSION}`` rather than the committed file:
+  # ref. That means you can publish a plugin against an upstream that's
+  # ALREADY live without re-publishing the upstream in the same run.
+  # ════════════════════════════════════════════════════════════════════
+  npm-sdk:
+    if: ${{ inputs.npm_sdk }}
+    name: "npm: @scitrera/memorylayer-sdk"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install dependencies
+        working-directory: memorylayer-sdk-typescript
+        run: npm install
+      - name: Build
+        working-directory: memorylayer-sdk-typescript
+        run: npm run build
+      - name: Publish to npm
+        working-directory: memorylayer-sdk-typescript
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  npm-mcp:
+    if: ${{ inputs.npm_mcp }}
+    name: "npm: @scitrera/memorylayer-mcp-server"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify SDK availability on npm
+        # Manual runs assume the upstream is already live, so we just
+        # confirm (no long poll) — fail fast if it isn't.
+        run: |
+          if ! npm view "@scitrera/memorylayer-sdk@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::@scitrera/memorylayer-sdk@${VERSION} not on npm. Publish the SDK first."
+            exit 1
+          fi
+      - name: Install deps (swap local SDK file:dep for the registry version)
+        working-directory: memorylayer-mcp-typescript
+        run: npm install "@scitrera/memorylayer-sdk@^${VERSION}"
+      - name: Build
+        working-directory: memorylayer-mcp-typescript
+        run: npm run build
+      - name: Publish to npm
+        working-directory: memorylayer-mcp-typescript
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  npm-cc-plugin:
+    if: ${{ inputs.npm_cc_plugin }}
+    name: "npm: @scitrera/memorylayer-cc-plugin"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify MCP availability on npm
+        run: |
+          if ! npm view "@scitrera/memorylayer-mcp-server@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::@scitrera/memorylayer-mcp-server@${VERSION} not on npm. Publish MCP first."
+            exit 1
+          fi
+      - name: Install deps (swap local MCP file:dep for the registry version)
+        working-directory: memorylayer-cc-plugin
+        run: npm install "@scitrera/memorylayer-mcp-server@^${VERSION}"
+      - name: Build
+        working-directory: memorylayer-cc-plugin
+        run: npm run build
+      - name: Publish to npm
+        working-directory: memorylayer-cc-plugin
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  npm-opencode-plugin:
+    if: ${{ inputs.npm_opencode_plugin }}
+    name: "npm: @scitrera/memorylayer-opencode-plugin"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify MCP availability on npm
+        run: |
+          if ! npm view "@scitrera/memorylayer-mcp-server@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::@scitrera/memorylayer-mcp-server@${VERSION} not on npm. Publish MCP first."
+            exit 1
+          fi
+      - name: Install deps (swap local MCP file:dep for the registry version)
+        working-directory: memorylayer-opencode-plugin
+        run: npm install "@scitrera/memorylayer-mcp-server@^${VERSION}"
+      - name: Build
+        working-directory: memorylayer-opencode-plugin
+        run: npm run build
+      - name: Publish to npm
+        working-directory: memorylayer-opencode-plugin
+        # First-publish exception — see release.yml. Remove the env
+        # block after trusted publisher is configured on npmjs.com for
+        # @scitrera/memorylayer-opencode-plugin.
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ════════════════════════════════════════════════════════════════════
+  # Docker — independent of the language jobs above.
+  # ════════════════════════════════════════════════════════════════════
+  docker-server:
+    if: ${{ inputs.docker_server }}
+    name: "Docker: scitrera/memorylayer-server"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify memorylayer-server on PyPI
+        # Image build pulls memorylayer-server from PyPI in the Dockerfile
+        # path used here. Confirm the requested version is live.
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://pypi.org/pypi/memorylayer-server/${VERSION}/json")
+          if [ "${STATUS}" != "200" ]; then
+            echo "::error::memorylayer-server ${VERSION} not on PyPI. Publish it first."
+            exit 1
+          fi
+      - name: Compose Docker tag set
+        id: tags
+        run: |
+          IMG_HUB="scitrera/memorylayer-server"
+          IMG_GHCR="ghcr.io/${{ github.repository_owner }}/memorylayer-server"
+          MAJOR_MINOR=$(echo "${VERSION}" | awk -F. '{ print $1 "." $2 }')
+          {
+            echo "tags<<EOF"
+            echo "${IMG_HUB}:${VERSION}"
+            echo "${IMG_HUB}:${MAJOR_MINOR}"
+            echo "${IMG_HUB}:latest"
+            echo "${IMG_GHCR}:${VERSION}"
+            echo "${IMG_GHCR}:${MAJOR_MINOR}"
+            echo "${IMG_GHCR}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
