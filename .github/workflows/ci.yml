@@ -36,9 +36,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install package with dev and context extras
+      - name: Install package with dev, context, and observability extras
         working-directory: memorylayer-core-python
-        run: pip install -e ".[dev,context]"
+        # ``observability`` pulls in opentelemetry-* — required by
+        # ``tests/unit/test_tenant_tag_middleware.py`` which imports
+        # ``opentelemetry.trace`` unconditionally.
+        run: pip install -e ".[dev,context,observability]"
 
       - name: Lint with ruff
         working-directory: memorylayer-core-python

@@ -93,14 +93,14 @@ run_server() {
     # specified extras before invoking the command. Caller's active
     # venv is irrelevant.
     if [ "$FIX" = true ]; then
-        run_step_in "$dir" "server: ruff fix"    uv run --extra dev --extra context -- ruff check --fix --unsafe-fixes .
-        run_step_in "$dir" "server: ruff format" uv run --extra dev --extra context -- ruff format .
+        run_step_in "$dir" "server: ruff fix"    uv run --extra dev --extra context --extra observability -- ruff check --fix --unsafe-fixes .
+        run_step_in "$dir" "server: ruff format" uv run --extra dev --extra context --extra observability -- ruff format .
     else
-        run_step_in "$dir" "server: ruff check"  uv run --extra dev --extra context -- ruff check .
-        run_step_in "$dir" "server: ruff format" uv run --extra dev --extra context -- ruff format --check .
+        run_step_in "$dir" "server: ruff check"  uv run --extra dev --extra context --extra observability -- ruff check .
+        run_step_in "$dir" "server: ruff format" uv run --extra dev --extra context --extra observability -- ruff format --check .
     fi
 
-    run_step_in "$dir" "server: pytest" uv run --extra dev --extra context -- pytest tests/ -m "not slow and not integration and not llm and not llm_quality" -x -q
+    run_step_in "$dir" "server: pytest" uv run --extra dev --extra context --extra observability -- pytest tests/ -m "not slow and not integration and not llm and not llm_quality" -x -q
 }
 
 # ──────────────────────────────────────────────────────────────────
