@@ -111,12 +111,6 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Replace local SDK reference with registry version
-        working-directory: memorylayer-mcp-typescript
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          sed -i 's|"file:../memorylayer-sdk-typescript"|"^'"${VERSION}"'"|' package.json
-
       - name: Wait for SDK availability on npm
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -131,9 +125,16 @@ jobs:
           echo "::error::SDK not available on npm after 5 minutes"
           exit 1
 
-      - name: Install dependencies
+      - name: Install deps (swap local SDK file:dep for the registry version)
         working-directory: memorylayer-mcp-typescript
-        run: npm install
+        # ``npm install pkg@version`` rewrites *both* package.json and
+        # package-lock.json so the local ``file:../memorylayer-sdk-typescript``
+        # dep is replaced cleanly with the registry version. Other transitive
+        # deps keep their existing locked versions — preserving the
+        # reproducibility benefit of the committed lockfile.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm install "@scitrera/memorylayer-sdk@^${VERSION}"
 
       - name: Build
         working-directory: memorylayer-mcp-typescript
@@ -168,12 +169,6 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Replace local MCP reference with registry version
-        working-directory: memorylayer-cc-plugin
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          sed -i 's|"file:../memorylayer-mcp-typescript"|"^'"${VERSION}"'"|' package.json
-
       - name: Wait for MCP server availability on npm
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -188,9 +183,13 @@ jobs:
           echo "::error::MCP server not available on npm after 5 minutes"
           exit 1
 
-      - name: Install dependencies
+      - name: Install deps (swap local MCP file:dep for the registry version)
         working-directory: memorylayer-cc-plugin
-        run: npm install
+        # See ``publish-npm-mcp`` for the rationale — ``npm install pkg@version``
+        # patches both package.json and the lockfile surgically.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm install "@scitrera/memorylayer-mcp-server@^${VERSION}"
 
       - name: Build
         working-directory: memorylayer-cc-plugin
@@ -225,12 +224,6 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Replace local MCP reference with registry version
-        working-directory: memorylayer-opencode-plugin
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          sed -i 's|"file:../memorylayer-mcp-typescript"|"^'"${VERSION}"'"|' package.json
-
       - name: Wait for MCP server availability on npm
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -245,9 +238,13 @@ jobs:
           echo "::error::MCP server not available on npm after 5 minutes"
           exit 1
 
-      - name: Install dependencies
+      - name: Install deps (swap local MCP file:dep for the registry version)
         working-directory: memorylayer-opencode-plugin
-        run: npm install
+        # See ``publish-npm-mcp`` for the rationale — ``npm install pkg@version``
+        # patches both package.json and the lockfile surgically.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm install "@scitrera/memorylayer-mcp-server@^${VERSION}"
 
       - name: Build
         working-directory: memorylayer-opencode-plugin
@@ -255,14 +252,19 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-opencode-plugin
-        # ``--provenance`` publishes a Sigstore attestation built from the
-        # GitHub OIDC token (paired with ``id-token: write`` above). With
-        # npm Trusted Publishing configured on the @scitrera packages,
-        # npm CLI also uses GitHub OIDC for the npm-registry PUT itself —
-        # but only when NODE_AUTH_TOKEN is unset. If a classic token env
-        # var is present, npm CLI commits to that path and won't fall
-        # back to OIDC, which surfaces as 404 (npm's disguised 403).
+        # First-publish exception: npm Trusted Publisher config is
+        # per-package and only applies to packages that already exist on
+        # the registry. ``@scitrera/memorylayer-opencode-plugin`` has
+        # never been published, so trusted publishing can't authorize
+        # the very first PUT — it has to use a classic token. AFTER
+        # the first successful publish, configure trusted publisher on
+        # npmjs.com → Package Settings → Trusted Publisher (repo
+        # ``scitrera/memorylayer``, workflow ``release.yml``), then
+        # DELETE the ``env:`` block below to switch this job to pure
+        # OIDC auth like the other three.
         run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────
   # Docker image → Docker Hub + GHCR (after memorylayer-server is on PyPI)
