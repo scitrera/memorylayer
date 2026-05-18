@@ -139,7 +139,7 @@ jobs:
   # referencing the per-arch digests pushed above.
   # ────────────────────────────────────────────────────────────────────
   merge:
-    name: "Manifest: ${{ env.DOCKERHUB_IMAGE }} + GHCR"
+    name: "Manifest: scitrera/memorylayer-embed-server + GHCR"
     runs-on: ubuntu-24.04
     needs: build
     permissions:
