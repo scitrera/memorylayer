@@ -84,7 +84,14 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-sdk-typescript
-        run: npm publish --access public
+        # ``--provenance`` makes npm CLI authenticate via the GitHub
+        # Actions OIDC token (paired with ``id-token: write`` above) and
+        # publish a Sigstore attestation. This is the required mode when
+        # npm Trusted Publishing is configured on the @scitrera packages.
+        # NODE_AUTH_TOKEN is kept as a fallback for the classic-token path
+        # in case OIDC discovery / the trusted publisher config doesn't
+        # match the workflow's OIDC subject claim.
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -136,7 +143,14 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-mcp-typescript
-        run: npm publish --access public
+        # ``--provenance`` makes npm CLI authenticate via the GitHub
+        # Actions OIDC token (paired with ``id-token: write`` above) and
+        # publish a Sigstore attestation. This is the required mode when
+        # npm Trusted Publishing is configured on the @scitrera packages.
+        # NODE_AUTH_TOKEN is kept as a fallback for the classic-token path
+        # in case OIDC discovery / the trusted publisher config doesn't
+        # match the workflow's OIDC subject claim.
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -188,7 +202,14 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-cc-plugin
-        run: npm publish --access public
+        # ``--provenance`` makes npm CLI authenticate via the GitHub
+        # Actions OIDC token (paired with ``id-token: write`` above) and
+        # publish a Sigstore attestation. This is the required mode when
+        # npm Trusted Publishing is configured on the @scitrera packages.
+        # NODE_AUTH_TOKEN is kept as a fallback for the classic-token path
+        # in case OIDC discovery / the trusted publisher config doesn't
+        # match the workflow's OIDC subject claim.
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -240,7 +261,14 @@ jobs:
 
       - name: Publish to npm
         working-directory: memorylayer-opencode-plugin
-        run: npm publish --access public
+        # ``--provenance`` makes npm CLI authenticate via the GitHub
+        # Actions OIDC token (paired with ``id-token: write`` above) and
+        # publish a Sigstore attestation. This is the required mode when
+        # npm Trusted Publishing is configured on the @scitrera packages.
+        # NODE_AUTH_TOKEN is kept as a fallback for the classic-token path
+        # in case OIDC discovery / the trusted publisher config doesn't
+        # match the workflow's OIDC subject claim.
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
