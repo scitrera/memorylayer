@@ -83,10 +83,25 @@ Global flag `-v` / `--verbose` enables debug logging.
 |----------|---------|-------------|
 | `MEMORYLAYER_EMBED_SERVER_HOST` | `127.0.0.1` | Bind address |
 | `MEMORYLAYER_EMBED_SERVER_PORT` | `61051` | Listening port |
+| `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` | `vllm` | `vllm` (in-process), `vllm_subprocess`, `openai`, `google`, `colpali`, `mock` |
+| `MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER` | `vllm_subprocess` | `colpali_inprocess` (in-process colpali-engine) or `vllm_subprocess` (out-of-process vLLM) |
 | `MEMORYLAYER_EMBED_MODEL_TEXT` | _(provider default)_ | Override the default text-embedding model |
-| `MEMORYLAYER_EMBED_MODEL_COLPALI` | _(provider default)_ | Override the default ColPali model |
+| `MEMORYLAYER_EMBEDDING_COLPALI_MODEL` | `ModernVBERT/colmodernvbert` | Multi-vector model. The vLLM path auto-upgrades the unloadable LoRA-adapter checkpoint to `colmodernvbert-merged`. |
+| `MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR` | `1` | Hierarchical token-pool factor. `2` halves vectors with negligible recall loss, `3` cuts ~66% with ~97.8% perf retention per the ColPali paper. Must be the same for query- and doc-side calls. |
+| `MEMORYLAYER_EMBEDDING_VLLM_MV_ARCHITECTURES` | `ColModernVBertForRetrieval` | `--hf-overrides` arch list for the multi-vec vLLM subprocess. Override when swapping to `ColQwen3_5` etc. |
+| `MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_LENGTH` | _(model default)_ | Per-multi-vec max sequence length. Leave unset to let vLLM derive from the model's config (avoids tripping ColModernVBert's 7999 limit). |
+| `MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL` | `0.25` | Per-vLLM-subprocess GPU memory budget. Lower when sharing the GPU. |
 
 Refer to the provider modules under `src/memorylayer_embed_server/` for the full list of model-specific environment variables.
+
+### Multi-vector serving back-ends
+
+The multi-vector / ColPali path has two interchangeable back-ends. Both speak the same wire shape on `/v1/embeddings/multi`, `/v1/embeddings/images`, and `/v1/score`:
+
+- **`colpali_inprocess` (default)** — colpali-engine via HF transformers, in the embed-server process. Lightweight; loads the small `ModernVBERT/colmodernvbert` LoRA adapter (~250 MB). Best for tests and tiny deployments.
+- **`vllm_subprocess` (production default)** — out-of-process `vllm serve --runner pooling` for batched, paged-attention throughput. Spawns one child process per multi-vec model; default model is `ModernVBERT/colmodernvbert-merged` (~1 GB unquantized) routed through the `ColModernVBertForRetrieval` arch class.
+
+Both back-ends honor `MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR`; queries and documents must use the same factor or MaxSim geometry breaks.
 
 ## Docker
 

@@ -30,7 +30,8 @@ __all__ = ["VLLMSubprocessRunner", "find_free_port"]
 
 _ROLE_EMBEDDING = "embedding"
 _ROLE_LLM = "llm"
-_VALID_ROLES = (_ROLE_EMBEDDING, _ROLE_LLM)
+_ROLE_MULTI_VECTOR = "multi_vector"
+_VALID_ROLES = (_ROLE_EMBEDDING, _ROLE_LLM, _ROLE_MULTI_VECTOR)
 
 
 class VLLMSubprocessRunner:
@@ -39,8 +40,18 @@ class VLLMSubprocessRunner:
     Parameters
     ----------
     role
-        ``"embedding"`` adds ``--runner pooling --convert embed`` to the
-        argv. ``"llm"`` does not.
+        ``"embedding"`` adds ``--runner pooling --convert embed`` (mean-pool
+        to a single vector per input). ``"multi_vector"`` adds just
+        ``--runner pooling`` so the model's native architecture class
+        (e.g. ``ColPaliForRetrieval``, ``ColModernVBertForRetrieval``,
+        ``ColQwen3_5``) drives per-token output served on ``/pooling``.
+        ``"llm"`` adds neither — standard chat/completion serving.
+    architectures
+        When set, passes ``--hf-overrides '{"architectures": [...]}'`` to
+        vLLM. Required for ColPali checkpoints that ship without a populated
+        ``architectures`` field (e.g. ``ModernVBERT/colmodernvbert-merged``),
+        and for Qwen3-VL-Reranker (where the HF default points at the
+        chat arch).
     served_model_names
         Forwarded to vLLM as ``--served-model-name`` (vLLM accepts
         multiple, advertising the model under each name). Useful for
@@ -65,6 +76,7 @@ class VLLMSubprocessRunner:
         tensor_parallel_size: int = 1,
         served_model_names: Sequence[str] | None = None,
         extra_args: Sequence[str] | None = None,
+        architectures: Sequence[str] | None = None,
         cmd: str = "vllm",
         startup_timeout_sec: float = 600.0,
         logger: logging.Logger | None = None,
@@ -82,6 +94,7 @@ class VLLMSubprocessRunner:
         self.tensor_parallel_size = int(tensor_parallel_size)
         self.served_model_names = list(served_model_names) if served_model_names else []
         self.extra_args = list(extra_args) if extra_args else []
+        self.architectures = list(architectures) if architectures else []
         self.cmd = cmd
         self.startup_timeout_sec = float(startup_timeout_sec)
         self.logger = logger or logging.getLogger(__name__)
@@ -133,8 +146,19 @@ class VLLMSubprocessRunner:
         if self.tensor_parallel_size > 1:
             argv.extend(["--tensor-parallel-size", str(self.tensor_parallel_size)])
         if self.role == _ROLE_EMBEDDING:
-            # vLLM 0.6+ pooling/embed flags.
+            # Mean-pool to a single vector per input.
             argv.extend(["--runner", "pooling", "--convert", "embed"])
+        elif self.role == _ROLE_MULTI_VECTOR:
+            # Native multi-vector / late-interaction output. The model's
+            # arch class (ColPaliForRetrieval, ColModernVBertForRetrieval,
+            # ColQwen3_5, …) drives the per-token output served on /pooling.
+            # Do NOT add --convert embed here — that would mean-pool away
+            # the multi-vector signal we want to preserve.
+            argv.extend(["--runner", "pooling"])
+        if self.architectures:
+            import json as _json
+
+            argv.extend(["--hf-overrides", _json.dumps({"architectures": list(self.architectures)})])
         if self.served_model_names:
             argv.append("--served-model-name")
             argv.extend(self.served_model_names)
@@ -149,11 +173,15 @@ class VLLMSubprocessRunner:
     # ------------------------------------------------------------------
 
     async def _pipe_stderr(self) -> None:
-        if self._process is None or self._process.stderr is None:
+        # Reads vllm's merged stdout+stderr stream (we redirect stderr to
+        # stdout in start()). Drains continuously so the OS pipe buffer
+        # never fills — a full pipe blocks vllm's next write and stalls
+        # engine init.
+        if self._process is None or self._process.stdout is None:
             return
         try:
             while True:
-                line = await self._process.stderr.readline()
+                line = await self._process.stdout.readline()
                 if not line:
                     break
                 self.logger.info(
@@ -164,7 +192,7 @@ class VLLMSubprocessRunner:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - best-effort
-            self.logger.debug("vllm subprocess stderr reader stopped: %s", e)
+            self.logger.debug("vllm subprocess output reader stopped: %s", e)
 
     async def wait_for_health(self) -> None:
         import httpx
@@ -204,14 +232,38 @@ class VLLMSubprocessRunner:
             )
         argv = self.build_argv()
         self.logger.info("Starting vllm subprocess (role=%s): %s", self.role, " ".join(argv))
+        # Merge stdout into stderr so we only need one drain task — and
+        # critically, so vllm's stdout writes (banner, some warnings)
+        # cannot deadlock on a full OS pipe buffer when nothing is
+        # draining the other stream. We hit this in test harnesses: vllm
+        # would block ~64 KiB into its boot logging, engine init stalled,
+        # memory pressure climbed, earlyoom eventually killed the process.
         self._process = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
         )
         self._stderr_task = asyncio.create_task(self._pipe_stderr())
-        await self.wait_for_health()
+        try:
+            await self.wait_for_health()
+        except BaseException:
+            # wait_for_health raised — the subprocess (and any EngineCore
+            # worker procs it spawned) didn't reach a usable state. Tear
+            # them down before re-raising so we don't leak GPU memory.
+            self.logger.warning(
+                "vllm subprocess (role=%s) failed health check; tearing down to avoid orphans.",
+                self.role,
+            )
+            try:
+                await self.shutdown()
+            except Exception as cleanup_err:  # noqa: BLE001 - log + continue
+                self.logger.error(
+                    "vllm subprocess (role=%s) cleanup after failed start raised: %s",
+                    self.role,
+                    cleanup_err,
+                )
+            raise
         self.logger.info(
             "vllm subprocess healthy at %s (role=%s, pid=%s)",
             self.health_url,
@@ -220,30 +272,54 @@ class VLLMSubprocessRunner:
         )
 
     async def shutdown(self) -> None:
-        """SIGTERM the process group; escalate to SIGKILL after 10s. Idempotent."""
+        """SIGTERM the process group; escalate to SIGKILL after 10s. Idempotent.
+
+        Uses the PID we recorded at spawn time as the PGID — with
+        ``start_new_session=True`` the child is the session leader so
+        PID == PGID. Looking it up via ``os.getpgid`` at shutdown time
+        fails when the parent has been reaped, which loses our handle
+        on still-alive EngineCore workers and leaks GPU memory.
+        """
         proc = self._process
-        if proc is not None and proc.returncode is None:
+        # The parent may have already exited (exit code != None) but its
+        # EngineCore worker processes can outlive it. Always attempt the
+        # process-group kill on the spawn PID.
+        if proc is not None:
+            pgid = proc.pid  # spawn used start_new_session=True ⇒ pid == pgid
             self.logger.info(
-                "Stopping vllm subprocess (role=%s, pid=%s)",
+                "Stopping vllm subprocess (role=%s, pid=%s, exit=%s)",
                 self.role,
-                proc.pid,
+                pgid,
+                proc.returncode,
             )
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                os.killpg(pgid, signal.SIGTERM)
             except (ProcessLookupError, OSError):
-                proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=10)
-            except TimeoutError:
-                self.logger.warning(
-                    "vllm subprocess (role=%s) did not stop in 10s; SIGKILL",
-                    self.role,
-                )
+                if proc.returncode is None:
+                    proc.terminate()
+            if proc.returncode is None:
                 try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    await asyncio.wait_for(proc.wait(), timeout=10)
+                except TimeoutError:
+                    self.logger.warning(
+                        "vllm subprocess (role=%s) did not stop in 10s; SIGKILL",
+                        self.role,
+                    )
+                    try:
+                        os.killpg(pgid, signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        proc.kill()
+                    await proc.wait()
+            else:
+                # Parent already exited but the group kill above still
+                # reaches any orphan EngineCore workers. Give them a
+                # moment to receive the signal and exit; escalate if
+                # they don't.
+                await asyncio.sleep(1.0)
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
                 except (ProcessLookupError, OSError):
-                    proc.kill()
-                await proc.wait()
+                    pass
             self.logger.info(
                 "vllm subprocess stopped (role=%s, exit=%s)",
                 self.role,

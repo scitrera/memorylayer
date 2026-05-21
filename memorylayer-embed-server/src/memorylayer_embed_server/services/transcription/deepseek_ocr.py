@@ -64,13 +64,35 @@ class DeepSeekOCRProvider(TranscriptionProvider):
                     model_name,
                     trust_remote_code=True,
                 )
-                model = AutoModel.from_pretrained(
-                    model_name,
+                # DeepSeek-OCR-2 (DeepseekOCR2ForCausalLM) does not yet support
+                # flash_attention_2 — pinning it crashes load. Try FA2 first
+                # (helps on supported variants like the original DeepSeek-OCR),
+                # fall back to SDPA which works across the family.
+                load_kwargs = dict(
                     use_mla=True,
-                    _attn_implementation="flash_attention_2",
                     trust_remote_code=True,
                     use_safetensors=True,
                 )
+                try:
+                    model = AutoModel.from_pretrained(
+                        model_name,
+                        _attn_implementation="flash_attention_2",
+                        **load_kwargs,
+                    )
+                except (ValueError, ImportError) as e:
+                    if "flash" in str(e).lower() or "attention" in str(e).lower():
+                        self.logger.info(
+                            "Flash Attention 2 unavailable for %s (%s); falling back to SDPA.",
+                            model_name,
+                            e,
+                        )
+                        model = AutoModel.from_pretrained(
+                            model_name,
+                            _attn_implementation="sdpa",
+                            **load_kwargs,
+                        )
+                    else:
+                        raise
                 model = model.eval().cuda().to(torch.bfloat16)
                 self._model = model
                 self._tokenizer = tokenizer

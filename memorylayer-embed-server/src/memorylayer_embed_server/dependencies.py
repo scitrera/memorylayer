@@ -18,30 +18,58 @@ from scitrera_app_framework import (
 )
 
 from .config import (
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_ENABLED,
     DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
     DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+    DEFAULT_EMBED_SERVER_GEMINI_ENABLED,
     DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS,
     DEFAULT_EMBED_SERVER_GEMINI_MODEL,
+    DEFAULT_EMBED_SERVER_GLM_OCR_ENABLED,
     DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS,
     DEFAULT_EMBED_SERVER_GLM_OCR_MODEL,
+    DEFAULT_EMBED_SERVER_GLM_OCR_TRANSPORT,
+    DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_CMD,
+    DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL,
+    DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_PORT,
+    DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC,
     DEFAULT_EMBED_SERVER_LLM_DEFAULT_PROFILE,
     DEFAULT_EMBED_SERVER_LLM_ENABLED,
     DEFAULT_EMBED_SERVER_LLM_PORT_RANGE,
     DEFAULT_EMBED_SERVER_LLM_PROFILES,
+    DEFAULT_EMBED_SERVER_MULTI_VECTOR_PROVIDER,
     DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER,
     DEFAULT_EMBED_SERVER_TRANSCRIPTION_ENABLED,
     DEFAULT_EMBED_SERVER_USE_MOCK_PROVIDERS,
     DEFAULT_EMBED_SERVER_USE_MULTI_FOR_SINGLE,
+    EMBED_SERVER_DEEPSEEK_OCR_ENABLED,
     EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS,
     EMBED_SERVER_DEEPSEEK_OCR_MODEL,
+    EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT,
+    EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD,
+    EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL,
+    EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT,
+    EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+    EMBED_SERVER_GEMINI_ENABLED,
     EMBED_SERVER_GEMINI_MAX_TOKENS,
     EMBED_SERVER_GEMINI_MODEL,
+    EMBED_SERVER_GLM_OCR_ENABLED,
     EMBED_SERVER_GLM_OCR_MAX_TOKENS,
     EMBED_SERVER_GLM_OCR_MODEL,
+    EMBED_SERVER_GLM_OCR_TRANSPORT,
+    EMBED_SERVER_GLM_OCR_VLLM_CMD,
+    EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL,
+    EMBED_SERVER_GLM_OCR_VLLM_PORT,
+    EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC,
     EMBED_SERVER_LLM_DEFAULT_PROFILE,
     EMBED_SERVER_LLM_ENABLED,
     EMBED_SERVER_LLM_PORT_RANGE,
     EMBED_SERVER_LLM_PROFILES,
+    EMBED_SERVER_MULTI_VECTOR_PROVIDER,
     EMBED_SERVER_SINGLE_VECTOR_PROVIDER,
     EMBED_SERVER_TRANSCRIPTION_ENABLED,
     EMBED_SERVER_USE_MOCK_PROVIDERS,
@@ -175,52 +203,48 @@ async def initialize_services(v: Variables = None) -> Variables:
 
 
 def _setup_transcription_cascade(v: Variables, logger: Logger):
-    """Wire up the transcription cascade with configured providers."""
+    """Wire up the transcription cascade with configured providers.
+
+    Each provider is gated on its own enable flag so deployments and tests
+    can isolate a single cascade member. All default to true — existing
+    deployments behave identically.
+    """
     from .services.transcription.cascade import CascadeTranscriber
 
     providers = []
 
-    # GLM-OCR (primary - local GPU via HuggingFace Transformers)
-    try:
-        from .services.transcription.glm_ocr import GLMOCRProvider
+    # GLM-OCR (primary)
+    if v.environ(EMBED_SERVER_GLM_OCR_ENABLED, default=DEFAULT_EMBED_SERVER_GLM_OCR_ENABLED, type_fn=ext_parse_bool):
+        glm_provider = _init_glm_ocr_provider(v, logger)
+        if glm_provider is not None:
+            providers.append(glm_provider)
+    else:
+        logger.info("GLM-OCR provider disabled by MEMORYLAYER_EMBED_GLM_OCR_ENABLED=false")
 
-        glm_provider = GLMOCRProvider(
-            v=v,
-            model_name=v.environ(EMBED_SERVER_GLM_OCR_MODEL, default=DEFAULT_EMBED_SERVER_GLM_OCR_MODEL),
-            max_tokens=v.environ(EMBED_SERVER_GLM_OCR_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS, type_fn=int),
-        )
-        providers.append(glm_provider)
-        logger.info("GLM-OCR provider configured")
-    except ImportError as e:
-        logger.warning("GLM-OCR provider unavailable (transformers not installed): %s", e)
-
-    # DeepSeek-OCR-2 (secondary - local GPU via HuggingFace Transformers)
-    try:
-        from .services.transcription.deepseek_ocr import DeepSeekOCRProvider
-
-        deepseek_provider = DeepSeekOCRProvider(
-            v=v,
-            model_name=v.environ(EMBED_SERVER_DEEPSEEK_OCR_MODEL, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL),
-            max_tokens=v.environ(EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, type_fn=int),
-        )
-        providers.append(deepseek_provider)
-        logger.info("DeepSeek-OCR-2 provider configured")
-    except ImportError as e:
-        logger.warning("DeepSeek-OCR-2 provider unavailable (transformers not installed): %s", e)
+    # DeepSeek-OCR-2 (secondary)
+    if v.environ(EMBED_SERVER_DEEPSEEK_OCR_ENABLED, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_ENABLED, type_fn=ext_parse_bool):
+        deepseek_provider = _init_deepseek_ocr_provider(v, logger)
+        if deepseek_provider is not None:
+            providers.append(deepseek_provider)
+    else:
+        logger.info("DeepSeek-OCR-2 provider disabled by MEMORYLAYER_EMBED_DEEPSEEK_OCR_ENABLED=false")
 
     # Gemini Flash (fallback - external API)
-    try:
-        from .services.transcription.gemini import GeminiProvider
+    if v.environ(EMBED_SERVER_GEMINI_ENABLED, default=DEFAULT_EMBED_SERVER_GEMINI_ENABLED, type_fn=ext_parse_bool):
+        try:
+            from .services.transcription.gemini import GeminiProvider
 
-        gemini_provider = GeminiProvider(
-            v=v,
-            model_name=v.environ(EMBED_SERVER_GEMINI_MODEL, default=DEFAULT_EMBED_SERVER_GEMINI_MODEL),
-            max_tokens=v.environ(EMBED_SERVER_GEMINI_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS, type_fn=int),
-        )
-        providers.append(gemini_provider)
-        logger.info("Gemini provider configured")
-    except ImportError as e:
-        logger.warning("Gemini provider unavailable (google-genai not installed): %s", e)
+            gemini_provider = GeminiProvider(
+                v=v,
+                model_name=v.environ(EMBED_SERVER_GEMINI_MODEL, default=DEFAULT_EMBED_SERVER_GEMINI_MODEL),
+                max_tokens=v.environ(EMBED_SERVER_GEMINI_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS, type_fn=int),
+            )
+            providers.append(gemini_provider)
+            logger.info("Gemini provider configured")
+        except ImportError as e:
+            logger.warning("Gemini provider unavailable (google-genai not installed): %s", e)
+    else:
+        logger.info("Gemini provider disabled by MEMORYLAYER_EMBED_GEMINI_ENABLED=false")
 
     cascade = CascadeTranscriber(v=v, providers=providers)
     v.set("cascade_transcriber", cascade)
@@ -275,18 +299,19 @@ def _setup_dual_embedding_service(v: Variables, logger: Logger):
         if not use_multi_for_single:
             single_vector = _init_single_vector_provider(v, logger, single_provider_kind)
 
-        # Multi-vector: ColPaliEmbeddingProvider lives inside the embed-server
-        # package so torch / colpali-engine stay out of the OSS main server.
-        try:
-            from memorylayer_embed_server.services.embedding.colpali import ColPaliEmbeddingProviderPlugin
-
-            colpali_plugin = ColPaliEmbeddingProviderPlugin()
-            multi_vector = colpali_plugin.initialize(v, logger)
-            logger.info("Multi-vector (ColPali) provider configured")
-        except ImportError as e:
-            logger.warning("ColPali embedding provider unavailable: %s", e)
-        except Exception as e:
-            logger.warning("Failed to initialize ColPali embedding provider: %s", e)
+        # Multi-vector: dispatch on EMBED_SERVER_MULTI_VECTOR_PROVIDER.
+        # Both backends speak the same MultimodalEmbeddingProvider surface,
+        # so /v1/embeddings/multi, /v1/embeddings/images, and /v1/score are
+        # backend-agnostic on the wire.
+        multi_provider_kind = (
+            v.environ(
+                EMBED_SERVER_MULTI_VECTOR_PROVIDER,
+                default=DEFAULT_EMBED_SERVER_MULTI_VECTOR_PROVIDER,
+            )
+            .strip()
+            .lower()
+        )
+        multi_vector = _init_multi_vector_provider(v, logger, multi_provider_kind)
 
     # Optional: share the multi-vector provider as the single-vector provider
     # so a real-ColPali deployment doesn't also need vLLM installed. ColPali
@@ -384,6 +409,182 @@ def _init_single_vector_provider(v: Variables, logger: Logger, kind: str):
         "no single-vector provider will be configured. Valid values: "
         "vllm, vllm_subprocess, openai, google, colpali, mock.",
         kind,
+    )
+    return None
+
+
+def _init_multi_vector_provider(v: Variables, logger: Logger, kind: str):
+    """Construct the multi-vector / ColPali embedding provider for ``kind``.
+
+    ``colpali_inprocess`` runs colpali-engine in-process via HF transformers
+    — small, simple, good for tests and tiny-model deployments. ``vllm_subprocess``
+    (production default) spawns ``vllm serve --runner pooling`` for batched
+    throughput. Both providers expose the same MultimodalEmbeddingProvider
+    surface so the route layer is unchanged. The naming mirrors the
+    single-vector dispatcher (``vllm`` in-process, ``vllm_subprocess``).
+    """
+    if kind in ("", "colpali_inprocess", "colpali"):
+        try:
+            from memorylayer_embed_server.services.embedding.colpali import ColPaliEmbeddingProviderPlugin
+
+            provider = ColPaliEmbeddingProviderPlugin().initialize(v, logger)
+            logger.info("Multi-vector (ColPali in-process via colpali-engine) provider configured")
+            return provider
+        except ImportError as e:
+            logger.warning("ColPali in-process provider unavailable: %s", e)
+        except Exception as e:
+            logger.warning("Failed to initialize ColPali in-process provider: %s", e)
+        return None
+
+    if kind == "vllm_subprocess":
+        try:
+            from memorylayer_embed_server.services.embedding.vllm_multi_vector import (
+                VLLMMultiVectorProviderPlugin,
+            )
+
+            provider = VLLMMultiVectorProviderPlugin().initialize(v, logger)
+            logger.info("Multi-vector (vLLM subprocess --runner pooling) provider configured")
+            return provider
+        except ImportError as e:
+            logger.warning("vLLM multi-vector provider unavailable: %s", e)
+        except Exception as e:
+            logger.warning("Failed to initialize vLLM multi-vector provider: %s", e)
+        return None
+
+    logger.warning(
+        "Unknown EMBED_SERVER_MULTI_VECTOR_PROVIDER value: %r — no multi-vector "
+        "provider will be configured. Valid values: colpali_inprocess, vllm_subprocess.",
+        kind,
+    )
+    return None
+
+
+def _init_glm_ocr_provider(v: Variables, logger: Logger):
+    """Construct the GLM-OCR transcription provider per the configured transport.
+
+    ``vllm_subprocess`` (default) runs the upstream recipe with MTP
+    speculative decoding; ``hf`` keeps the legacy in-process HF path.
+    """
+    transport = (
+        v.environ(EMBED_SERVER_GLM_OCR_TRANSPORT, default=DEFAULT_EMBED_SERVER_GLM_OCR_TRANSPORT)
+        .strip()
+        .lower()
+    )
+    model_name = v.environ(EMBED_SERVER_GLM_OCR_MODEL, default=DEFAULT_EMBED_SERVER_GLM_OCR_MODEL)
+    max_tokens = v.environ(EMBED_SERVER_GLM_OCR_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS, type_fn=int)
+
+    if transport == "vllm_subprocess":
+        try:
+            from .services.transcription.vllm_transcription import build_glm_ocr_vllm_provider
+
+            provider = build_glm_ocr_vllm_provider(
+                v=v,
+                logger=logger,
+                model_name=model_name,
+                max_tokens=max_tokens,
+                port=v.environ(EMBED_SERVER_GLM_OCR_VLLM_PORT, default=DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_PORT, type_fn=int),
+                gpu_memory_utilization=v.environ(
+                    EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL,
+                    default=DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL,
+                    type_fn=float,
+                ),
+                startup_timeout_sec=v.environ(
+                    EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+                    default=DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+                    type_fn=float,
+                ),
+                cmd=v.environ(EMBED_SERVER_GLM_OCR_VLLM_CMD, default=DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_CMD),
+            )
+            logger.info("GLM-OCR provider configured (transport=vllm_subprocess)")
+            return provider
+        except ImportError as e:
+            logger.warning("GLM-OCR vllm-subprocess provider unavailable: %s", e)
+            return None
+
+    if transport == "hf":
+        try:
+            from .services.transcription.glm_ocr import GLMOCRProvider
+
+            provider = GLMOCRProvider(v=v, model_name=model_name, max_tokens=max_tokens)
+            logger.info("GLM-OCR provider configured (transport=hf)")
+            return provider
+        except ImportError as e:
+            logger.warning("GLM-OCR HF provider unavailable (transformers not installed): %s", e)
+            return None
+
+    logger.warning(
+        "Unknown MEMORYLAYER_EMBED_GLM_OCR_TRANSPORT value: %r — GLM-OCR will not "
+        "be configured. Valid values: vllm_subprocess, hf.",
+        transport,
+    )
+    return None
+
+
+def _init_deepseek_ocr_provider(v: Variables, logger: Logger):
+    """Construct the DeepSeek-OCR-2 transcription provider per the configured transport.
+
+    ``vllm_subprocess`` (default) runs the upstream recipe with the
+    DeepSeek-specific logits processor and prefix-caching/MM-cache off;
+    ``hf`` keeps the legacy in-process HF path (currently only works
+    with eager attention, so significantly slower).
+    """
+    transport = (
+        v.environ(EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT)
+        .strip()
+        .lower()
+    )
+    model_name = v.environ(EMBED_SERVER_DEEPSEEK_OCR_MODEL, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL)
+    max_tokens = v.environ(
+        EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, type_fn=int
+    )
+
+    if transport == "vllm_subprocess":
+        try:
+            from .services.transcription.vllm_transcription import build_deepseek_ocr_vllm_provider
+
+            provider = build_deepseek_ocr_vllm_provider(
+                v=v,
+                logger=logger,
+                model_name=model_name,
+                max_tokens=max_tokens,
+                port=v.environ(
+                    EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT,
+                    default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT,
+                    type_fn=int,
+                ),
+                gpu_memory_utilization=v.environ(
+                    EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL,
+                    default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL,
+                    type_fn=float,
+                ),
+                startup_timeout_sec=v.environ(
+                    EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+                    default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+                    type_fn=float,
+                ),
+                cmd=v.environ(EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD),
+            )
+            logger.info("DeepSeek-OCR-2 provider configured (transport=vllm_subprocess)")
+            return provider
+        except ImportError as e:
+            logger.warning("DeepSeek-OCR-2 vllm-subprocess provider unavailable: %s", e)
+            return None
+
+    if transport == "hf":
+        try:
+            from .services.transcription.deepseek_ocr import DeepSeekOCRProvider
+
+            provider = DeepSeekOCRProvider(v=v, model_name=model_name, max_tokens=max_tokens)
+            logger.info("DeepSeek-OCR-2 provider configured (transport=hf)")
+            return provider
+        except ImportError as e:
+            logger.warning("DeepSeek-OCR-2 HF provider unavailable (transformers not installed): %s", e)
+            return None
+
+    logger.warning(
+        "Unknown MEMORYLAYER_EMBED_DEEPSEEK_OCR_TRANSPORT value: %r — DeepSeek-OCR-2 "
+        "will not be configured. Valid values: vllm_subprocess, hf.",
+        transport,
     )
     return None
 

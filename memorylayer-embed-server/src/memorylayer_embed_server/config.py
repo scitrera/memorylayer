@@ -26,6 +26,10 @@ DEFAULT_EMBED_SERVER_TRANSCRIPTION_SYSTEM_PROMPT = (
     "Focus solely on delivering the Markdown content."
 )
 
+# TODO: split up config such that config per service lives with that service to avoid everything needing to be dumped here
+# TODO: switch transcription cascade to use profiles like LLM profiles in server and then make the entire cascade
+#       env configurable rather than hard-coded
+
 # ============================================
 # GLM-OCR Settings
 # ============================================
@@ -37,6 +41,28 @@ DEFAULT_EMBED_SERVER_GLM_OCR_MODEL = "zai-org/GLM-OCR"
 
 EMBED_SERVER_GLM_OCR_MAX_TOKENS = "MEMORYLAYER_EMBED_GLM_OCR_MAX_TOKENS"
 DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS = 16384
+
+# Per-provider enable toggles for the transcription cascade. Default
+# true so existing deployments are unaffected; tests and constrained
+# deployments use these to isolate one provider for verification.
+EMBED_SERVER_GLM_OCR_ENABLED = "MEMORYLAYER_EMBED_GLM_OCR_ENABLED"
+DEFAULT_EMBED_SERVER_GLM_OCR_ENABLED = True
+
+# Transport for GLM-OCR. ``vllm_subprocess`` runs ``vllm serve`` with the
+# upstream MTP speculative-decoding recipe; ``hf`` keeps the legacy
+# in-process HuggingFace Transformers path. The two transports speak the
+# same TranscriptionProvider surface so the cascade is transport-agnostic.
+EMBED_SERVER_GLM_OCR_TRANSPORT = "MEMORYLAYER_EMBED_GLM_OCR_TRANSPORT"
+DEFAULT_EMBED_SERVER_GLM_OCR_TRANSPORT = "vllm_subprocess"
+
+EMBED_SERVER_GLM_OCR_VLLM_PORT = "MEMORYLAYER_EMBED_GLM_OCR_VLLM_PORT"
+DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_PORT = 18010
+EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL = "MEMORYLAYER_EMBED_GLM_OCR_VLLM_GPU_MEM_UTIL"
+DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL = 0.15
+EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC = "MEMORYLAYER_EMBED_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC"
+DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC = 600.0
+EMBED_SERVER_GLM_OCR_VLLM_CMD = "MEMORYLAYER_EMBED_GLM_OCR_VLLM_CMD"
+DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_CMD = "vllm"
 
 # ============================================
 # DeepSeek-OCR-2 Settings
@@ -50,14 +76,36 @@ DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL = "deepseek-ai/DeepSeek-OCR-2"
 EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_MAX_TOKENS"
 DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS = 16384
 
+EMBED_SERVER_DEEPSEEK_OCR_ENABLED = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_ENABLED"
+DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_ENABLED = False
+
+# Transport for DeepSeek-OCR-2. ``vllm_subprocess`` uses the upstream
+# recipe (NGramPerReqLogitsProcessor, prefix-caching off, MM cache 0).
+# ``hf`` keeps the legacy in-process Transformers path which currently
+# only works with eager attention (slow). Default is vllm_subprocess.
+EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_TRANSPORT"
+DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT = "vllm_subprocess"
+
+EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_VLLM_PORT"
+DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT = 18011
+EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL"
+DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL = 0.15
+EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC"
+DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC = 600.0
+EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_VLLM_CMD"
+DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD = "vllm"
+
 # ============================================
 # Gemini Fallback
 # ============================================
 EMBED_SERVER_GEMINI_MODEL = "MEMORYLAYER_EMBED_GEMINI_MODEL"
-DEFAULT_EMBED_SERVER_GEMINI_MODEL = "gemini-3-flash-preview"
+DEFAULT_EMBED_SERVER_GEMINI_MODEL = "gemini-flash-latest"
 
 EMBED_SERVER_GEMINI_MAX_TOKENS = "MEMORYLAYER_EMBED_GEMINI_MAX_TOKENS"
 DEFAULT_EMBED_SERVER_GEMINI_MAX_TOKENS = 16384
+
+EMBED_SERVER_GEMINI_ENABLED = "MEMORYLAYER_EMBED_GEMINI_ENABLED"
+DEFAULT_EMBED_SERVER_GEMINI_ENABLED = True
 
 # ============================================
 # Single-Vector Embedding (vLLM)
@@ -117,7 +165,32 @@ DEFAULT_EMBED_SERVER_USE_MULTI_FOR_SINGLE = False
 # USE_MOCK_PROVIDERS and USE_MULTI_FOR_SINGLE remain supported as
 # higher-priority overrides for backwards compatibility.
 EMBED_SERVER_SINGLE_VECTOR_PROVIDER = "MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER"
-DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER = "vllm"
+# ``vllm_subprocess`` runs vLLM in its own process with isolated CUDA
+# context — production-friendly because GPU OOMs don't take the FastAPI
+# loop down with them. ``vllm`` (in-process AsyncLLM) remains available
+# for single-process deployments where the subprocess overhead is
+# undesirable, but the subprocess is the supported default.
+DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER = "vllm_subprocess"
+
+# Selects which provider serves multi-vector / ColPali requests. Both
+# back-ends speak the same wire shape via /v1/embeddings/multi,
+# /v1/embeddings/images, and /v1/score; the difference is the runtime.
+# Values:
+#   ``colpali_inprocess``  in-process colpali-engine via HF transformers.
+#                          Lightweight (no subprocess); good for tests
+#                          and tiny-model deployments (ModernVBERT/colmodernvbert).
+#   ``vllm_subprocess``     (default) out-of-process vLLM (--runner pooling)
+#                          for production throughput. Auto-overrides the
+#                          model name when the legacy LoRA-adapter checkpoint
+#                          is requested (it's not vLLM-loadable). Naming
+#                          mirrors the single-vector dispatcher.
+EMBED_SERVER_MULTI_VECTOR_PROVIDER = "MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER"
+# Subprocess vLLM (--runner pooling) is the production default — isolated
+# CUDA context, batched throughput, FP8-ready. Switch back to
+# ``colpali_inprocess`` for tiny-model dev work or installs without vLLM.
+# Naming matches the single-vector dispatcher: ``vllm_subprocess`` is the
+# subprocess flavor, ``colpali_inprocess`` is the in-process flavor.
+DEFAULT_EMBED_SERVER_MULTI_VECTOR_PROVIDER = "vllm_subprocess"
 
 # ============================================
 # LLM Inference Profiles (multi-profile vLLM subprocess)

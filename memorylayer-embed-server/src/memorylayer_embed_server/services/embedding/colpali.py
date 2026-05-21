@@ -38,6 +38,19 @@ DEFAULT_COLPALI_MAX_CONCURRENT = 4
 # load-shedding deployments.
 MEMORYLAYER_EMBEDDING_COLPALI_QUEUE_TIMEOUT_SEC = "MEMORYLAYER_EMBEDDING_COLPALI_QUEUE_TIMEOUT_SEC"
 DEFAULT_COLPALI_QUEUE_TIMEOUT_SEC = 0.0
+# Hierarchical token pooling factor. 1 = no pooling (full multi-vector output).
+# A factor of 2 cuts vector count ~50% with negligible retrieval-quality loss,
+# factor 3 cuts ~66% with ~97.8% perf retention per the ColPali paper. Must be
+# applied identically to query- and doc-side embeddings so MaxSim geometry
+# stays consistent — set it once at server boot and don't change it per
+# request.
+MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR = "MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR"
+# Per the ColPali paper, factor 3 cuts vector count ~66% while retaining
+# ~97.8% of retrieval performance — a strong default. Operators tuning
+# for absolute recall can drop to 2 or 1; 1 disables pooling entirely.
+# Query- and doc-side calls must use the same factor; setting this once
+# at server boot is the supported pattern.
+DEFAULT_COLPALI_POOL_FACTOR = 3
 
 # Default to ModernVBERT - MIT licensed, smaller, better performance
 DEFAULT_MEMORYLAYER_COLPALI_EMBEDDING_MODEL = "ModernVBERT/colmodernvbert"
@@ -91,6 +104,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         output_dimensions: int = 128,
         max_concurrent: int = DEFAULT_COLPALI_MAX_CONCURRENT,
         queue_timeout_sec: float = DEFAULT_COLPALI_QUEUE_TIMEOUT_SEC,
+        pool_factor: int = DEFAULT_COLPALI_POOL_FACTOR,
     ):
         super().__init__(v, output_dimensions)  # Default dimension per vector
         self.model_name = model_name
@@ -98,9 +112,14 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         self.revision = revision
         self.max_concurrent = max(1, int(max_concurrent))
         self.queue_timeout_sec = max(0.0, float(queue_timeout_sec))
+        self.pool_factor = max(1, int(pool_factor))
         self._v = v
         self._model = None
         self._processor = None
+        # Lazy-construct the pooler so the colpali-engine import only fires
+        # when pooling is actually enabled; lets the provider keep working
+        # on installs that don't ship the [colpali] extra.
+        self._pooler = None
         # Constructed lazily so the Semaphore binds to the running event
         # loop rather than whichever loop happens to exist at import time.
         self._gpu_semaphore: asyncio.Semaphore | None = None
@@ -108,12 +127,39 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         # so an LB can route to the least-utilised replica.
         self._in_flight: int = 0
         self.logger.info(
-            "Initialized ColPaliEmbeddingProvider: model=%s (revision=%s), max_concurrent=%d, queue_timeout_sec=%s",
+            "Initialized ColPaliEmbeddingProvider: model=%s (revision=%s), max_concurrent=%d, queue_timeout_sec=%s, pool_factor=%d",
             model_name,
             revision,
             self.max_concurrent,
             "off" if self.queue_timeout_sec == 0 else f"{self.queue_timeout_sec:.1f}s",
+            self.pool_factor,
         )
+
+    def _get_pooler(self):
+        """Lazy-load the HierarchicalTokenPooler.
+
+        Returns ``None`` when ``pool_factor == 1`` so callers can skip the
+        no-op path entirely.
+        """
+        if self.pool_factor <= 1:
+            return None
+        if self._pooler is None:
+            from colpali_engine.compression.token_pooling import HierarchicalTokenPooler
+
+            self._pooler = HierarchicalTokenPooler()
+        return self._pooler
+
+    def _apply_pooling(self, tensors):
+        """Apply hierarchical token pooling to a list of 2D ``(tokens, dim)`` tensors.
+
+        No-op when ``pool_factor == 1``. The pooler clusters adjacent token
+        vectors that share signal (e.g. white background patches, repeated
+        sub-tokens) — cuts MaxSim compute and storage at minimal recall cost.
+        """
+        pooler = self._get_pooler()
+        if pooler is None:
+            return tensors
+        return pooler.pool_embeddings(tensors, pool_factor=self.pool_factor)
 
     def _get_semaphore(self) -> asyncio.Semaphore:
         if self._gpu_semaphore is None:
@@ -398,6 +444,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
             all_results = []
             for batch_inputs in dataloader:
                 batch_tensors = await asyncio.to_thread(process_batch, batch_inputs)
+                batch_tensors = self._apply_pooling(batch_tensors)
                 for tensor in batch_tensors:
                     vectors = tensor.numpy().tolist()
                     all_results.append(MultiVectorEmbedding(vectors=vectors))
@@ -453,6 +500,7 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
             all_results = []
             for batch_inputs in dataloader:
                 batch_tensors = await asyncio.to_thread(process_batch, batch_inputs)
+                batch_tensors = self._apply_pooling(batch_tensors)
                 for tensor in batch_tensors:
                     vectors = tensor.numpy().tolist()
                     all_results.append(MultiVectorEmbedding(vectors=vectors))
@@ -481,7 +529,8 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
             inputs = processor.process_queries([text]).to(self.device)
             with torch.no_grad():
                 embeddings = model(**inputs)
-            vectors = embeddings[0].cpu().numpy().tolist()
+            pooled = self._apply_pooling([embeddings[0].cpu()])
+            vectors = pooled[0].numpy().tolist()
         return MultiVectorEmbedding(vectors=vectors)
 
     async def embed_image_multivector(self, image: str | bytes | Path) -> MultiVectorEmbedding:
@@ -506,7 +555,8 @@ class ColPaliEmbeddingProvider(MultimodalEmbeddingProvider):
         inputs = processor.process_images([pil_image]).to(self.device)
         with torch.no_grad():
             embeddings = model(**inputs)
-        vectors = embeddings[0].cpu().numpy().tolist()
+        pooled = self._apply_pooling([embeddings[0].cpu()])
+        vectors = pooled[0].numpy().tolist()
         return MultiVectorEmbedding(vectors=vectors)
 
     @staticmethod
@@ -547,6 +597,11 @@ class ColPaliEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
             default=DEFAULT_COLPALI_QUEUE_TIMEOUT_SEC,
             type_fn=float,
         )
+        pool_factor = v.environ(
+            MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR,
+            default=DEFAULT_COLPALI_POOL_FACTOR,
+            type_fn=int,
+        )
         return ColPaliEmbeddingProvider(
             v=v,
             model_name=model,
@@ -554,4 +609,5 @@ class ColPaliEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
             revision=revision,
             max_concurrent=max_concurrent,
             queue_timeout_sec=queue_timeout_sec,
+            pool_factor=pool_factor,
         )

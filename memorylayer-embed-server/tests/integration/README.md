@@ -120,6 +120,67 @@ mock-provider variant remains the right tool for CI.
 
 ---
 
+## Variant — real-GPU subprocess (no docker)
+
+For a faster iteration loop than the docker chain, the
+``test_real_gpu_embeddings.py`` and ``test_real_gpu_transcription.py``
+modules spawn ``memorylayer-embed`` as a subprocess on a free loopback
+port and drive it directly over HTTP. No docker, no second
+memorylayer-server container — just the embed-server with real models
+on the host GPU.
+
+These tests require the embed-server's own venv with the ``[colpali]``
+and ``[ocr]`` extras installed:
+
+```bash
+cd oss/memorylayer-embed-server
+uv venv
+uv pip install --python .venv/bin/python --torch-backend=auto \
+    -e ../memorylayer-core-python \
+    -e ".[colpali,ocr,dev,observability]"
+```
+
+Then opt into the slow-integration markers:
+
+```bash
+# ColPali via in-process colpali-engine (ModernVBERT/colmodernvbert LoRA adapter, ~250MB)
+.venv/bin/pytest -m "slow and integration" \
+    tests/integration/test_real_gpu_embeddings.py -v
+
+# ColPali via vLLM /pooling subprocess (ModernVBERT/colmodernvbert-merged, ~1GB).
+# Exercises the production multi-vector path: EMBED_SERVER_MULTI_VECTOR_PROVIDER=vllm_subprocess.
+# Cold-start downloads model weights and warms vLLM — expect 1–3 minutes.
+.venv/bin/pytest -m "slow and integration" \
+    tests/integration/test_real_gpu_vllm_multivector.py -v
+
+# Transcription cascade (GLM-OCR — multi-GB download on cold cache)
+.venv/bin/pytest -m "slow and integration" \
+    tests/integration/test_real_gpu_transcription.py -v
+```
+
+Useful environment overrides (read by the test modules):
+
+| Variable                                      | Purpose                                                 |
+|-----------------------------------------------|---------------------------------------------------------|
+| ``MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER``   | ``vllm_subprocess`` (default) or ``colpali_inprocess``  |
+| ``MEMORYLAYER_EMBEDDING_COLPALI_MODEL``       | Override the ColPali model under test                   |
+| ``MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR`` | Hierarchical token-pool factor (1=off, paper recommends 2 or 3) |
+| ``MEMORYLAYER_EMBEDDING_VLLM_MV_ARCHITECTURES`` | Comma-separated arch override for the vLLM provider (e.g. ``ColModernVBertForRetrieval``) |
+| ``MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL``   | Per-vLLM-subprocess GPU memory budget (default 0.25)    |
+| ``MEMORYLAYER_EMBEDDING_DEVICE``              | Force ``cuda`` / ``cpu`` (in-process colpali path only) |
+| ``MEMORYLAYER_EMBED_GLM_OCR_MODEL``           | Substitute a different OCR model in the transcription cascade |
+| ``MEMORYLAYER_EMBED_GLM_OCR_MAX_TOKENS``      | Cap OCR output length (test default: 512)               |
+| ``MEMORYLAYER_EMBED_TEST_REQUEST_TIMEOUT``    | Per-request HTTP timeout in seconds (default 600/900)   |
+| ``MEMORYLAYER_EMBED_TEST_BOOT_TIMEOUT``       | embed-server boot timeout in seconds (default 600 for vLLM tests) |
+| ``MEMORYLAYER_EMBED_TEST_DISCARD_LOGS``       | ``1`` cleans up the subprocess log files on teardown. By default logs are kept under ``$TMPDIR`` for post-mortem. |
+
+Each module uses a ``module``-scoped fixture that boots one subprocess
+for the file's tests and tears it down at the end. The two suites are
+intentionally split so the embedding subprocess and transcription
+subprocess do not compete for GPU memory.
+
+---
+
 ## Troubleshooting
 
 * **Compose build fails on aether staging**: the `Dockerfile.test`
