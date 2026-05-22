@@ -46,20 +46,16 @@ from .._vllm_runner import VLLMSubprocessRunner
 # only learn one surface.
 from .colpali import (
     DEFAULT_COLPALI_POOL_FACTOR,
-    DEFAULT_EMBEDDING_REVISION,
     DEFAULT_MEMORYLAYER_COLPALI_EMBEDDING_MODEL,
     MEMORYLAYER_EMBEDDING_COLPALI_MODEL,
     MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR,
-    MEMORYLAYER_EMBEDDING_REVISION,
 )
 from .vllm import (
     DEFAULT_DTYPE,
     DEFAULT_ENFORCE_EAGER,
     DEFAULT_GPU_MEMORY_UTILIZATION,
-    DEFAULT_MAX_LENGTH,
     MEMORYLAYER_EMBEDDING_VLLM_DTYPE,
     MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER,
-    MEMORYLAYER_EMBEDDING_VLLM_MAX_LENGTH,
 )
 from .vllm_subprocess import (
     _parse_max_concurrent_env,
@@ -264,9 +260,7 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
         except (KeyError, TypeError) as e:
             raise RuntimeError(f"unexpected vllm /pooling response: missing 'data' key in {data!r}") from e
         if len(items) != expected_count:
-            raise RuntimeError(
-                f"vllm /pooling returned {len(items)} items, expected {expected_count}: {data!r}"
-            )
+            raise RuntimeError(f"vllm /pooling returned {len(items)} items, expected {expected_count}: {data!r}")
         items_sorted = sorted(items, key=lambda d: d.get("index", 0))
         out: list[list[list[float]]] = []
         for item in items_sorted:
@@ -290,9 +284,7 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
                 json={"model": self.model_name, "input": texts},
             )
         if resp.status_code != 200:
-            raise RuntimeError(
-                f"vllm /pooling failed with status {resp.status_code}: {resp.text[:500]}"
-            )
+            raise RuntimeError(f"vllm /pooling failed with status {resp.status_code}: {resp.text[:500]}")
         return self._parse_pooling_response(resp.json(), expected_count=len(texts))
 
     @staticmethod
@@ -338,9 +330,7 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
                 json={"model": self.model_name, "messages": messages},
             )
         if resp.status_code != 200:
-            raise RuntimeError(
-                f"vllm /pooling (image) failed with status {resp.status_code}: {resp.text[:500]}"
-            )
+            raise RuntimeError(f"vllm /pooling (image) failed with status {resp.status_code}: {resp.text[:500]}")
         parsed = self._parse_pooling_response(resp.json(), expected_count=1)
         return parsed[0]
 
@@ -479,10 +469,6 @@ class VLLMMultiVectorProviderPlugin(EmbeddingProviderPluginBase):
                 type_fn=float,
             ),
             cmd=v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_CMD, default=DEFAULT_MV_VLLM_CMD),
-            max_concurrent=_parse_max_concurrent_env(
-                v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_CONCURRENT, default=None)
-            ),
-            oversubscribe_factor=_parse_oversubscribe_factor_env(
-                v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_OVERSUBSCRIBE, default=None)
-            ),
+            max_concurrent=_parse_max_concurrent_env(v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_CONCURRENT, default=None)),
+            oversubscribe_factor=_parse_oversubscribe_factor_env(v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_OVERSUBSCRIBE, default=None)),
         )

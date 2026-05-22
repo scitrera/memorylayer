@@ -42,7 +42,6 @@ from .base import (
     clean_transcription_output,
 )
 
-
 # Defaults shared across both vLLM-served OCR profiles. Operators override
 # per-profile via the wiring in ``dependencies._setup_transcription_cascade``.
 DEFAULT_VLLM_OCR_HOST = "127.0.0.1"
@@ -131,8 +130,7 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         self._skip_subprocess: bool = False  # test-harness hook
 
         self.logger.info(
-            "Initialized VLLMTranscriptionProvider: provider=%s, model=%s, port=%d, "
-            "gpu_memory_utilization=%.2f, extra_args=%s",
+            "Initialized VLLMTranscriptionProvider: provider=%s, model=%s, port=%d, gpu_memory_utilization=%.2f, extra_args=%s",
             provider_name,
             model_name,
             port,

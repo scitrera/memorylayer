@@ -126,9 +126,7 @@ def test_transcribe_synthetic_page(base_url: str) -> None:
     returns one result. The first request triggers the model download +
     warm-up, hence the large timeout."""
     page_bytes = _synthetic_page(
-        "MemoryLayer GPU transcription test.\n"
-        "The quick brown fox jumps over the lazy dog.\n"
-        "Apple orchards in Yakima."
+        "MemoryLayer GPU transcription test.\nThe quick brown fox jumps over the lazy dog.\nApple orchards in Yakima."
     )
     payload = {
         "images": [base64.b64encode(page_bytes).decode()],
@@ -159,17 +157,12 @@ def test_transcribe_synthetic_page(base_url: str) -> None:
     # PROVIDER_NAME is "deepseek-ocr", not "deepseek-ocr-2").
     gpu_providers = {"glm-ocr", "deepseek-ocr"}
     attempted_providers = {a["provider"] for a in page["attempts"]}
-    assert gpu_providers & attempted_providers, (
-        f"cascade should attempt at least one GPU OCR provider, "
-        f"got attempts: {attempted_providers}"
-    )
+    assert gpu_providers & attempted_providers, f"cascade should attempt at least one GPU OCR provider, got attempts: {attempted_providers}"
 
     if page["success"]:
         # When the GPU model succeeded, we should see content and a
         # GPU-provider attribution.
-        assert page["provider_used"] in gpu_providers, (
-            f"unexpected provider_used={page['provider_used']!r}"
-        )
+        assert page["provider_used"] in gpu_providers, f"unexpected provider_used={page['provider_used']!r}"
         assert page["content"].strip(), "successful transcription must return content"
     else:
         # Soft failure: surface the per-provider errors so test output is

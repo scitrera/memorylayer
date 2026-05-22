@@ -66,8 +66,7 @@ def wait_for_http(url: str, *, timeout_s: float, accept_status: tuple[int, ...] 
     body = last_response.text if last_response is not None else None
     status = last_response.status_code if last_response is not None else None
     raise TimeoutError(
-        f"{url} did not return {accept_status} within {timeout_s:.0f}s "
-        f"(last_status={status}, last_body={body!r}, last_exc={last_exc!r})"
+        f"{url} did not return {accept_status} within {timeout_s:.0f}s (last_status={status}, last_body={body!r}, last_exc={last_exc!r})"
     )
 
 

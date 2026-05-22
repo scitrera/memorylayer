@@ -473,11 +473,7 @@ def _init_glm_ocr_provider(v: Variables, logger: Logger):
     ``vllm_subprocess`` (default) runs the upstream recipe with MTP
     speculative decoding; ``hf`` keeps the legacy in-process HF path.
     """
-    transport = (
-        v.environ(EMBED_SERVER_GLM_OCR_TRANSPORT, default=DEFAULT_EMBED_SERVER_GLM_OCR_TRANSPORT)
-        .strip()
-        .lower()
-    )
+    transport = v.environ(EMBED_SERVER_GLM_OCR_TRANSPORT, default=DEFAULT_EMBED_SERVER_GLM_OCR_TRANSPORT).strip().lower()
     model_name = v.environ(EMBED_SERVER_GLM_OCR_MODEL, default=DEFAULT_EMBED_SERVER_GLM_OCR_MODEL)
     max_tokens = v.environ(EMBED_SERVER_GLM_OCR_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_GLM_OCR_MAX_TOKENS, type_fn=int)
 
@@ -537,8 +533,7 @@ def _init_glm_ocr_provider(v: Variables, logger: Logger):
             return None
 
     logger.warning(
-        "Unknown MEMORYLAYER_EMBED_GLM_OCR_TRANSPORT value: %r — GLM-OCR will not "
-        "be configured. Valid values: vllm_subprocess, hf.",
+        "Unknown MEMORYLAYER_EMBED_GLM_OCR_TRANSPORT value: %r — GLM-OCR will not be configured. Valid values: vllm_subprocess, hf.",
         transport,
     )
     return None
@@ -552,15 +547,9 @@ def _init_deepseek_ocr_provider(v: Variables, logger: Logger):
     ``hf`` keeps the legacy in-process HF path (currently only works
     with eager attention, so significantly slower).
     """
-    transport = (
-        v.environ(EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT)
-        .strip()
-        .lower()
-    )
+    transport = v.environ(EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT).strip().lower()
     model_name = v.environ(EMBED_SERVER_DEEPSEEK_OCR_MODEL, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MODEL)
-    max_tokens = v.environ(
-        EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, type_fn=int
-    )
+    max_tokens = v.environ(EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_MAX_TOKENS, type_fn=int)
 
     if transport == "vllm_subprocess":
         try:

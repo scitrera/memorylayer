@@ -414,12 +414,8 @@ class VLLMSubprocessEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
                 MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD,
                 default=DEFAULT_VLLM_SUBPROCESS_CMD,
             ),
-            max_concurrent=_parse_max_concurrent_env(
-                v.environ(MEMORYLAYER_EMBEDDING_VLLM_MAX_CONCURRENT, default=None)
-            ),
-            oversubscribe_factor=_parse_oversubscribe_factor_env(
-                v.environ(MEMORYLAYER_EMBEDDING_VLLM_OVERSUBSCRIBE, default=None)
-            ),
+            max_concurrent=_parse_max_concurrent_env(v.environ(MEMORYLAYER_EMBEDDING_VLLM_MAX_CONCURRENT, default=None)),
+            oversubscribe_factor=_parse_oversubscribe_factor_env(v.environ(MEMORYLAYER_EMBEDDING_VLLM_OVERSUBSCRIBE, default=None)),
         )
 
 

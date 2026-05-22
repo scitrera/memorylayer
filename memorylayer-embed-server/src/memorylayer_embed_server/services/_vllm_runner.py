@@ -116,9 +116,7 @@ class VLLMSubprocessRunner:
         # order: operator override > vllm-reported (parsed from stderr) >
         # fallback constant. ``None`` here means "auto", so we'll prefer
         # the vllm-reported value once it appears in the log.
-        self._configured_max_concurrent: int | None = (
-            max(1, int(max_concurrent)) if max_concurrent is not None else None
-        )
+        self._configured_max_concurrent: int | None = max(1, int(max_concurrent)) if max_concurrent is not None else None
         self._reported_max_concurrent: int | None = None
         # Multiplier applied on top of the resolved concurrency. ``1.0``
         # disables oversubscription (recommended starting point). Setting

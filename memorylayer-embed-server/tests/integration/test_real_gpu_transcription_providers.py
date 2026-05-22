@@ -61,9 +61,7 @@ def _synthetic_page(text: str, size: tuple[int, int] = (640, 200)) -> bytes:
 
 def _post_transcribe(base_url: str, *, system_prompt: str | None = None, max_tokens: int = 256) -> dict:
     page_bytes = _synthetic_page(
-        "MemoryLayer per-provider transcription test.\n"
-        "The quick brown fox jumps over the lazy dog.\n"
-        "Apple orchards in Yakima."
+        "MemoryLayer per-provider transcription test.\nThe quick brown fox jumps over the lazy dog.\nApple orchards in Yakima."
     )
     payload: dict = {"images": [base64.b64encode(page_bytes).decode()], "max_tokens": max_tokens}
     if system_prompt is not None:
@@ -129,8 +127,7 @@ def test_glm_ocr_only_transcribes_synthetic_page(glm_only_base_url: str) -> None
     page = body["results"][0]
     assert page["attempts"], "must record at least one attempt"
     assert {a["provider"] for a in page["attempts"]} == {"glm-ocr"}, (
-        f"isolated-GLM-OCR test must hit only the glm-ocr provider, got "
-        f"{{a['provider'] for a in page['attempts']}}"
+        "isolated-GLM-OCR test must hit only the glm-ocr provider, got {a['provider'] for a in page['attempts']}"
     )
     if page["success"]:
         assert page["provider_used"] == "glm-ocr"
@@ -219,10 +216,7 @@ def test_gemini_only_transcribes_synthetic_page(gemini_only_base_url: str) -> No
 def cascade_fallthrough_base_url() -> str:
     """GLM-OCR + Gemini both enabled, GLM-OCR forced to fail via max_tokens=1."""
     if not _HAS_GOOGLE_API_KEY:
-        pytest.skip(
-            "Cascade fall-through test needs Gemini as the second provider; "
-            "set GOOGLE_API_KEY to run it."
-        )
+        pytest.skip("Cascade fall-through test needs Gemini as the second provider; set GOOGLE_API_KEY to run it.")
     pytest.importorskip("google.genai")
     env = _common_env_only_enable(glm=True, deepseek=False, gemini=True)
     # Force GLM-OCR to hit its token cap immediately so the cascade has to
