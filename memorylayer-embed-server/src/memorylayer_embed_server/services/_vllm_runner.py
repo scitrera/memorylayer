@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import signal
 import socket
@@ -26,6 +27,18 @@ import time
 from collections.abc import Sequence
 
 __all__ = ["VLLMSubprocessRunner", "find_free_port"]
+
+# vLLM logs its max-concurrency estimate during engine init, e.g.:
+#   INFO 05-20 15:58:37 [kv_cache_utils.py:1711] Maximum concurrency for
+#   8,192 tokens per request: 28.84x
+# We parse it to size the client-side semaphore so backpressure happens
+# at our HTTP boundary rather than vllm's internal scheduler queue.
+_VLLM_MAX_CONCURRENCY_RE = re.compile(r"Maximum concurrency for [\d,]+ tokens per request:\s*([\d.]+)x")
+
+# Floor used when neither the operator nor vllm's log give us a value.
+# Big enough that low-volume deployments never hit it; small enough that
+# a runaway burst won't melt vllm. Override via the operator env var.
+_DEFAULT_FALLBACK_MAX_CONCURRENT = 32
 
 
 _ROLE_EMBEDDING = "embedding"
@@ -79,6 +92,8 @@ class VLLMSubprocessRunner:
         architectures: Sequence[str] | None = None,
         cmd: str = "vllm",
         startup_timeout_sec: float = 600.0,
+        max_concurrent: int | None = None,
+        oversubscribe_factor: float = 1.0,
         logger: logging.Logger | None = None,
     ) -> None:
         if role not in _VALID_ROLES:
@@ -97,6 +112,22 @@ class VLLMSubprocessRunner:
         self.architectures = list(architectures) if architectures else []
         self.cmd = cmd
         self.startup_timeout_sec = float(startup_timeout_sec)
+        # Concurrency limit applied by ``concurrency_slot()``. Resolved
+        # order: operator override > vllm-reported (parsed from stderr) >
+        # fallback constant. ``None`` here means "auto", so we'll prefer
+        # the vllm-reported value once it appears in the log.
+        self._configured_max_concurrent: int | None = (
+            max(1, int(max_concurrent)) if max_concurrent is not None else None
+        )
+        self._reported_max_concurrent: int | None = None
+        # Multiplier applied on top of the resolved concurrency. ``1.0``
+        # disables oversubscription (recommended starting point). Setting
+        # >1.0 trades the safety margin of vllm's worst-case-token
+        # estimate for higher real-world throughput — vllm reports max
+        # concurrency assuming every request hits ``max_model_len``,
+        # which is usually wildly conservative.
+        self._oversubscribe_factor: float = max(0.0, float(oversubscribe_factor))
+        self._concurrency_sem: asyncio.Semaphore | None = None
         self.logger = logger or logging.getLogger(__name__)
 
         self._process: asyncio.subprocess.Process | None = None
@@ -176,7 +207,9 @@ class VLLMSubprocessRunner:
         # Reads vllm's merged stdout+stderr stream (we redirect stderr to
         # stdout in start()). Drains continuously so the OS pipe buffer
         # never fills — a full pipe blocks vllm's next write and stalls
-        # engine init.
+        # engine init. Side effect: opportunistically parses vllm's
+        # "Maximum concurrency for N tokens per request: X.XXx" log line
+        # to size the client-side semaphore.
         if self._process is None or self._process.stdout is None:
             return
         try:
@@ -184,15 +217,36 @@ class VLLMSubprocessRunner:
                 line = await self._process.stdout.readline()
                 if not line:
                     break
-                self.logger.info(
-                    "[vllm-subprocess role=%s] %s",
-                    self.role,
-                    line.decode(errors="replace").rstrip(),
-                )
+                decoded = line.decode(errors="replace").rstrip()
+                self.logger.info("[vllm-subprocess role=%s] %s", self.role, decoded)
+                if self._reported_max_concurrent is None:
+                    self._maybe_capture_max_concurrency(decoded)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - best-effort
             self.logger.debug("vllm subprocess output reader stopped: %s", e)
+
+    def _maybe_capture_max_concurrency(self, line: str) -> None:
+        """Parse vllm's reported max-concurrency from a single log line.
+
+        No-op if the line doesn't match or if we've already captured a
+        value for this run.
+        """
+        match = _VLLM_MAX_CONCURRENCY_RE.search(line)
+        if match is None:
+            return
+        try:
+            value = float(match.group(1))
+        except (TypeError, ValueError):
+            return
+        floored = max(1, int(value))
+        self._reported_max_concurrent = floored
+        self.logger.info(
+            "vllm (role=%s) reported max concurrency %.2fx → semaphore size %d",
+            self.role,
+            value,
+            floored,
+        )
 
     async def wait_for_health(self) -> None:
         import httpx
@@ -327,6 +381,54 @@ class VLLMSubprocessRunner:
             )
         if self._stderr_task is not None and not self._stderr_task.done():
             self._stderr_task.cancel()
+
+    # ------------------------------------------------------------------
+    # Client-side concurrency gating
+    # ------------------------------------------------------------------
+
+    @property
+    def effective_max_concurrent(self) -> int:
+        """Resolved concurrency limit for the semaphore.
+
+        Resolution order for the base value:
+          1. Operator override (``max_concurrent`` __init__ arg)
+          2. vLLM-reported max concurrency (parsed from stderr log)
+          3. Safe fallback constant
+        The final result is ``max(1, floor(base * oversubscribe_factor))``.
+
+        The fallback only kicks in when both knobs are absent and vllm
+        hasn't logged its max-concurrency line yet (e.g. early in boot,
+        older vllm, or the line format shifted).
+        """
+        if self._configured_max_concurrent is not None:
+            base = self._configured_max_concurrent
+        elif self._reported_max_concurrent is not None:
+            base = self._reported_max_concurrent
+        else:
+            base = _DEFAULT_FALLBACK_MAX_CONCURRENT
+        return max(1, int(base * self._oversubscribe_factor))
+
+    def concurrency_slot(self) -> asyncio.Semaphore:
+        """Async semaphore sized to ``effective_max_concurrent``.
+
+        Lazy-allocated so the semaphore captures whatever value
+        ``effective_max_concurrent`` resolves to AT FIRST CALL — which
+        means callers should call this after ``wait_for_health()``
+        returns to pick up vllm's reported value. Once created the
+        semaphore is fixed for the runner's lifetime.
+
+        Use as ``async with runner.concurrency_slot():`` — Semaphore
+        objects support the async context-manager protocol directly.
+        """
+        if self._concurrency_sem is None:
+            limit = self.effective_max_concurrent
+            self._concurrency_sem = asyncio.Semaphore(limit)
+            self.logger.debug(
+                "vllm subprocess (role=%s) concurrency semaphore initialized to %d",
+                self.role,
+                limit,
+            )
+        return self._concurrency_sem
 
 
 def find_free_port(

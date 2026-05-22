@@ -61,6 +61,18 @@ MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_HOST = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROC
 MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_PORT = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_PORT"
 MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC"
 MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD = "MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD"
+# Client-side concurrency cap for the single-vec vLLM subprocess. Empty
+# / unset → auto-derive from vllm's reported max concurrency at boot.
+# Set to a positive integer to pin the value.
+MEMORYLAYER_EMBEDDING_VLLM_MAX_CONCURRENT = "MEMORYLAYER_EMBEDDING_VLLM_MAX_CONCURRENT"
+# Oversubscription multiplier on top of the resolved concurrency.
+# vllm's reported max-concurrency is a worst-case-token estimate (every
+# request assumed to hit max_model_len), so real workloads can usually
+# accept 1.5–2.0x more concurrent requests safely. Default 1.0 = no
+# oversubscription. Applies to the SINGLE-VECTOR subprocess only —
+# multi-vector has its own knob (``MEMORYLAYER_EMBEDDING_VLLM_MV_OVERSUBSCRIBE``)
+# because the two subprocesses can carry very different workload shapes.
+MEMORYLAYER_EMBEDDING_VLLM_OVERSUBSCRIBE = "MEMORYLAYER_EMBEDDING_VLLM_OVERSUBSCRIBE"
 
 DEFAULT_VLLM_SUBPROCESS_HOST = "127.0.0.1"
 DEFAULT_VLLM_SUBPROCESS_PORT = 18000
@@ -86,6 +98,8 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
         port: int = DEFAULT_VLLM_SUBPROCESS_PORT,
         startup_timeout_sec: float = DEFAULT_VLLM_SUBPROCESS_STARTUP_TIMEOUT_SEC,
         cmd: str = DEFAULT_VLLM_SUBPROCESS_CMD,
+        max_concurrent: int | None = None,
+        oversubscribe_factor: float = 1.0,
     ):
         super().__init__(v, output_dimensions=output_dimensions)
         self.model_name = model_name
@@ -113,6 +127,8 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
             enforce_eager=enforce_eager,
             cmd=cmd,
             startup_timeout_sec=float(startup_timeout_sec),
+            max_concurrent=max_concurrent,
+            oversubscribe_factor=oversubscribe_factor,
             logger=self.logger,
         )
 
@@ -194,10 +210,11 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
 
     async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
         client = await self._ensure_started()
-        response = await client.embeddings.create(
-            input=texts,
-            model=self.model_name,
-        )
+        async with self._runner.concurrency_slot():
+            response = await client.embeddings.create(
+                input=texts,
+                model=self.model_name,
+            )
         # OpenAI client preserves request order.
         out: list[list[float]] = []
         for item in response.data:
@@ -226,10 +243,11 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
                 timeout=300.0,
             )
         await self._ensure_started()
-        resp = await self._mm_http.post(
-            "/embeddings",
-            json={"model": self.model_name, "messages": messages},
-        )
+        async with self._runner.concurrency_slot():
+            resp = await self._mm_http.post(
+                "/embeddings",
+                json={"model": self.model_name, "messages": messages},
+            )
         resp.raise_for_status()
         data = resp.json()
         try:
@@ -396,4 +414,51 @@ class VLLMSubprocessEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
                 MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_CMD,
                 default=DEFAULT_VLLM_SUBPROCESS_CMD,
             ),
+            max_concurrent=_parse_max_concurrent_env(
+                v.environ(MEMORYLAYER_EMBEDDING_VLLM_MAX_CONCURRENT, default=None)
+            ),
+            oversubscribe_factor=_parse_oversubscribe_factor_env(
+                v.environ(MEMORYLAYER_EMBEDDING_VLLM_OVERSUBSCRIBE, default=None)
+            ),
         )
+
+
+def _parse_max_concurrent_env(raw: object) -> int | None:
+    """Return ``None`` for empty/unset/'auto'; positive int otherwise.
+
+    Surfaces to operators as ``MEMORYLAYER_EMBEDDING_VLLM_MAX_CONCURRENT``.
+    Empty / missing / ``"auto"`` mean "let the runner pick up vllm's
+    reported max concurrency from its boot log." Any positive integer
+    pins the value and disables the auto path.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s.lower() == "auto":
+        return None
+    try:
+        value = int(s)
+    except ValueError:
+        return None
+    return max(1, value)
+
+
+def _parse_oversubscribe_factor_env(raw: object) -> float:
+    """Return a positive float; default ``1.0`` for empty/unset/invalid input.
+
+    Operators set ``MEMORYLAYER_EMBEDDING_VLLM_OVERSUBSCRIBE=1.5`` to allow
+    50% more concurrent requests than vllm's worst-case estimate suggests.
+    Anything ≤ 0 falls back to 1.0 (safer than a runtime ValueError).
+    """
+    if raw is None:
+        return 1.0
+    s = str(raw).strip()
+    if not s:
+        return 1.0
+    try:
+        value = float(s)
+    except ValueError:
+        return 1.0
+    if value <= 0:
+        return 1.0
+    return value

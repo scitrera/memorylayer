@@ -59,8 +59,11 @@ from .vllm import (
     DEFAULT_MAX_LENGTH,
     MEMORYLAYER_EMBEDDING_VLLM_DTYPE,
     MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER,
-    MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL,
     MEMORYLAYER_EMBEDDING_VLLM_MAX_LENGTH,
+)
+from .vllm_subprocess import (
+    _parse_max_concurrent_env,
+    _parse_oversubscribe_factor_env,
 )
 
 # Multi-vec-specific subprocess + override env vars.
@@ -75,6 +78,19 @@ MEMORYLAYER_EMBEDDING_VLLM_MV_DIMENSIONS = "MEMORYLAYER_EMBEDDING_VLLM_MV_DIMENS
 # VLLM_MAX_LENGTH default (32768) is wrong for ColModernVBert and trips a
 # pydantic validation error at vLLM boot.
 MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_LENGTH = "MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_LENGTH"
+# Multi-vec oversubscription multiplier. Separate from the single-vec
+# knob (``MEMORYLAYER_EMBEDDING_VLLM_OVERSUBSCRIBE``) because the
+# multi-vec subprocess runs a different model + workload shape, and
+# operators may want to push it harder (or hold it back) independently.
+# Empty / unset → 1.0 (no oversubscription).
+MEMORYLAYER_EMBEDDING_VLLM_MV_OVERSUBSCRIBE = "MEMORYLAYER_EMBEDDING_VLLM_MV_OVERSUBSCRIBE"
+# Multi-vec GPU memory utilization fraction. Single-vec uses the bare
+# ``MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL`` knob; multi-vec gets its
+# own so the two subprocesses can be tuned independently.
+MEMORYLAYER_EMBEDDING_VLLM_MV_GPU_MEM_UTIL = "MEMORYLAYER_EMBEDDING_VLLM_MV_GPU_MEM_UTIL"
+# Multi-vec client-side concurrency cap. Empty / unset / "auto" →
+# auto-derive from vllm's reported max concurrency at boot.
+MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_CONCURRENT = "MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_CONCURRENT"
 
 DEFAULT_MV_VLLM_HOST = "127.0.0.1"
 DEFAULT_MV_VLLM_PORT = 18001  # one above the single-vec subprocess default
@@ -109,6 +125,8 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
         port: int = DEFAULT_MV_VLLM_PORT,
         startup_timeout_sec: float = DEFAULT_MV_VLLM_STARTUP_TIMEOUT_SEC,
         cmd: str = DEFAULT_MV_VLLM_CMD,
+        max_concurrent: int | None = None,
+        oversubscribe_factor: float = 1.0,
     ):
         super().__init__(v, output_dimensions=output_dimensions)
         self.model_name = model_name
@@ -138,6 +156,8 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
             architectures=self.architectures,
             cmd=cmd,
             startup_timeout_sec=float(startup_timeout_sec),
+            max_concurrent=max_concurrent,
+            oversubscribe_factor=oversubscribe_factor,
             logger=self.logger,
         )
 
@@ -264,10 +284,11 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
 
     async def _pooling_text(self, texts: list[str]) -> list[list[list[float]]]:
         client = await self._ensure_started()
-        resp = await client.post(
-            "/pooling",
-            json={"model": self.model_name, "input": texts},
-        )
+        async with self._runner.concurrency_slot():
+            resp = await client.post(
+                "/pooling",
+                json={"model": self.model_name, "input": texts},
+            )
         if resp.status_code != 200:
             raise RuntimeError(
                 f"vllm /pooling failed with status {resp.status_code}: {resp.text[:500]}"
@@ -311,10 +332,11 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
                 ],
             }
         ]
-        resp = await client.post(
-            "/pooling",
-            json={"model": self.model_name, "messages": messages},
-        )
+        async with self._runner.concurrency_slot():
+            resp = await client.post(
+                "/pooling",
+                json={"model": self.model_name, "messages": messages},
+            )
         if resp.status_code != 200:
             raise RuntimeError(
                 f"vllm /pooling (image) failed with status {resp.status_code}: {resp.text[:500]}"
@@ -434,7 +456,7 @@ class VLLMMultiVectorProviderPlugin(EmbeddingProviderPluginBase):
                 type_fn=int,
             ),
             gpu_memory_utilization=v.environ(
-                MEMORYLAYER_EMBEDDING_VLLM_GPU_MEM_UTIL,
+                MEMORYLAYER_EMBEDDING_VLLM_MV_GPU_MEM_UTIL,
                 default=DEFAULT_GPU_MEMORY_UTILIZATION,
                 type_fn=float,
             ),
@@ -457,4 +479,10 @@ class VLLMMultiVectorProviderPlugin(EmbeddingProviderPluginBase):
                 type_fn=float,
             ),
             cmd=v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_CMD, default=DEFAULT_MV_VLLM_CMD),
+            max_concurrent=_parse_max_concurrent_env(
+                v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_MAX_CONCURRENT, default=None)
+            ),
+            oversubscribe_factor=_parse_oversubscribe_factor_env(
+                v.environ(MEMORYLAYER_EMBEDDING_VLLM_MV_OVERSUBSCRIBE, default=None)
+            ),
         )

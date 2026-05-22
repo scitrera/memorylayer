@@ -95,6 +95,8 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         extra_args: list[str] | None = None,
         startup_timeout_sec: float = DEFAULT_VLLM_OCR_STARTUP_TIMEOUT_SEC,
         cmd: str = DEFAULT_VLLM_OCR_CMD,
+        max_concurrent: int | None = None,
+        oversubscribe_factor: float = 1.0,
     ):
         super().__init__(v)
         # Make PROVIDER_NAME instance-level so cascade attribution lines up
@@ -118,6 +120,8 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
             extra_args=extra_args,
             cmd=cmd,
             startup_timeout_sec=float(startup_timeout_sec),
+            max_concurrent=max_concurrent,
+            oversubscribe_factor=oversubscribe_factor,
             logger=self.logger,
         )
 
@@ -217,12 +221,13 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
                 }
             ]
 
-            response = await client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=0.0,
-            )
+            async with self._runner.concurrency_slot():
+                response = await client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=0.0,
+                )
 
             choice = response.choices[0]
             raw_content = choice.message.content or ""
@@ -275,6 +280,8 @@ def build_glm_ocr_vllm_provider(
     startup_timeout_sec: float,
     cmd: str,
     enforce_eager: bool = True,
+    max_concurrent: int | None = None,
+    oversubscribe_factor: float = 1.0,
 ) -> VLLMTranscriptionProvider:
     """GLM-OCR via vLLM with MTP speculative decoding.
 
@@ -311,6 +318,8 @@ def build_glm_ocr_vllm_provider(
         extra_args=extra_args,
         startup_timeout_sec=startup_timeout_sec,
         cmd=cmd,
+        max_concurrent=max_concurrent,
+        oversubscribe_factor=oversubscribe_factor,
     )
 
 
@@ -325,6 +334,8 @@ def build_deepseek_ocr_vllm_provider(
     startup_timeout_sec: float,
     cmd: str,
     enforce_eager: bool = True,
+    max_concurrent: int | None = None,
+    oversubscribe_factor: float = 1.0,
 ) -> VLLMTranscriptionProvider:
     """DeepSeek-OCR-2 via vLLM with the recipe-mandated flags.
 
@@ -374,4 +385,6 @@ def build_deepseek_ocr_vllm_provider(
         extra_args=extra_args,
         startup_timeout_sec=startup_timeout_sec,
         cmd=cmd,
+        max_concurrent=max_concurrent,
+        oversubscribe_factor=oversubscribe_factor,
     )

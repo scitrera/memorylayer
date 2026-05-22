@@ -7,3 +7,4 @@ node-modules/
 __pycache__/
 *.pyc
 uv.lock
+/memorylayer-embed-server/.slop/

@@ -24,6 +24,8 @@ from .config import (
     DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT,
     DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD,
     DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_MAX_CONCURRENT,
+    DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_OVERSUBSCRIBE,
     DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT,
     DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC,
     DEFAULT_EMBED_SERVER_GEMINI_ENABLED,
@@ -35,6 +37,8 @@ from .config import (
     DEFAULT_EMBED_SERVER_GLM_OCR_TRANSPORT,
     DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_CMD,
     DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL,
+    DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_MAX_CONCURRENT,
+    DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_OVERSUBSCRIBE,
     DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_PORT,
     DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC,
     DEFAULT_EMBED_SERVER_LLM_DEFAULT_PROFILE,
@@ -52,6 +56,8 @@ from .config import (
     EMBED_SERVER_DEEPSEEK_OCR_TRANSPORT,
     EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD,
     EMBED_SERVER_DEEPSEEK_OCR_VLLM_GPU_MEM_UTIL,
+    EMBED_SERVER_DEEPSEEK_OCR_VLLM_MAX_CONCURRENT,
+    EMBED_SERVER_DEEPSEEK_OCR_VLLM_OVERSUBSCRIBE,
     EMBED_SERVER_DEEPSEEK_OCR_VLLM_PORT,
     EMBED_SERVER_DEEPSEEK_OCR_VLLM_STARTUP_TIMEOUT_SEC,
     EMBED_SERVER_GEMINI_ENABLED,
@@ -63,6 +69,8 @@ from .config import (
     EMBED_SERVER_GLM_OCR_TRANSPORT,
     EMBED_SERVER_GLM_OCR_VLLM_CMD,
     EMBED_SERVER_GLM_OCR_VLLM_GPU_MEM_UTIL,
+    EMBED_SERVER_GLM_OCR_VLLM_MAX_CONCURRENT,
+    EMBED_SERVER_GLM_OCR_VLLM_OVERSUBSCRIBE,
     EMBED_SERVER_GLM_OCR_VLLM_PORT,
     EMBED_SERVER_GLM_OCR_VLLM_STARTUP_TIMEOUT_SEC,
     EMBED_SERVER_LLM_DEFAULT_PROFILE,
@@ -475,6 +483,10 @@ def _init_glm_ocr_provider(v: Variables, logger: Logger):
 
     if transport == "vllm_subprocess":
         try:
+            from .services.embedding.vllm_subprocess import (
+                _parse_max_concurrent_env,
+                _parse_oversubscribe_factor_env,
+            )
             from .services.transcription.vllm_transcription import build_glm_ocr_vllm_provider
 
             provider = build_glm_ocr_vllm_provider(
@@ -494,6 +506,18 @@ def _init_glm_ocr_provider(v: Variables, logger: Logger):
                     type_fn=float,
                 ),
                 cmd=v.environ(EMBED_SERVER_GLM_OCR_VLLM_CMD, default=DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_CMD),
+                max_concurrent=_parse_max_concurrent_env(
+                    v.environ(
+                        EMBED_SERVER_GLM_OCR_VLLM_MAX_CONCURRENT,
+                        default=DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_MAX_CONCURRENT,
+                    )
+                ),
+                oversubscribe_factor=_parse_oversubscribe_factor_env(
+                    v.environ(
+                        EMBED_SERVER_GLM_OCR_VLLM_OVERSUBSCRIBE,
+                        default=DEFAULT_EMBED_SERVER_GLM_OCR_VLLM_OVERSUBSCRIBE,
+                    )
+                ),
             )
             logger.info("GLM-OCR provider configured (transport=vllm_subprocess)")
             return provider
@@ -540,6 +564,10 @@ def _init_deepseek_ocr_provider(v: Variables, logger: Logger):
 
     if transport == "vllm_subprocess":
         try:
+            from .services.embedding.vllm_subprocess import (
+                _parse_max_concurrent_env,
+                _parse_oversubscribe_factor_env,
+            )
             from .services.transcription.vllm_transcription import build_deepseek_ocr_vllm_provider
 
             provider = build_deepseek_ocr_vllm_provider(
@@ -563,6 +591,18 @@ def _init_deepseek_ocr_provider(v: Variables, logger: Logger):
                     type_fn=float,
                 ),
                 cmd=v.environ(EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD, default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_CMD),
+                max_concurrent=_parse_max_concurrent_env(
+                    v.environ(
+                        EMBED_SERVER_DEEPSEEK_OCR_VLLM_MAX_CONCURRENT,
+                        default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_MAX_CONCURRENT,
+                    )
+                ),
+                oversubscribe_factor=_parse_oversubscribe_factor_env(
+                    v.environ(
+                        EMBED_SERVER_DEEPSEEK_OCR_VLLM_OVERSUBSCRIBE,
+                        default=DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_OVERSUBSCRIBE,
+                    )
+                ),
             )
             logger.info("DeepSeek-OCR-2 provider configured (transport=vllm_subprocess)")
             return provider
