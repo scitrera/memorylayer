@@ -1,6 +1,6 @@
 [project]
 name = "memorylayer-embed-server"
-version = "0.1.22"
+version = "0.1.23"
 description = "MemoryLayer.ai Embed Server - Stateless transcription and embedding GPU server"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -2,7 +2,7 @@
 # scripts/update-versions.py can check all versions against this file and update all package to be in sync
 
 memorylayer-core-python: 0.1.22
-memorylayer-embed-server: 0.1.22
+memorylayer-embed-server: 0.1.23
 
 memorylayer-sdk-python: 0.1.22
 memorylayer-sdk-typescript: 0.1.22
