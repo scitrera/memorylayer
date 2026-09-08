@@ -39,6 +39,7 @@ from scitrera_app_framework import Variables, ext_parse_bool, get_extension, get
 from scitrera_rt_data.serialization.msgpack import msgpack_deserialize, msgpack_serialize
 
 from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
+from memorylayer_server.services.llm.attribution import task_attribution
 from memorylayer_server.services.tasks.base import (
     EXT_STORAGE_BACKEND,
     TaskService,
@@ -77,7 +78,19 @@ def _deserialize_task_payload(data: bytes) -> dict | None:
 AETHER_TASKS_ENABLED = "AETHER_TASKS_ENABLED"
 DEFAULT_AETHER_TASKS_ENABLED = True
 
-# Implementation name used for task targeting (self)
+# In-process worker toggle. When True (default) the server registers task
+# handlers and claims POOL assignments itself, acting as an in-process worker —
+# convenient for dev/testing where one process schedules and consumes. When
+# False, the server still schedules/produces tasks but does NOT register
+# handlers or set the assignment callback, so prod can split roles and run
+# dedicated WorkerRunner processes (implementation "memorylayer") instead.
+MEMORYLAYER_TASKS_INPROCESS_WORKER = "MEMORYLAYER_TASKS_INPROCESS_WORKER"
+DEFAULT_MEMORYLAYER_TASKS_INPROCESS_WORKER = True
+
+# Implementation name used for task targeting (self).
+# Deliberately hardcoded (not env-configurable) to avoid ACL/cert churn: the
+# server and dedicated workers share this implementation identity so they
+# compete on a single POOL.
 _TASK_IMPLEMENTATION = "memorylayer"
 
 
@@ -159,11 +172,29 @@ class AetherTaskService(TaskService):
         """
         self._client = agent_service.client
         self._workspace = agent_service.workspace
-        agent_service.set_task_assignment_handler(self._handle_task_assignment)
+
+        # Only consume (claim POOL assignments) when the in-process worker is
+        # enabled. When disabled, the server still schedules/produces tasks but
+        # leaves consumption to dedicated WorkerRunner processes.
+        inprocess_worker = self._v.environ(
+            MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            DEFAULT_MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            type_fn=ext_parse_bool,
+        )
+        if inprocess_worker:
+            agent_service.set_task_assignment_handler(self._handle_task_assignment)
+        else:
+            self.logger.info(
+                "In-process worker disabled (%s=false): server will schedule/produce "
+                "tasks but not claim POOL assignments (run dedicated workers instead)",
+                MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            )
+
         self.logger.info(
-            "Bound to shared Aether client (workspace=%s, connected=%s)",
+            "Bound to shared Aether client (workspace=%s, connected=%s, inprocess_worker=%s)",
             self._workspace,
             self._client is not None,
+            inprocess_worker,
         )
 
     async def disconnect(self) -> None:
@@ -192,6 +223,8 @@ class AetherTaskService(TaskService):
         payload: dict,
         delay_seconds: int = 0,
         priority: int = 5,
+        retry_policy=None,
+        metadata: dict | None = None,
     ) -> str:
         """Schedule a one-shot task via Aether's task lifecycle.
 
@@ -200,6 +233,12 @@ class AetherTaskService(TaskService):
             payload: Task payload data.
             delay_seconds: Delay before creating (default: immediate).
             priority: Task priority 1-10, lower is higher (default: 5).
+            retry_policy: Optional ``aether_pb2.RetryPolicy`` proto attached to
+                the created Aether task so the server auto-reschedules on
+                ``fail_task`` per this policy (spanning a multi-minute backend
+                outage). ``None`` (default) preserves today's behavior (Aether's
+                built-in default re-pend). Forwarded to ``create_task``
+                capability-guarded — see ``_create_task``.
 
         Returns:
             Unique task ID (``atask_<hex>`` prefix), or empty string if
@@ -213,9 +252,11 @@ class AetherTaskService(TaskService):
         self._task_status[task_id] = TaskStatus.PENDING
 
         if delay_seconds > 0:
-            asyncio.create_task(self._delayed_create(task_id, task_type, payload, delay_seconds))
+            asyncio.create_task(
+                self._delayed_create(task_id, task_type, payload, delay_seconds, retry_policy, metadata)
+            )
         else:
-            await self._create_task(task_id, task_type, payload)
+            await self._create_task(task_id, task_type, payload, retry_policy, metadata)
 
         return task_id
 
@@ -374,11 +415,19 @@ class AetherTaskService(TaskService):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _create_task(self, task_id: str, task_type: str, payload: dict) -> None:
+    async def _create_task(self, task_id: str, task_type: str, payload: dict, retry_policy=None,
+                           metadata: dict | None = None) -> None:
         """Create a task via Aether's task lifecycle (create_task).
 
         Uses POOL assignment mode so that competing worker processes receive
         task assignments via their ``on_task_assignment`` callback.
+
+        ``retry_policy`` (an ``aether_pb2.RetryPolicy`` proto) is forwarded to
+        ``create_task`` capability-guarded: it is only passed when the installed
+        SDK's ``create_task`` actually accepts a ``retry_policy`` keyword (the
+        proto field was added in a later SDK). When the SDK cannot carry it, a
+        one-line WARNING is emitted and the task is created without it (today's
+        behavior) rather than silently dropping the intent.
         """
         if self._client is None:
             self.logger.error(
@@ -390,15 +439,39 @@ class AetherTaskService(TaskService):
 
         from scitrera_aether_client import POOL
 
+        # Only forward retry_policy when the installed SDK's create_task accepts
+        # it (version-drift safety: older SDKs lack the RetryPolicy proto field).
+        create_kwargs = {}
+        if retry_policy is not None:
+            import inspect
+
+            if "retry_policy" in inspect.signature(self._client.create_task).parameters:
+                create_kwargs["retry_policy"] = retry_policy
+            else:
+                self.logger.warning(
+                    "Aether SDK create_task does not accept retry_policy; creating "
+                    "task %s (type=%s) WITHOUT a retry policy — upgrade "
+                    "scitrera-aether-client to enable multi-minute embed retries",
+                    task_id,
+                    task_type,
+                )
+
+        # Merge caller-supplied metadata (e.g. bg_kind/title/visibility) alongside
+        # the reserved task_id. The Aether metadata map is string-valued, so coerce
+        # values to str; task_id is stamped last so callers can't clobber it.
+        task_metadata = {str(k): str(val) for k, val in (metadata or {}).items()}
+        task_metadata["task_id"] = task_id
+
         aether_task_type = f"memorylayer-task.{task_type}"
         try:
             await self._client.create_task(
                 task_type=aether_task_type,
                 workspace=self._workspace,
-                metadata={"task_id": task_id},
+                metadata=task_metadata,
                 payload=msgpack_serialize(payload),
                 target_implementation=_TASK_IMPLEMENTATION,
                 assignment_mode=POOL,
+                **create_kwargs,
             )
             self._task_status[task_id] = TaskStatus.RUNNING
             self.logger.debug(
@@ -421,11 +494,13 @@ class AetherTaskService(TaskService):
         task_type: str,
         payload: dict,
         delay_seconds: int,
+        retry_policy=None,
+        metadata: dict | None = None,
     ) -> None:
         """Wait *delay_seconds* then create the aether task."""
         try:
             await asyncio.sleep(delay_seconds)
-            await self._create_task(task_id, task_type, payload)
+            await self._create_task(task_id, task_type, payload, retry_policy, metadata)
         except asyncio.CancelledError:
             self._task_status[task_id] = TaskStatus.CANCELLED
         except Exception:
@@ -486,9 +561,26 @@ class AetherTaskService(TaskService):
                 await self._report_task_failed(aether_task_id, f"JSON decode error: {exc}")
                 return
 
+        # Thread the Aether task_id and task metadata into the payload under
+        # reserved keys so progress-aware handlers can correlate live progress
+        # with the Background Tasks snapshot (keyed by the Aether task_id, NOT
+        # the ml/dctask id stored in metadata["task_id"]). Without this the
+        # _ProgressEmitter is a no-op and the in-process server ingests with no
+        # progress. Mirrors WorkerRunner._handle_task_assignment so the OSS
+        # in-process path reaches parity with the dedicated worker.
+        if isinstance(task_payload, dict):
+            task_payload.setdefault("_aether_task_id", aether_task_id)
+            task_payload.setdefault("_task_metadata", dict(assignment.metadata))
+
         self.logger.info("Executing task %s (type=%s)", ml_task_id, task_type)
+        # Bind the Aether task id as ambient LLM attribution for the whole
+        # handler run so every outgoing LLM call made transitively (e.g.
+        # memory.remember -> extraction/ontology/tiering -> llm) carries the
+        # ``X-Scitrera-Task-Id`` header to the MLflow AI Gateway, without
+        # threading the id through every service method signature.
         try:
-            await handler(self._v, task_payload)
+            with task_attribution(aether_task_id):
+                await handler(self._v, task_payload)
             self._task_status[ml_task_id] = TaskStatus.COMPLETED
             self.logger.info("Task %s completed successfully", ml_task_id)
             await self._report_task_completed(aether_task_id)

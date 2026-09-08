@@ -112,6 +112,45 @@ EMBED_SERVER_DEEPSEEK_OCR_VLLM_OVERSUBSCRIBE = "MEMORYLAYER_EMBED_DEEPSEEK_OCR_V
 DEFAULT_EMBED_SERVER_DEEPSEEK_OCR_VLLM_OVERSUBSCRIBE = ""  # → 1.0
 
 # ============================================
+# Unlimited-OCR Settings
+# ============================================
+# Baidu's DeepSeek-OCR-lineage document parser. vLLM-only: the model needs
+# the arch's n-gram logits processor plus a fixed prompt/decode recipe, none
+# of which the in-process HF path can express.
+
+EMBED_SERVER_UNLIMITED_OCR_MODEL = "MEMORYLAYER_EMBED_UNLIMITED_OCR_MODEL"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_MODEL = "baidu/Unlimited-OCR"
+
+EMBED_SERVER_UNLIMITED_OCR_MAX_TOKENS = "MEMORYLAYER_EMBED_UNLIMITED_OCR_MAX_TOKENS"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_MAX_TOKENS = 16384
+
+EMBED_SERVER_UNLIMITED_OCR_ENABLED = "MEMORYLAYER_EMBED_UNLIMITED_OCR_ENABLED"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_ENABLED = False
+
+EMBED_SERVER_UNLIMITED_OCR_VLLM_PORT = "MEMORYLAYER_EMBED_UNLIMITED_OCR_VLLM_PORT"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_PORT = 18012
+EMBED_SERVER_UNLIMITED_OCR_VLLM_GPU_MEM_UTIL = "MEMORYLAYER_EMBED_UNLIMITED_OCR_VLLM_GPU_MEM_UTIL"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_GPU_MEM_UTIL = 0.15
+EMBED_SERVER_UNLIMITED_OCR_VLLM_STARTUP_TIMEOUT_SEC = "MEMORYLAYER_EMBED_UNLIMITED_OCR_VLLM_STARTUP_TIMEOUT_SEC"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_STARTUP_TIMEOUT_SEC = 600.0
+EMBED_SERVER_UNLIMITED_OCR_VLLM_CMD = "MEMORYLAYER_EMBED_UNLIMITED_OCR_VLLM_CMD"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_CMD = "vllm"
+# Client-side concurrency cap; empty / unset → auto-derive from vllm's
+# reported max concurrency. Oversubscription multiplier as for GLM-OCR.
+EMBED_SERVER_UNLIMITED_OCR_VLLM_MAX_CONCURRENT = "MEMORYLAYER_EMBED_UNLIMITED_OCR_VLLM_MAX_CONCURRENT"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_MAX_CONCURRENT = ""  # auto
+EMBED_SERVER_UNLIMITED_OCR_VLLM_OVERSUBSCRIBE = "MEMORYLAYER_EMBED_UNLIMITED_OCR_VLLM_OVERSUBSCRIBE"
+DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_OVERSUBSCRIBE = ""  # → 1.0
+
+# Prompt/decode recipe. These are the values the model was trained against —
+# the defaults live in services.transcription.vllm_transcription and are only
+# surfaced as env vars so an operator can follow an upstream card revision
+# without a code change. WINDOW_SIZE 1024 is the multi-page / PDF setting.
+EMBED_SERVER_UNLIMITED_OCR_PROMPT = "MEMORYLAYER_EMBED_UNLIMITED_OCR_PROMPT"
+EMBED_SERVER_UNLIMITED_OCR_NGRAM_SIZE = "MEMORYLAYER_EMBED_UNLIMITED_OCR_NGRAM_SIZE"
+EMBED_SERVER_UNLIMITED_OCR_WINDOW_SIZE = "MEMORYLAYER_EMBED_UNLIMITED_OCR_WINDOW_SIZE"
+
+# ============================================
 # Gemini Fallback
 # ============================================
 EMBED_SERVER_GEMINI_MODEL = "MEMORYLAYER_EMBED_GEMINI_MODEL"
@@ -172,7 +211,12 @@ DEFAULT_EMBED_SERVER_USE_MULTI_FOR_SINGLE = False
 # Selects which provider serves single-vector requests. Multi-vector
 # continues to use ColPali (or the mock for ``USE_MOCK_PROVIDERS``).
 # Values:
-#   ``vllm``     (default)  in-process vLLM with Qwen3-VL-Embedding-2B
+#   ``sentence_transformers`` (default) in-process sentence-transformers on CPU
+#                           (all-MiniLM-L6-v2, 384-d). Needs the `local` extra.
+#   ``vllm_subprocess``     out-of-process vLLM with Qwen3-VL-Embedding-2B
+#                           (2048-d). Isolated CUDA context; GPU OOMs don't take
+#                           the FastAPI loop down. The production GPU choice.
+#   ``vllm``                in-process vLLM (AsyncLLM), single-process deployments
 #   ``openai``              HTTP call out to OpenAI (or OpenAI-compat endpoint
 #                           — pair with MEMORYLAYER_EMBEDDING_OPENAI_BASE_URL)
 #   ``google``              HTTP call out to Google GenAI
@@ -181,12 +225,16 @@ DEFAULT_EMBED_SERVER_USE_MULTI_FOR_SINGLE = False
 # USE_MOCK_PROVIDERS and USE_MULTI_FOR_SINGLE remain supported as
 # higher-priority overrides for backwards compatibility.
 EMBED_SERVER_SINGLE_VECTOR_PROVIDER = "MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER"
-# ``vllm_subprocess`` runs vLLM in its own process with isolated CUDA
-# context — production-friendly because GPU OOMs don't take the FastAPI
-# loop down with them. ``vllm`` (in-process AsyncLLM) remains available
-# for single-process deployments where the subprocess overhead is
-# undesirable, but the subprocess is the supported default.
-DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER = "vllm_subprocess"
+# Default ``sentence_transformers``: running the embed server should not require
+# a GPU, a CUDA toolchain, or a 2B-parameter download. all-MiniLM-L6-v2 is ~90 MB
+# and encodes on CPU, which makes `pip install "memorylayer-embed-server[local]"`
+# a genuinely local quick start.
+#
+# ⚠ CHANGING THIS CHANGES THE VECTOR DIMENSION (384 here vs 2048 for the vLLM
+# default), and dimension is a property of already-stored data, not just of
+# configuration. GPU deployments should set this explicitly rather than relying
+# on the default. See the "Embedding dimensions" section of the README.
+DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER = "sentence_transformers"
 
 # Selects which provider serves multi-vector / ColPali requests. Both
 # back-ends speak the same wire shape via /v1/embeddings/multi,
@@ -231,6 +279,10 @@ DEFAULT_EMBED_SERVER_MULTI_VECTOR_PROVIDER = "vllm_subprocess"
 #   MEMORYLAYER_EMBED_LLM_PROFILE_<NAME>_EXTRA_ARGS      (shell-split list)
 #   MEMORYLAYER_EMBED_LLM_PROFILE_<NAME>_CMD             (default "vllm")
 #   MEMORYLAYER_EMBED_LLM_PROFILE_<NAME>_HOST            (default "127.0.0.1")
+#   MEMORYLAYER_EMBED_LLM_PROFILE_<NAME>_ENABLE_PROMPT_EMBEDS (default false)
+#       Adds ``--enable-prompt-embeds`` so this profile accepts precomputed
+#       input embeddings (the visual-tokenizer prompt-embeds feature) in
+#       chat/completions requests.
 EMBED_SERVER_LLM_ENABLED = "MEMORYLAYER_EMBED_LLM_ENABLED"
 DEFAULT_EMBED_SERVER_LLM_ENABLED = False
 

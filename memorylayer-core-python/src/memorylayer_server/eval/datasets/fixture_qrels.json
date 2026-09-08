@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "_description": "Small, lexically-grounded retrieval qrels for the bundled fixture corpus. Used by the CI retrieval-regression gate.",
+  "queries": [
+    {"query_id": "q1", "query": "python web framework for building APIs", "relevant": ["fastapi-web", "python-backend"], "expected_top1": "fastapi-web"},
+    {"query_id": "q2", "query": "machine learning with python", "relevant": ["python-ml", "numpy-arrays"], "expected_top1": "python-ml"},
+    {"query_id": "q3", "query": "in memory caching key value store", "relevant": ["redis-cache"], "expected_top1": "redis-cache"},
+    {"query_id": "q4", "query": "relational database SQL queries and transactions", "relevant": ["postgres-db"], "expected_top1": "postgres-db"},
+    {"query_id": "q5", "query": "orchestrate containers across a cluster", "relevant": ["k8s-orchestration", "docker-deploy"], "expected_top1": "k8s-orchestration"},
+    {"query_id": "q6", "query": "semantic similarity search over embeddings", "relevant": ["vector-search"], "expected_top1": "vector-search"},
+    {"query_id": "q7", "query": "retrieval augmented generation for language models", "relevant": ["rag-retrieval"], "expected_top1": "rag-retrieval"},
+    {"query_id": "q8", "query": "distributed version control for source code", "relevant": ["git-vcs"], "expected_top1": "git-vcs"},
+    {"query_id": "q9", "query": "python testing framework with fixtures", "relevant": ["testing-pytest"], "expected_top1": "testing-pytest"},
+    {"query_id": "q10", "query": "self attention sequence modeling architecture", "relevant": ["transformer-arch"], "expected_top1": "transformer-arch"}
+  ]
+}

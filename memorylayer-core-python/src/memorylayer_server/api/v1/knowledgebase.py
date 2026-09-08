@@ -12,6 +12,7 @@ Endpoints:
 """
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -24,8 +25,9 @@ from ...services._constants import EXT_GRAPH_ANALYSIS_SERVICE, EXT_KNOWLEDGEBASE
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
 from ...services.knowledgebase.base import Article, KBGenerateOptions, Knowledgebase
+from ...services.tasks import TaskService
 from .. import EXT_MULTI_API_ROUTERS
-from .deps import get_auth_service, get_authz_service
+from .deps import get_auth_service, get_authz_service, get_task_service
 from .schemas import ErrorResponse
 
 # ------------------------------------------------------------------ #
@@ -42,6 +44,15 @@ class KBGenerateRequest(BaseModel):
     max_communities: int = Field(50, ge=1, le=500, description="Maximum community articles to generate")
     max_god_nodes: int = Field(20, ge=0, le=200, description="Maximum entity articles to generate")
     regenerate: bool = Field(False, description="Force regeneration even if KB exists")
+    background: bool = Field(
+        False,
+        description=(
+            "Run generation as a background kb_update task instead of "
+            "synchronously. Returns immediately with the current KB metadata; the "
+            "task surfaces in the UI's background operations and emits a kb_updated "
+            "event on completion."
+        ),
+    )
 
 
 class ArticleListResponse(BaseModel):
@@ -98,6 +109,7 @@ async def generate_knowledgebase(
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     kb_service=Depends(get_knowledgebase_service),
+    task_service: TaskService = Depends(get_task_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> Knowledgebase:
     """
@@ -114,6 +126,34 @@ async def generate_knowledgebase(
         await authz_service.require_authorization(ctx, "knowledgebase", "write", workspace_id=ctx.workspace_id)
 
         logger.info("Generating knowledgebase for workspace=%s", ctx.workspace_id)
+
+        # Background mode: enqueue a kb_update task instead of running the
+        # (slow, LLM-heavy) pipeline inline. The task carries bg_kind='kb' +
+        # visibility='workspace' metadata so it surfaces in the UI's background
+        # operations feed and emits kb_updated on completion (same path the
+        # document→KB pipeline uses). Return immediately with the current KB
+        # metadata (stale until the task finishes).
+        if request.background:
+            task_id = await task_service.schedule_task(
+                "kb_update",
+                {"workspace_id": ctx.workspace_id, "regenerate": request.regenerate},
+                metadata={
+                    "bg_kind": "kb",
+                    "visibility": "workspace",
+                    "title": "Regenerating knowledge base",
+                },
+            )
+            logger.info(
+                "Scheduled background KB regeneration for workspace=%s (task=%s, regenerate=%s)",
+                ctx.workspace_id, task_id, request.regenerate,
+            )
+            existing = await kb_service.get_knowledgebase(ctx.workspace_id)
+            if existing is not None:
+                return existing
+            return Knowledgebase(
+                workspace_id=ctx.workspace_id,
+                generated_at=datetime.now(timezone.utc),
+            )
 
         options = KBGenerateOptions(
             include_rpg=request.include_rpg,
@@ -343,6 +383,7 @@ async def export_vault(
 )
 async def get_graph_analysis(
     http_request: Request,
+    include_central_nodes: bool = True,
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     graph_service=Depends(get_graph_analysis_service),
@@ -353,13 +394,19 @@ async def get_graph_analysis(
 
     Runs a fresh analysis (snapshot + communities + centrality + bridges + stats).
     For a cached result use GET /v1/knowledgebase which reads the last generated KB.
+
+    ``include_central_nodes=false`` returns the lighter communities-only analysis
+    (communities + bridges + stats), skipping betweenness and the per-memory
+    central_nodes payload.
     """
     try:
         ctx = await auth_service.build_context(http_request, None)
         await authz_service.require_authorization(ctx, "knowledgebase", "read", workspace_id=ctx.workspace_id)
 
         logger.debug("Running graph analysis for workspace=%s", ctx.workspace_id)
-        analysis: GraphAnalysis = await graph_service.analyze(workspace_id=ctx.workspace_id)
+        analysis: GraphAnalysis = await graph_service.analyze(
+            workspace_id=ctx.workspace_id, include_central_nodes=include_central_nodes
+        )
 
         return GraphAnalysisResponse(analysis=analysis, cached=False)
 

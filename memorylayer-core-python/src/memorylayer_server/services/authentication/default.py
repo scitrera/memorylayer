@@ -14,9 +14,11 @@ from scitrera_app_framework import Variables, ext_parse_bool, get_extension
 
 from ...config import (
     DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+    DEFAULT_MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
     DEFAULT_TENANT_ID,
     DEFAULT_WORKSPACE_ID,
     MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+    MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
 )
 from ...models.auth import AuthIdentity
 from ...models.session import Session
@@ -26,6 +28,7 @@ from .base import (
     EXT_AUTHENTICATION_SERVICE,
     AuthenticationService,
     AuthenticationServicePluginBase,
+    ensure_resolved_workspace,
 )
 
 
@@ -43,12 +46,14 @@ class OpenAuthenticationService(AuthenticationService):
         session_service: SessionService,
         workspace_service: WorkspaceService,
         implicit_session_create: bool = True,
+        implicit_workspace_create: bool = True,
         logger: logging.Logger | None = None,
     ):
         super().__init__(logger)
         self.session_service = session_service
         self.workspace_service = workspace_service
         self._implicit_session_create = implicit_session_create
+        self._implicit_workspace_create = implicit_workspace_create
 
     async def verify_api_key(self, api_key: str | None) -> AuthIdentity:
         """
@@ -85,6 +90,7 @@ class OpenAuthenticationService(AuthenticationService):
         request_workspace_id: str | None,
         session: Session | None,
         tenant_id: str,
+        allow_create: bool = True,
     ) -> str:
         """
         Resolve workspace with priority order and auto-creation.
@@ -98,10 +104,13 @@ class OpenAuthenticationService(AuthenticationService):
         workspace_id = request_workspace_id or (session.workspace_id if session else None) or DEFAULT_WORKSPACE_ID
 
         # Auto-create workspace if needed (OSS "just works" pattern)
-        await self.workspace_service.ensure_workspace(
-            workspace_id=workspace_id,
-            tenant_id=tenant_id,
-            auto_create=True,
+        await ensure_resolved_workspace(
+            self.workspace_service,
+            workspace_id,
+            tenant_id,
+            may_create=allow_create,
+            implicit_create=self._implicit_workspace_create,
+            explicitly_named=bool(request_workspace_id),
         )
 
         return workspace_id
@@ -163,10 +172,17 @@ class OpenAuthenticationServicePlugin(AuthenticationServicePluginBase):
             type_fn=ext_parse_bool,
         )
 
+        implicit_workspace_create = v.environ(
+            MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
+            default=DEFAULT_MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
+            type_fn=ext_parse_bool,
+        )
+
         return OpenAuthenticationService(
             session_service=session_service,
             workspace_service=workspace_service,
             implicit_session_create=implicit_create,
+            implicit_workspace_create=implicit_workspace_create,
             logger=logger,
         )
 

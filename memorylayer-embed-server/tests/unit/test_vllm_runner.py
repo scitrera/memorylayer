@@ -114,6 +114,23 @@ def test_llm_argv_omits_served_model_name_flag_when_empty():
     assert "--served-model-name" not in r.build_argv()
 
 
+def test_llm_argv_includes_enable_prompt_embeds_when_set():
+    r = _runner(role="llm", enable_prompt_embeds=True)
+    assert "--enable-prompt-embeds" in r.build_argv()
+
+
+def test_llm_argv_omits_enable_prompt_embeds_by_default():
+    r = _runner(role="llm", enable_prompt_embeds=False)
+    assert "--enable-prompt-embeds" not in r.build_argv()
+
+
+def test_enable_prompt_embeds_ignored_for_non_llm_roles():
+    # Pooling/embedding runners reject the flag, so it must never be emitted.
+    for role in ("embedding", "multi_vector"):
+        r = _runner(role=role, enable_prompt_embeds=True)
+        assert "--enable-prompt-embeds" not in r.build_argv()
+
+
 def test_argv_includes_tensor_parallel_when_greater_than_one():
     r = _runner(role="llm", tensor_parallel_size=2)
     argv = r.build_argv()

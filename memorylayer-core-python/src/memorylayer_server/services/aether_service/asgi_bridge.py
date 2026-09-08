@@ -16,15 +16,16 @@ Notes / decisions
   raise ``UnicodeEncodeError``. That is a wire-protocol issue: HTTP headers
   are not transport-safe outside of latin-1 and a caller producing such a
   request has bigger problems.
-* **Streaming responses**: TODO. Phase 2a explicitly excluded streaming on
-  the terminator. We accumulate the full response body and return it
-  inline. ``ProxyHttpTerminator._send_response`` chunks bodies > 256 KiB
-  before sending them upstream, so this still scales for large bounded
-  responses; what is NOT supported is open-ended streaming
-  (``StreamingResponse`` over SSE etc). When the terminator is upgraded to
-  support ``stream_response_indefinitely`` we will need to switch to a
-  send-callback that forwards each ``http.response.body`` chunk as a
-  separate ``ProxyHttpBodyChunk``.
+* **Streaming responses**: BOUNDED ``StreamingResponse`` (e.g. skill file /
+  bundle downloads) IS supported — we accumulate every ``http.response.body``
+  chunk and return it inline, and ``receive()`` parks after the request instead
+  of returning ``http.disconnect`` so Starlette's disconnect-listener doesn't
+  cancel the stream mid-body (see ``receive`` below). ``ProxyHttpTerminator.
+  _send_response`` chunks bodies > 256 KiB before sending them upstream, so this
+  scales for large bounded responses. What is still NOT supported is open-ended
+  streaming (SSE / ``stream_response_indefinitely``): the terminator would need
+  to forward each ``http.response.body`` chunk as a separate ``ProxyHttpBodyChunk``
+  rather than accumulating.
 * **Header collisions**: ASGI permits duplicate header names as separate
   ``(name, value)`` tuples; ``MintedRequest.headers`` is a ``Dict``, so
   duplicates are last-write-wins on the way IN. Going OUT we preserve
@@ -38,6 +39,7 @@ Notes / decisions
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -71,12 +73,25 @@ async def asgi_dispatch(
     response_status = 500
     response_headers: list[tuple[bytes, bytes]] = []
     response_chunks: list[bytes] = []
+    # Set once the app coroutine returns, to release any receive() parked below.
+    response_done = asyncio.Event()
 
     async def receive():
         nonlocal received
         if not received:
             received = True
             return {"type": "http.request", "body": req.body, "more_body": False}
+        # Request fully delivered. BLOCK until the response completes rather than
+        # returning ``http.disconnect``: Starlette's ``StreamingResponse`` (under
+        # ASGI spec_version < 2.4) runs a concurrent ``listen_for_disconnect(receive)``
+        # task that CANCELS the streaming task the instant receive() yields
+        # ``http.disconnect`` — which truncates the body to empty. A plain Response
+        # never calls receive() again, so it was unaffected; but every bounded
+        # StreamingResponse (e.g. skill file/bundle downloads) came back empty over
+        # the relay. Parking here keeps the synthetic connection "alive" until the
+        # response is sent (the response task group then cancels this awaiter), which
+        # is exactly how a real server behaves for a bounded request/response.
+        await response_done.wait()
         return {"type": "http.disconnect"}
 
     async def send(message: dict[str, Any]) -> None:
@@ -114,7 +129,12 @@ async def asgi_dispatch(
         "state": {"app_workspace": req.app_workspace},
     }
 
-    await app(scope, receive, send)
+    try:
+        await app(scope, receive, send)
+    finally:
+        # Release a parked receive() in case the app returned without the response
+        # task group cancelling it (belt-and-suspenders; the cancel path is normal).
+        response_done.set()
 
     return aether_pb2.ProxyHttpResponse(
         request_id=req.request_id,

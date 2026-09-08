@@ -15,11 +15,21 @@ import type {
   DatasetInfo, DatasetJobInfo, DatasetUploadOptions, DatasetUploadResponse,
   DatasetListResponse, DatasetSliceOptions, DatasetSliceResult, DatasetMemoriesResponse,
   AuthorityContext,
+  ApiToken, ApiTokenWithSecret, TokenCreateOptions, TokenListResponse,
+  MemoryListOptions, MemoryListResponse,
+  Entity, EntityListResponse, EntityResponse, EntityResolveResponse,
+  EntityListOptions, EntityResolveOptions, EntityMergeOptions,
+  AssociationUpdateOptions,
+  ThreadUpdateOptions, UserThreadListOptions,
+  SessionCheckpoint, ContextPack, ContextDelta, ContextPackOptions,
 } from "./types.js";
 import { RelationshipType } from "./types.js";
-import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError, EnterpriseRequiredError } from "./errors.js";
+import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError, EnterpriseRequiredError, RateLimitError } from "./errors.js";
+import { sleep } from "./utils.js";
 import { SkillsNamespace } from "./skills.js";
 import { McpServersNamespace } from "./mcp_servers.js";
+import { KnowledgebaseNamespace } from "./knowledgebase.js";
+import { RpgNamespace } from "./rpg.js";
 
 export class MemoryLayerClient {
   private baseUrl: string;
@@ -28,12 +38,21 @@ export class MemoryLayerClient {
   private sessionId?: string;
   private timeout: number;
   private defaultAuthority?: AuthorityContext;
+  private fetchImpl: typeof fetch;
+  private maxRetries: number;
+  private retryBaseDelay: number;
 
   /** Skills namespace — access via `client.skills.list(...)` etc. */
   readonly skills: SkillsNamespace;
 
   /** MCP Servers namespace — access via `client.mcpServers.list(...)` etc. */
   readonly mcpServers: McpServersNamespace;
+
+  /** Knowledgebase namespace — access via `client.kb.get(...)` etc. */
+  readonly kb: KnowledgebaseNamespace;
+
+  /** Repository Planning Graph namespace — access via `client.rpg.sync(...)` etc. */
+  readonly rpg: RpgNamespace;
 
   constructor(config: ClientConfig = {}) {
     this.baseUrl = config.baseUrl ?? "http://localhost:61001";
@@ -42,8 +61,15 @@ export class MemoryLayerClient {
     this.sessionId = config.sessionId;
     this.timeout = config.timeout ?? 30000;
     this.defaultAuthority = config.defaultAuthority;
+    this.maxRetries = config.maxRetries ?? 3;
+    this.retryBaseDelay = config.retryBaseDelay ?? 500;
+    // Bind to globalThis so the default impl preserves `this === undefined`
+    // (fetch is sensitive to its receiver in some runtimes).
+    this.fetchImpl = config.fetch ?? fetch.bind(globalThis);
     this.skills = new SkillsNamespace(this);
     this.mcpServers = new McpServersNamespace(this);
+    this.kb = new KnowledgebaseNamespace(this);
+    this.rpg = new RpgNamespace(this);
   }
 
   /**
@@ -90,16 +116,27 @@ export class MemoryLayerClient {
     return h;
   }
 
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    enterpriseFeature?: string,
+  /**
+   * Build the standard request headers (auth, session, workspace, OBO authority).
+   * Centralized so every request helper applies identical header logic.
+   *
+   * Note: upload/stream paths (exportWorkspace, importWorkspaceStream,
+   * uploadDocument, uploadDataset, getPageImage) call this method and therefore
+   * intentionally inherit authority (X-Aether-*) headers when a defaultAuthority
+   * is set — consistent with every other request type.
+   *
+   * @param includeContentType Whether to set `Content-Type: application/json`.
+   *   Omit for multipart/form-data (browser sets the boundary) or NDJSON bodies
+   *   that set their own content type.
+   */
+  private buildHeaders(
     authority?: AuthorityContext,
-  ): Promise<T> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    includeContentType = true,
+  ): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (includeContentType) {
+      headers["Content-Type"] = "application/json";
+    }
     if (this.apiKey) {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
@@ -110,34 +147,143 @@ export class MemoryLayerClient {
       headers["X-Workspace-ID"] = this.workspaceId;
     }
     Object.assign(headers, this.buildAuthorityHeaders(authority));
+    return headers;
+  }
 
+  /**
+   * Determine whether a failed response is transient and should be retried.
+   * Retries 429 (rate limit) and 5xx server errors. 501 is treated as a
+   * permanent "not implemented" signal and is never retried.
+   */
+  private isRetryableStatus(status: number): boolean {
+    if (status === 429) return true;
+    if (status === 501) return false;
+    return status >= 500 && status < 600;
+  }
+
+  /**
+   * Parse a `Retry-After` header (delta-seconds or HTTP-date) into milliseconds.
+   * Returns undefined when absent or unparseable.
+   */
+  private parseRetryAfter(response: Response): number | undefined {
+    const raw = response.headers?.get?.("Retry-After");
+    if (!raw) return undefined;
+    const seconds = Number(raw);
+    if (!Number.isNaN(seconds)) {
+      return Math.max(0, seconds * 1000);
+    }
+    const dateMs = Date.parse(raw);
+    if (!Number.isNaN(dateMs)) {
+      return Math.max(0, dateMs - Date.now());
+    }
+    return undefined;
+  }
+
+  /**
+   * Returns true when the HTTP method is safe to retry after a transient failure.
+   * POST is excluded to prevent duplicate writes (e.g. duplicate memories/edges
+   * after a post-commit 504). recall/reflect/mergeEntities are POST-but-read or
+   * write-once, but are deliberately left non-retried for safety and consistency
+   * with the Python SDK.
+   */
+  private isIdempotentMethod(method: string): boolean {
+    return ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "PATCH"].includes(method.toUpperCase());
+  }
+
+  /**
+   * Execute a fetch with bounded retry-with-backoff for transient failures
+   * (5xx, 429). Honors the `Retry-After` header when present, otherwise uses
+   * exponential backoff. Non-transient failures and successful responses are
+   * returned/raised immediately.
+   *
+   * Retries are gated on method idempotency: only GET/HEAD/OPTIONS/PUT/DELETE/PATCH
+   * are retried. POST is never retried automatically to avoid duplicate writes.
+   *
+   * This is the single network seam used by every request helper, so retry and
+   * header handling stay consistent across the client.
+   */
+  private async executeFetch(
+    url: string,
+    init: RequestInit,
+    enterpriseFeature?: string,
+  ): Promise<Response> {
+    const canRetry = this.isIdempotentMethod((init.method as string) ?? "GET");
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+      try {
+        const response = await this.fetchImpl(url, { ...init, signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          return response;
+        }
+
+        // Transient server-side failure: retry if attempts remain AND method is idempotent.
+        if (canRetry && attempt < this.maxRetries && this.isRetryableStatus(response.status)) {
+          const retryAfter = this.parseRetryAfter(response);
+          const delay = retryAfter ?? this.retryBaseDelay * Math.pow(2, attempt);
+          await sleep(delay);
+          continue;
+        }
+
+        // Permanent failure, non-idempotent method, or retries exhausted: surface a typed error.
+        await this.handleError(response, enterpriseFeature);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        // Typed errors from handleError are terminal — never retry them.
+        if (error instanceof MemoryLayerError) throw error;
+        // Network/abort error: retry if attempts remain AND method is idempotent.
+        lastError = error;
+        if (canRetry && attempt < this.maxRetries) {
+          await sleep(this.retryBaseDelay * Math.pow(2, attempt));
+          continue;
+        }
+        throw new MemoryLayerError(`Request failed: ${error}`);
+      }
+    }
+    // Unreachable in practice, but satisfies the type checker.
+    throw new MemoryLayerError(`Request failed: ${lastError}`);
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    enterpriseFeature?: string,
+    authority?: AuthorityContext,
+    responseMode: "json" | "text" | "arraybuffer" = "json",
+  ): Promise<T> {
+    const headers = this.buildHeaders(authority);
     const url = `${this.baseUrl}${path}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-    try {
-      const response = await fetch(url, {
+    const response = await this.executeFetch(
+      url,
+      {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
+      },
+      enterpriseFeature,
+    );
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        await this.handleError(response, enterpriseFeature);
-      }
-
-      if (response.status === 204) {
-        return undefined as T;
-      }
-
-      return await response.json() as T;
-    } catch (error) {
-      if (error instanceof MemoryLayerError) throw error;
-      throw new MemoryLayerError(`Request failed: ${error}`);
+    if (response.status === 204) {
+      return undefined as T;
     }
+
+    // Non-JSON endpoints (e.g. GET /v1/skills/{id}/manifest → text/markdown,
+    // GET /v1/skills/{id}/files/{path} → text/x-python etc.) must be read as
+    // raw text/bytes; calling response.json() on them throws. Default stays
+    // JSON so existing callers are unaffected.
+    if (responseMode === "text") {
+      return await response.text() as T;
+    }
+    if (responseMode === "arraybuffer") {
+      return await response.arrayBuffer() as T;
+    }
+
+    return await response.json() as T;
   }
 
   private async handleError(response: Response, enterpriseFeature?: string): Promise<never> {
@@ -157,6 +303,10 @@ export class MemoryLayerClient {
       case 400:
       case 422:
         throw new ValidationError(message, body.details);
+      case 429: {
+        const retryAfterMs = this.parseRetryAfter(response);
+        throw new RateLimitError(message, retryAfterMs !== undefined ? retryAfterMs / 1000 : undefined);
+      }
       case 501:
         if (enterpriseFeature) {
           throw new EnterpriseRequiredError(enterpriseFeature);
@@ -179,6 +329,7 @@ export class MemoryLayerClient {
       tags: options.tags ?? [],
       metadata: options.metadata ?? {},
       associations: options.associations ?? [],
+      relations: options.relations ?? [],
       context_id: options.contextId,
       user_id: options.userId,
     };
@@ -206,10 +357,19 @@ export class MemoryLayerClient {
       max_expansion: options.maxExpansion,
       created_after: options.createdAfter?.toISOString(),
       created_before: options.createdBefore?.toISOString(),
+      offset: options.offset,
+      event_after: options.eventAfter?.toISOString(),
+      event_before: options.eventBefore?.toISOString(),
+      time_order: options.timeOrder,
+      include_global: options.includeGlobal,
+      include_global_user: options.includeGlobalUser,
       context: options.conversationContext ?? [],
       rag_threshold: options.ragThreshold,
       detail_level: options.detailLevel,
       user_id: options.userId,
+      budget_tokens: options.budgetTokens,
+      include_confidence: options.includeConfidence ?? true,
+      include_relations: options.includeRelations ?? true,
     };
     return this.request<RecallResult>("POST", "/v1/memories/recall", body, undefined, options.authority);
   }
@@ -277,6 +437,63 @@ export class MemoryLayerClient {
     return response.associations;
   }
 
+  /**
+   * Update an association's strength and/or metadata.
+   *
+   * `memoryId` must be one of the association's endpoints (source or target);
+   * otherwise the server returns 404. Re-typing an edge is not supported —
+   * delete and recreate instead.
+   */
+  async updateAssociation(
+    memoryId: string,
+    associationId: string,
+    updates: AssociationUpdateOptions,
+  ): Promise<void> {
+    const body: Record<string, unknown> = {};
+    if (updates.strength !== undefined) body.strength = updates.strength;
+    if (updates.metadata !== undefined) body.metadata = updates.metadata;
+    await this.request<void>(
+      "PATCH",
+      `/v1/memories/${memoryId}/associations/${associationId}`,
+      body,
+    );
+  }
+
+  /**
+   * Delete an association (graph edge) by ID.
+   *
+   * `memoryId` must be one of the association's endpoints (source or target);
+   * otherwise the server returns 404.
+   */
+  async deleteAssociation(memoryId: string, associationId: string): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/v1/memories/${memoryId}/associations/${associationId}`,
+    );
+  }
+
+  /**
+   * List/browse memories in the workspace ordered by recency (created_at desc).
+   *
+   * Unlike {@link recall} this performs no vector search — it is a plain
+   * filtered enumeration for browsing. Supports limit/offset pagination and
+   * optional type/subtype/tag/context filters.
+   */
+  async listMemories(options: MemoryListOptions = {}): Promise<MemoryListResponse> {
+    const params = new URLSearchParams();
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    if (options.type) params.set("type", String(options.type));
+    if (options.subtype) params.set("subtype", String(options.subtype));
+    if (options.tag) params.set("tag", options.tag);
+    if (options.contextId) params.set("context_id", options.contextId);
+    const query = params.toString();
+    return this.request<MemoryListResponse>(
+      "GET",
+      `/v1/memories${query ? `?${query}` : ""}`,
+    );
+  }
+
   // Session operations
   /**
    * Create a new session.
@@ -328,6 +545,70 @@ export class MemoryLayerClient {
   async getSession(sessionId: string): Promise<Session> {
     const response = await this.request<{ session: Session }>("GET", `/v1/sessions/${sessionId}`);
     return response.session;
+  }
+
+  async createCheckpoint(
+    sessionId: string,
+    input: {
+      transcriptSegment: string;
+      contentHash: string;
+      idempotencyKey: string;
+      sourceKind?: string;
+      sourceSequence?: number;
+      sourceBoundary?: number;
+    },
+  ): Promise<SessionCheckpoint> {
+    return this.request<SessionCheckpoint>(
+      "POST",
+      `/v1/sessions/${sessionId}/checkpoints`,
+      {
+        transcript_segment: input.transcriptSegment,
+        content_hash: input.contentHash,
+        idempotency_key: input.idempotencyKey,
+        source_kind: input.sourceKind ?? "transcript",
+        source_sequence: input.sourceSequence,
+        source_boundary: input.sourceBoundary,
+      },
+    );
+  }
+
+  async getCheckpoint(sessionId: string, checkpointId: string): Promise<SessionCheckpoint> {
+    return this.request<SessionCheckpoint>(
+      "GET",
+      `/v1/sessions/${sessionId}/checkpoints/${checkpointId}`,
+    );
+  }
+
+  async getContextPack(sessionId: string, options: ContextPackOptions = {}): Promise<ContextPack> {
+    return this.request<ContextPack>(
+      "POST",
+      `/v1/sessions/${sessionId}/context-pack`,
+      {
+        topic: options.topic,
+        entity_ids: options.entityIds ?? [],
+        entity_names: options.entityNames ?? [],
+        budget_tokens: options.budgetTokens ?? 2048,
+        section_limits: options.sectionLimits,
+        include_directives: options.includeDirectives,
+        include_working_memory: options.includeWorkingMemory,
+        include_recent_activity: options.includeRecentActivity,
+        include_contradictions: options.includeContradictions,
+        include_sandbox_summary: options.includeSandboxSummary,
+        include_checkpoint_recovery: options.includeCheckpointRecovery,
+      },
+    );
+  }
+
+  async getContextDelta(
+    sessionId: string,
+    cursor: string,
+    budgetTokens = 2048,
+  ): Promise<ContextDelta> {
+    return this.request<ContextDelta>(
+      "POST",
+      `/v1/sessions/${sessionId}/context-delta`,
+      { cursor, budget_tokens: budgetTokens },
+    );
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -414,11 +695,11 @@ export class MemoryLayerClient {
   }
 
   // Workspace operations
-  async createWorkspace(name: string, settings?: Record<string, unknown>): Promise<Workspace> {
+  async createWorkspace(name: string, settings?: Record<string, unknown>, tags?: string[]): Promise<Workspace> {
     const response = await this.request<{ workspace: Workspace }>(
       "POST",
       "/v1/workspaces",
-      { name, settings: settings ?? {} }
+      { name, settings: settings ?? {}, tags: tags ?? [] }
     );
     return response.workspace;
   }
@@ -430,12 +711,19 @@ export class MemoryLayerClient {
     return response.workspace;
   }
 
-  async listWorkspaces(): Promise<Workspace[]> {
-    const response = await this.request<{ workspaces: Workspace[] }>("GET", "/v1/workspaces");
+  async listWorkspaces(filter?: { tags?: string[]; match?: "any" | "all" }): Promise<Workspace[]> {
+    let path = "/v1/workspaces";
+    if (filter?.tags && filter.tags.length > 0) {
+      const params = new URLSearchParams();
+      for (const tag of filter.tags) params.append("tags", tag);
+      params.append("match", filter.match ?? "all");
+      path += `?${params.toString()}`;
+    }
+    const response = await this.request<{ workspaces: Workspace[] }>("GET", path);
     return response.workspaces;
   }
 
-  async updateWorkspace(workspaceId: string, updates: { name?: string; settings?: Record<string, unknown> }): Promise<Workspace> {
+  async updateWorkspace(workspaceId: string, updates: { name?: string; settings?: Record<string, unknown>; tags?: string[] }): Promise<Workspace> {
     const response = await this.request<{ workspace: Workspace }>(
       "PUT",
       `/v1/workspaces/${workspaceId}`,
@@ -461,6 +749,141 @@ export class MemoryLayerClient {
       `/v1/workspaces/${this.workspaceId}/contexts`
     );
     return response.contexts;
+  }
+
+  async deleteContext(contextId: string, workspaceId?: string): Promise<void> {
+    const wsId = workspaceId ?? this.workspaceId;
+    if (!wsId) throw new ValidationError("Workspace ID required");
+    await this.request<void>(
+      "DELETE",
+      `/v1/workspaces/${wsId}/contexts/${contextId}`,
+    );
+  }
+
+  // ------------------------------------------------------------------ //
+  // Entity Registry operations
+  //
+  // Gated server-side by MEMORYLAYER_ENTITY_REGISTRY_ENABLED. When the
+  // registry is disabled the server returns 501, surfaced here as
+  // EnterpriseRequiredError via the `enterpriseFeature` arg.
+  // ------------------------------------------------------------------ //
+
+  /** List canonical entities in a workspace (deterministic order by id). */
+  async listEntities(options: EntityListOptions = {}): Promise<EntityListResponse> {
+    const params = new URLSearchParams();
+    const wsId = options.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    if (options.status) params.set("status", options.status);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return this.request<EntityListResponse>(
+      "GET",
+      `/v1/entities${query ? `?${query}` : ""}`,
+      undefined,
+      "Entity registry",
+    );
+  }
+
+  /** Get a single canonical entity by id. */
+  async getEntity(entityId: string, workspaceId?: string): Promise<Entity> {
+    const params = new URLSearchParams();
+    const wsId = workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    const response = await this.request<EntityResponse>(
+      "GET",
+      `/v1/entities/${entityId}${query ? `?${query}` : ""}`,
+      undefined,
+      "Entity registry",
+    );
+    return response.entity;
+  }
+
+  /**
+   * Resolve a surface name/alias to an existing canonical entity (never
+   * creates). Throws NotFoundError if no entity matches.
+   */
+  async resolveEntity(name: string, options: EntityResolveOptions = {}): Promise<EntityResolveResponse> {
+    const params = new URLSearchParams();
+    params.set("name", name);
+    if (options.entityType) params.set("entity_type", String(options.entityType));
+    const wsId = options.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    return this.request<EntityResolveResponse>(
+      "GET",
+      `/v1/entities/resolve?${params.toString()}`,
+      undefined,
+      "Entity registry",
+    );
+  }
+
+  /**
+   * Merge `sourceId` into `targetId`; returns the surviving target entity.
+   * Requires the entity registry to be enabled (501 -> EnterpriseRequiredError).
+   */
+  async mergeEntities(options: EntityMergeOptions): Promise<Entity> {
+    const params = new URLSearchParams();
+    const wsId = options.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    const response = await this.request<EntityResponse>(
+      "POST",
+      `/v1/entities/merge${query ? `?${query}` : ""}`,
+      {
+        source_id: options.sourceId,
+        target_id: options.targetId,
+        reason: options.reason,
+      },
+      "Entity registry",
+    );
+    return response.entity;
+  }
+
+  // ------------------------------------------------------------------ //
+  // API Token operations (admin scope; gRPC-backed via Aether)
+  // ------------------------------------------------------------------ //
+
+  /** List API tokens. Set `includeRevoked` to also return revoked tokens. */
+  async listTokens(includeRevoked = false): Promise<ApiToken[]> {
+    const params = new URLSearchParams();
+    if (includeRevoked) params.set("include_revoked", "true");
+    const query = params.toString();
+    const response = await this.request<TokenListResponse>(
+      "GET",
+      `/v1/tokens${query ? `?${query}` : ""}`,
+    );
+    return response.tokens;
+  }
+
+  /**
+   * Create a new API token. The returned object includes the plaintext
+   * `token` value, which is only ever available at creation time.
+   */
+  async createToken(options: TokenCreateOptions): Promise<ApiTokenWithSecret> {
+    const body: Record<string, unknown> = { name: options.name };
+    if (options.principalType !== undefined) body.principal_type = options.principalType;
+    if (options.workspacePatterns !== undefined) body.workspace_patterns = options.workspacePatterns;
+    if (options.scopes !== undefined) body.scopes = options.scopes;
+    if (options.expiresInDays !== undefined) body.expires_in_days = options.expiresInDays;
+    return this.request<ApiTokenWithSecret>("POST", "/v1/tokens", body);
+  }
+
+  /** Get details for a single API token. */
+  async getToken(tokenId: string): Promise<ApiToken> {
+    return this.request<ApiToken>("GET", `/v1/tokens/${tokenId}`);
+  }
+
+  /** Delete an API token. */
+  async deleteToken(tokenId: string): Promise<void> {
+    await this.request<void>("DELETE", `/v1/tokens/${tokenId}`);
+  }
+
+  /**
+   * Revoke an API token. Revoked tokens are invalidated immediately but remain
+   * visible in listings (with `revoked=true`).
+   */
+  async revokeToken(tokenId: string): Promise<void> {
+    await this.request<void>("POST", `/v1/tokens/${tokenId}/revoke`);
   }
 
   // Batch operations
@@ -530,22 +953,13 @@ export class MemoryLayerClient {
 
     // Fetch NDJSON response
     const url = `${this.baseUrl}/v1/workspaces/${id}/export${query}`;
-    const headers: Record<string, string> = {};
-    if (this.apiKey) {
-      headers["Authorization"] = `Bearer ${this.apiKey}`;
-    }
-    if (this.sessionId) {
-      headers["X-Session-ID"] = this.sessionId;
-    }
-    if (this.workspaceId) {
-      headers["X-Workspace-ID"] = this.workspaceId;
-    }
+    const headers = this.buildHeaders(undefined, false);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchImpl(url, {
         method: "GET",
         headers,
         signal: controller.signal,
@@ -611,22 +1025,13 @@ export class MemoryLayerClient {
     const query = params.toString() ? `?${params.toString()}` : '';
 
     const url = `${this.baseUrl}/v1/workspaces/${id}/export${query}`;
-    const headers: Record<string, string> = {};
-    if (this.apiKey) {
-      headers["Authorization"] = `Bearer ${this.apiKey}`;
-    }
-    if (this.sessionId) {
-      headers["X-Session-ID"] = this.sessionId;
-    }
-    if (this.workspaceId) {
-      headers["X-Workspace-ID"] = this.workspaceId;
-    }
+    const headers = this.buildHeaders(undefined, false);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchImpl(url, {
         method: "GET",
         headers,
         signal: controller.signal,
@@ -666,24 +1071,14 @@ export class MemoryLayerClient {
     ndjsonBody: string
   ): Promise<WorkspaceImportResult> {
     const url = `${this.baseUrl}/v1/workspaces/${workspaceId}/import`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/x-ndjson",
-    };
-    if (this.apiKey) {
-      headers["Authorization"] = `Bearer ${this.apiKey}`;
-    }
-    if (this.sessionId) {
-      headers["X-Session-ID"] = this.sessionId;
-    }
-    if (this.workspaceId) {
-      headers["X-Workspace-ID"] = this.workspaceId;
-    }
+    const headers = this.buildHeaders(undefined, false);
+    headers["Content-Type"] = "application/x-ndjson";
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchImpl(url, {
         method: "POST",
         headers,
         body: ndjsonBody,
@@ -804,17 +1199,14 @@ export class MemoryLayerClient {
     if (options.importance !== undefined) formData.append("importance", String(options.importance));
     if (options.retainOriginal !== undefined) formData.append("retain_original", String(options.retainOriginal));
 
-    const headers: Record<string, string> = {};
-    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
-    if (this.sessionId) headers["X-Session-ID"] = this.sessionId;
-    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+    const headers = this.buildHeaders(undefined, false);
 
     const url = `${this.baseUrl}/v1/documents`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchImpl(url, {
         method: "POST",
         headers,
         body: formData,
@@ -912,17 +1304,14 @@ export class MemoryLayerClient {
    * Get a page image as a Blob.
    */
   async getPageImage(documentId: string, pageId: string): Promise<Blob> {
-    const headers: Record<string, string> = {};
-    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
-    if (this.sessionId) headers["X-Session-ID"] = this.sessionId;
-    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+    const headers = this.buildHeaders(undefined, false);
 
     const url = `${this.baseUrl}/v1/documents/${documentId}/pages/${pageId}/image`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, { method: "GET", headers, signal: controller.signal });
+      const response = await this.fetchImpl(url, { method: "GET", headers, signal: controller.signal });
       clearTimeout(timeoutId);
       if (!response.ok) {
         await this.handleError(response, "Document page images");
@@ -1067,6 +1456,55 @@ export class MemoryLayerClient {
     );
   }
 
+  /**
+   * List chat threads owned by a user across all workspaces.
+   *
+   * Unlike {@link listThreads}, this is keyed on (tenant, user, ownership) and
+   * does NOT require a workspace filter — used for user-session-scoped views.
+   */
+  async listUserThreads(userId: string, options: UserThreadListOptions = {}): Promise<ChatThread[]> {
+    const params = new URLSearchParams();
+    if (options.ownership) params.set("ownership", options.ownership);
+    if (options.scopeFilter) params.set("scope_filter", options.scopeFilter);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    const response = await this.request<{ threads: ChatThread[]; total_count: number }>(
+      "GET",
+      `/v1/threads/user/${userId}${query ? `?${query}` : ""}`,
+    );
+    return response.threads;
+  }
+
+  /** Update a thread (e.g. rename or change metadata). */
+  async updateThread(threadId: string, updates: ThreadUpdateOptions): Promise<ChatThread> {
+    const params = new URLSearchParams();
+    const wsId = updates.workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    const body: Record<string, unknown> = {};
+    if (updates.title !== undefined) body.title = updates.title;
+    if (updates.metadata !== undefined) body.metadata = updates.metadata;
+    const response = await this.request<{ thread: ChatThread }>(
+      "PUT",
+      `/v1/threads/${threadId}${query ? `?${query}` : ""}`,
+      body,
+    );
+    return response.thread;
+  }
+
+  /** Delete a single message from a thread. */
+  async deleteMessage(threadId: string, messageId: string, workspaceId?: string): Promise<void> {
+    const params = new URLSearchParams();
+    const wsId = workspaceId ?? this.workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    await this.request<void>(
+      "DELETE",
+      `/v1/threads/${threadId}/messages/${messageId}${query ? `?${query}` : ""}`,
+    );
+  }
+
   async appendMessages(
     threadId: string,
     messages: MessageAppendInput[],
@@ -1136,17 +1574,14 @@ export class MemoryLayerClient {
     if (options.detectTimeSeries !== undefined) formData.append("detect_time_series", String(options.detectTimeSeries));
     if (options.generateSummaries !== undefined) formData.append("generate_summaries", String(options.generateSummaries));
 
-    const headers: Record<string, string> = {};
-    if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
-    if (this.sessionId) headers["X-Session-ID"] = this.sessionId;
-    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+    const headers = this.buildHeaders(undefined, false);
 
     const url = `${this.baseUrl}/v1/datasets`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchImpl(url, {
         method: "POST",
         headers,
         body: formData,
@@ -1291,12 +1726,34 @@ export class MemoryLayerClient {
     path: string,
     body?: unknown,
     authority?: AuthorityContext,
+    responseMode: "json" | "text" | "arraybuffer" = "json",
   ): Promise<T> {
-    return this.request<T>(method, path, body, undefined, authority);
+    return this.request<T>(method, path, body, undefined, authority, responseMode);
   }
 
   /** Used internally by McpServersNamespace to make requests with OBO authority. */
   async _mcpServersRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    authority?: AuthorityContext,
+  ): Promise<T> {
+    return this.request<T>(method, path, body, undefined, authority);
+  }
+
+  /** Used internally by KnowledgebaseNamespace to make requests with OBO authority. */
+  async _kbRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    authority?: AuthorityContext,
+    responseMode: "json" | "text" | "arraybuffer" = "json",
+  ): Promise<T> {
+    return this.request<T>(method, path, body, undefined, authority, responseMode);
+  }
+
+  /** Used internally by RpgNamespace to make requests with OBO authority. */
+  async _rpgRequest<T>(
     method: string,
     path: string,
     body?: unknown,

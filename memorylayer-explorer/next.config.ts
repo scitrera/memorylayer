@@ -2,7 +2,7 @@ import type {NextConfig} from "next";
 
 const nextConfig: NextConfig = {
     output: "standalone",
-    allowedDevOrigins: ["localhost", "spark-2918",],
+    allowedDevOrigins: ["localhost"],
     async rewrites() {
         return [
             {

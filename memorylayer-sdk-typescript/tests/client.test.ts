@@ -375,6 +375,49 @@ describe("MemoryLayerClient", () => {
       expect(result).toEqual(mockWorkspace);
     });
 
+    it("should list workspaces filtered by tag", async () => {
+      const mockWorkspaces = [
+        {
+          id: "ws-kb",
+          tenant_id: "tenant-123",
+          name: "KB",
+          settings: {},
+          tags: ["knowledge", "topic:finance"],
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+        },
+      ];
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ workspaces: mockWorkspaces }),
+      });
+
+      const result = await client.listWorkspaces({ tags: ["knowledge", "topic:finance"], match: "all" });
+
+      expect(result).toEqual(mockWorkspaces);
+      expect(global.fetch).toHaveBeenCalledWith(
+        "http://localhost:61001/v1/workspaces?tags=knowledge&tags=topic%3Afinance&match=all",
+        expect.objectContaining({ method: "GET" })
+      );
+    });
+
+    it("should list all workspaces when no filter is given", async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ workspaces: [] }),
+      });
+
+      await client.listWorkspaces();
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        "http://localhost:61001/v1/workspaces",
+        expect.objectContaining({ method: "GET" })
+      );
+    });
+
     it("should create a context", async () => {
       const mockContext = {
         id: "ctx-123",

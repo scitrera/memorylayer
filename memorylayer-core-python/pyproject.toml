@@ -1,6 +1,6 @@
 [project]
 name = "memorylayer-server"
-version = "0.1.22"
+version = "0.2.0"
 description = "MemoryLayer.ai - API-first memory infrastructure for LLM-powered agents (open source core)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,7 +22,7 @@ dependencies = [
     "scitrera-app-framework==0.0.69",
     "scitrera-rt-data[all]==0.0.7",
     "scitrera-ext-cachetools==0.0.1",
-    "scitrera-aether-client>=0.1.59",
+    "scitrera-aether-client>=0.2.2",
     "fastapi==0.136.1",
     "uvicorn[standard]==0.46.0",
     "pydantic==2.13.4",
@@ -31,7 +31,7 @@ dependencies = [
     "sqlite-vec==0.1.9", # NOTE: prerelease version required for proper arm64 support without custom rerelease
     "numpy>2.0.0",
     "httpx>=0.28.1",
-    "python-multipart==0.0.27",
+    "python-multipart==0.0.31",
     "click==8.3.3",
     "networkx>=3.0",
     "markdown>=3.5",
@@ -122,6 +122,7 @@ all = [
 
 [project.scripts]
 memorylayer = "memorylayer_server.cli:cli"
+memorylayer-eval = "memorylayer_server.eval.__main__:main"
 
 [project.urls]
 Homepage = "https://memorylayer.ai"
@@ -133,8 +134,20 @@ Issues = "https://github.com/scitrera/memorylayer/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+# Package builders must exclude local state even when building from a dirty checkout.
+exclude = [
+    "**/.omc/**", "**/.claude/**", "**/.codex/**", "**/.agents/**", "**/.slop/**",
+    "**/.venv/**", "**/__pycache__/**", "**/node_modules/**",
+    "**/.env", "**/.env.*", "**/.mcp.json",
+    "**/*.db", "**/*.db-shm", "**/*.db-wal", "**/*.sqlite", "**/*.sqlite3",
+    "**/*.pem", "**/*.key", "**/*.pyc",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/memorylayer_server"]
+# Bundle the retrieval-eval fixture datasets (non-.py) into the wheel.
+artifacts = ["src/memorylayer_server/eval/datasets/*"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/memorylayer_server"]

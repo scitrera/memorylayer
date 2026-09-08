@@ -6,3 +6,5 @@ export { SkillsNamespace, parseSkillFolder } from "./skills.js";
 export type { Skill, SkillFile, SkillManifest, SkillListOptions, SkillResolveOptions, SkillSyncResult, ParsedSkillFolder } from "./skills.js";
 export { McpServersNamespace } from "./mcp_servers.js";
 export type { McpServer, McpServerCreateOptions, McpServerUpdateOptions, McpServerListOptions, McpServerResolveOptions } from "./mcp_servers.js";
+export { KnowledgebaseNamespace } from "./knowledgebase.js";
+export * from "./rpg.js";

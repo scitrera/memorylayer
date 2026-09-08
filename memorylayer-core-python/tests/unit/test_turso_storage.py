@@ -469,6 +469,38 @@ class TestWorkspaceOperations:
     async def test_get_nonexistent_workspace(self, backend):
         assert await backend.get_workspace("nonexistent") is None
 
+    async def test_delete_workspace_removes_owned_resources(self, backend):
+        workspace_id = "ws_delete"
+        now = datetime.now(UTC)
+        await backend.create_workspace(
+            Workspace(
+                id=workspace_id,
+                tenant_id="_default",
+                name="Delete WS",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await backend.create_context(
+            workspace_id,
+            Context(
+                id="ctx_delete",
+                workspace_id=workspace_id,
+                name="Delete Context",
+                created_at=now,
+            ),
+        )
+        memory = await backend.create_memory(
+            workspace_id,
+            RememberInput(content="remove me"),
+        )
+
+        assert await backend.delete_workspace(workspace_id) is True
+        assert await backend.get_workspace(workspace_id) is None
+        assert await backend.get_context(workspace_id, "ctx_delete") is None
+        assert await backend.get_memory(workspace_id, memory.id) is None
+        assert await backend.delete_workspace(workspace_id) is False
+
     async def test_create_and_get_context(self, backend):
         now = datetime.now(UTC)
         ctx = Context(id="ctx_test", workspace_id="_default", name="Test Ctx", description="A test context", settings={}, created_at=now)
@@ -857,3 +889,117 @@ class TestTursoPlugin:
     def test_plugin_name(self):
         plugin = TursoStorageBackendPlugin()
         assert "turso" in plugin.name()
+
+
+# ============================================================================
+# Workspace Tags Tests (Turso)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+class TestTursoWorkspaceTags:
+    """Verify Turso backend handles workspace tags end-to-end.
+
+    Added to cover the parity gap that hid CORRECTION 2: turso had no tags
+    column, did not persist tags on create/update, did not read them in
+    _row_to_workspace, and had a broken list_workspaces() signature.
+    """
+
+    async def _mk(self, backend, ws_id: str, tags: list[str]) -> None:
+        await backend.create_workspace(
+            Workspace(
+                id=ws_id,
+                tenant_id="_default",
+                name=ws_id,
+                tags=tags,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+    async def test_tags_round_trip_on_create(self, backend):
+        """Tags stored on create are returned by get_workspace."""
+        await self._mk(backend, "turso_tags_rt", ["knowledge", "topic:finance"])
+
+        retrieved = await backend.get_workspace("turso_tags_rt")
+        assert retrieved is not None
+        assert "knowledge" in retrieved.tags
+        assert "topic:finance" in retrieved.tags
+
+    async def test_tags_normalised_on_create(self, backend):
+        """Tags are normalised (lower, strip, dedupe) when persisted."""
+        await backend.create_workspace(
+            Workspace(
+                id="turso_tags_norm",
+                tenant_id="_default",
+                name="norm",
+                tags=["  Knowledge ", "knowledge", "Topic:Finance"],
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        retrieved = await backend.get_workspace("turso_tags_norm")
+        assert retrieved is not None
+        assert retrieved.tags == ["knowledge", "topic:finance"]
+
+    async def test_tags_persist_on_update(self, backend):
+        """update_workspace(tags=...) normalises and persists replacement tags."""
+        await self._mk(backend, "turso_tags_upd", ["old"])
+
+        updated = await backend.update_workspace("turso_tags_upd", tags=["Archive", "archive"])
+        assert updated is not None
+        assert updated.tags == ["archive"]
+
+        # Verify round-trip from storage
+        retrieved = await backend.get_workspace("turso_tags_upd")
+        assert retrieved is not None
+        assert retrieved.tags == ["archive"]
+
+    async def test_list_workspaces_no_filter(self, backend):
+        """list_workspaces() with no tag arg returns all workspaces."""
+        await self._mk(backend, "turso_lw_a", ["alpha"])
+        await self._mk(backend, "turso_lw_b", ["beta"])
+
+        all_ws = await backend.list_workspaces()
+        ids = {w.id for w in all_ws}
+        assert {"turso_lw_a", "turso_lw_b"} <= ids
+
+    async def test_list_workspaces_single_tag_match_all(self, backend):
+        """list_workspaces(tags=[...]) filters by required tag."""
+        await self._mk(backend, "turso_kb_fin", ["knowledge", "topic:finance"])
+        await self._mk(backend, "turso_kb_legal", ["knowledge", "topic:legal"])
+        await self._mk(backend, "turso_plain", ["project"])
+
+        result = await backend.list_workspaces(tags=["knowledge"])
+        ids = {w.id for w in result}
+        assert {"turso_kb_fin", "turso_kb_legal"} <= ids
+        assert "turso_plain" not in ids
+
+    async def test_list_workspaces_match_all(self, backend):
+        """match='all' requires workspace to carry every requested tag."""
+        await self._mk(backend, "turso_both", ["alpha", "beta"])
+        await self._mk(backend, "turso_alpha_only", ["alpha"])
+
+        result = await backend.list_workspaces(tags=["alpha", "beta"], match="all")
+        ids = {w.id for w in result}
+        assert "turso_both" in ids
+        assert "turso_alpha_only" not in ids
+
+    async def test_list_workspaces_match_any(self, backend):
+        """match='any' requires workspace to carry at least one requested tag."""
+        await self._mk(backend, "turso_any_fin", ["topic:finance"])
+        await self._mk(backend, "turso_any_proj", ["project"])
+        await self._mk(backend, "turso_any_legal", ["topic:legal"])
+
+        result = await backend.list_workspaces(tags=["topic:finance", "project"], match="any")
+        ids = {w.id for w in result}
+        assert {"turso_any_fin", "turso_any_proj"} <= ids
+        assert "turso_any_legal" not in ids
+
+    async def test_list_workspaces_tag_filter_case_insensitive(self, backend):
+        """Tag filter normalises case so 'Knowledge' matches stored 'knowledge'."""
+        await self._mk(backend, "turso_case_ws", ["knowledge"])
+
+        result = await backend.list_workspaces(tags=["Knowledge"])
+        ids = {w.id for w in result}
+        assert "turso_case_ws" in ids

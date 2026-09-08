@@ -37,7 +37,11 @@ class EmbeddingServiceMV(EmbeddingService):
                 f"Provider {self.provider.__class__.__name__} does not support multi-vector embeddings. "
                 "Configure MEMORYLAYER_EMBEDDING_PROVIDER=embed_server."
             )
-        return await self.provider.embed_text_multivector(text)
+        return await self._provider_call(
+            self.provider.embed_text_multivector(text),
+            modality="text_multivector",
+            item_count=1,
+        )
 
     async def embed_image_multivector(
         self,
@@ -46,7 +50,11 @@ class EmbeddingServiceMV(EmbeddingService):
         """Generate multi-vector embedding for image (multivector-capable provider only)."""
         if not self._is_multivector:
             raise ValueError("Multi-vector embeddings require a multivector-capable provider")
-        return await self.provider.embed_image_multivector(image)
+        return await self._provider_call(
+            self.provider.embed_image_multivector(image),
+            modality="image_multivector",
+            item_count=1,
+        )
 
     async def embed_batch_multivector(
         self,
@@ -56,7 +64,11 @@ class EmbeddingServiceMV(EmbeddingService):
         """Generate multi-vector embeddings for multiple texts efficiently."""
         if not self._is_multivector:
             raise ValueError("Multi-vector embeddings require a multivector-capable provider")
-        return await self.provider.embed_batch_multivector(texts, batch_size=batch_size)
+        return await self._provider_call(
+            self.provider.embed_batch_multivector(texts, batch_size=batch_size),
+            modality="text_multivector_batch",
+            item_count=len(texts),
+        )
 
     async def embed_images_batch_multivector(
         self,
@@ -66,7 +78,11 @@ class EmbeddingServiceMV(EmbeddingService):
         """Generate multi-vector embeddings for multiple images efficiently."""
         if not self._is_multivector:
             raise ValueError("Multi-vector embeddings require a multivector-capable provider")
-        return await self.provider.embed_images_batch_multivector(images, batch_size=batch_size)
+        return await self._provider_call(
+            self.provider.embed_images_batch_multivector(images, batch_size=batch_size),
+            modality="image_multivector_batch",
+            item_count=len(images),
+        )
 
     @staticmethod
     def maxsim_score(

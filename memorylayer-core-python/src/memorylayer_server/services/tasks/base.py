@@ -48,7 +48,10 @@ class TaskService(ABC):
     """
 
     @abstractmethod
-    async def schedule_task(self, task_type: str, payload: dict, delay_seconds: int = 0, priority: int = 5) -> str | None:
+    async def schedule_task(
+        self, task_type: str, payload: dict, delay_seconds: int = 0, priority: int = 5,
+        retry_policy=None, metadata: dict | None = None,
+    ) -> str | None:
         """
         Schedule a task for background execution.
 
@@ -57,6 +60,18 @@ class TaskService(ABC):
             payload: Task payload data
             delay_seconds: Delay before execution (default: immediate)
             priority: Task priority (1-10, lower is higher priority)
+            retry_policy: Optional backend-specific retry policy (e.g. an
+                ``aether_pb2.RetryPolicy``) attached to the task so the backend
+                auto-reschedules failures per the policy. ``None`` (default)
+                keeps the backend's built-in behavior. Backends that cannot
+                carry a retry policy ignore it (best-effort).
+            metadata: Optional string-valued metadata to attach to the backend
+                task (e.g. ``{"bg_kind": "kb", "visibility": "workspace",
+                "title": "..."}``). The worker surfaces it back as
+                ``_task_metadata`` on the payload, which the progress emitter
+                reads to render the task in the UI's background-operations feed.
+                Backends without task metadata ignore it. Values should be
+                strings (the Aether metadata map is string-keyed/valued).
 
         Returns:
             Task ID for tracking, or None if tasks are disabled.

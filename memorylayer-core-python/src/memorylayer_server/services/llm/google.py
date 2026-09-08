@@ -7,6 +7,7 @@ from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
 from ...models.llm import LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
+from ..api_key_store import resolve_api_key_ref
 from .base import LLMProvider
 
 DEFAULT_LLM_GOOGLE_MODEL = "gemini-3-flash-preview"
@@ -46,31 +47,62 @@ class GoogleLLMProvider(LLMProvider):
     in via ``extra_body``).
     """
 
+    # Default key name resolved from the API key store when no literal
+    # ``api_key`` is given and no per-profile override is configured.
+    DEFAULT_API_KEY_NAME = "GOOGLE_API_KEY"
+
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         model: str = DEFAULT_LLM_GOOGLE_MODEL,
         default_max_tokens: int | None = None,
         default_temperature: float | None = None,
+        api_key_name: str | None = None,
+        api_key_store=None,
         v: Variables = None,
     ):
-        self.api_key = api_key
+        # ``api_key`` (literal) wins and skips the store; otherwise resolve the
+        # key by name through the store on each use (picks up rotations).
+        self.api_key, self._key_ref = resolve_api_key_ref(
+            api_key=api_key,
+            api_key_name=api_key_name,
+            api_key_store=api_key_store,
+            default_name=self.DEFAULT_API_KEY_NAME,
+        )
         self.model = model
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
         self._client = None
+        self._client_key = None
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info("Initialized GoogleLLMProvider: model=%s", model)
 
-    def _get_client(self):
-        """Lazy-load Google GenAI client."""
-        if self._client is None:
-            try:
-                from google import genai
+    def _build_client(self, api_key):
+        """Construct a Google GenAI client for ``api_key``."""
+        try:
+            from google import genai
+        except ImportError:
+            raise ImportError("google-genai package not installed. Install with: pip install google-genai")
+        return genai.Client(api_key=api_key)
 
-                self._client = genai.Client(api_key=self.api_key)
-            except ImportError:
-                raise ImportError("google-genai package not installed. Install with: pip install google-genai")
+    def _get_client(self):
+        """Lazy-load Google GenAI client from the static key (no store)."""
+        if self._client is None:
+            self._client = self._build_client(self.api_key)
+            self._client_key = self.api_key
+        return self._client
+
+    async def _ensure_client(self):
+        """Return a client built with the currently-resolved key.
+
+        Rebuilds the cached client only when the store-resolved key changes.
+        """
+        if self._key_ref is None:
+            return self._get_client()
+        key = await self._key_ref.resolve()
+        if self._client is None or key != self._client_key:
+            self._client = self._build_client(key)
+            self._client_key = key
         return self._client
 
     @staticmethod
@@ -204,7 +236,7 @@ class GoogleLLMProvider(LLMProvider):
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Generate completion using Google GenAI API."""
-        client = self._get_client()
+        client = await self._ensure_client()
 
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)
@@ -260,7 +292,7 @@ class GoogleLLMProvider(LLMProvider):
         emitted on the terminal chunk (Gemini's streaming surface is
         primarily text-oriented).
         """
-        client = self._get_client()
+        client = await self._ensure_client()
 
         system_text, messages = self._extract_messages(request)
         max_tokens, temperature = self.resolve_params(request)

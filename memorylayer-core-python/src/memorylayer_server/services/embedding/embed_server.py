@@ -42,13 +42,19 @@ class EmbedServerEmbeddingProvider(MultimodalEmbeddingProvider):
         self,
         v: Variables = None,
         output_dimensions: int | None = None,
+        request_dimensions: int | None = None,
     ):
         super().__init__(v, output_dimensions)
         self._v = v
         self._client = None
+        # When set, forwarded as the OpenAI ``dimensions`` field so a Matryoshka
+        # server truncates to this size (keeps stored vectors == the configured
+        # embedding dimension / vector-column width). None → do not send it.
+        self._request_dimensions = request_dimensions
         self.logger.info(
-            "Initialized EmbedServerEmbeddingProvider (dimensions=%s)",
+            "Initialized EmbedServerEmbeddingProvider (dimensions=%s, request_dimensions=%s)",
             output_dimensions,
+            request_dimensions,
         )
 
     def _get_client(self):
@@ -80,20 +86,55 @@ class EmbedServerEmbeddingProvider(MultimodalEmbeddingProvider):
             await client.connect()
         return client
 
+    async def preload(self):
+        """Startup reachability probe against the configured embed server.
+
+        Without this, an unreachable peer stays invisible until the first write,
+        which then fails as an opaque 500 with the connection error buried in a
+        stack trace. Embedding one short string is the cheapest call that proves
+        the whole path (transport, URL/target, model load) actually works.
+
+        This never raises: a peer that is merely slow to come up should not stop
+        the server from booting, and the operator gets an actionable ERROR either
+        way.
+        """
+        try:
+            await self.embed("preflight")
+        except Exception as exc:
+            # Report the transport/target the client actually resolved, rather than
+            # re-reading env here — they can differ (defaults, Aether wiring).
+            client = self._client
+            transport = getattr(client, "_transport", "unknown")
+            target = (
+                getattr(client, "_aether_target", None)
+                if transport == "aether"
+                else getattr(client, "_base_url", None)
+            ) or "unknown"
+            self.logger.error(
+                "Embedding provider 'embed_server' could not reach its peer (transport=%s, target=%s): %s. "
+                "Storing memories WILL fail until this is resolved. Either start a memorylayer-embed-server peer "
+                "and point MEMORYLAYER_EMBED_SERVER_URL at it, or switch MEMORYLAYER_EMBEDDING_PROVIDER to "
+                "'openai'/'google' (cloud) or 'hash' (offline, lexical-only).",
+                transport,
+                target,
+                exc,
+            )
+        return
+
     # ------------------------------------------------------------------
     # Single-vector text
     # ------------------------------------------------------------------
 
     async def embed(self, text: str) -> list[float]:
         client = await self._ensure_connected()
-        result = await client.embed_texts([text])
+        result = await client.embed_texts([text], dimensions=self._request_dimensions)
         return result[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         client = await self._ensure_connected()
-        return await client.embed_texts(texts)
+        return await client.embed_texts(texts, dimensions=self._request_dimensions)
 
     # ------------------------------------------------------------------
     # Multi-vector (ColPali-style late interaction)
@@ -195,9 +236,17 @@ class EmbedServerEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
     PROVIDER_NAME = EmbeddingProviderType.EMBED_SERVER
 
     def initialize(self, v: Variables, logger: Logger) -> EmbedServerEmbeddingProvider:
+        from scitrera_app_framework import ext_parse_bool
+
         dimensions = v.environ(
             MEMORYLAYER_EMBEDDING_DIMENSIONS,
             default=DEFAULT_EMBEDDING_DIMENSIONS_EMBED_SERVER,
             type_fn=int,
         )
-        return EmbedServerEmbeddingProvider(v=v, output_dimensions=dimensions)
+        # Opt-in: forward ``dimensions`` to the embed server so a Matryoshka model
+        # truncates each vector to the configured size (matches the vector column
+        # width). Default off — servers that emit a fixed native dim are unaffected.
+        request_dims = None
+        if v.environ("MEMORYLAYER_EMBED_SERVER_REQUEST_DIMENSIONS", default=False, type_fn=ext_parse_bool):
+            request_dims = dimensions
+        return EmbedServerEmbeddingProvider(v=v, output_dimensions=dimensions, request_dimensions=request_dims)

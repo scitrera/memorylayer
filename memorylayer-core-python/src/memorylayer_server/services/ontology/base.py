@@ -11,7 +11,9 @@ class FeatureRequiresUpgradeError(Exception):
         super().__init__(f"Feature '{feature}' requires MemoryLayer Enterprise. Visit https://memorylayer.ai/enterprise to upgrade.")
 
 
-# Unified ontology with 63 relationship types across 11 categories
+# Unified ontology.  The compact knowledge-work application profile below is
+# informed by PROV-O, DCMI Terms, Schema.org Action/Role, and W3C ORG; it keeps
+# connector metadata interoperable without importing their full RDF models.
 BASE_ONTOLOGY = {
     # --- Hierarchical relationships ---
     "parent_of": {
@@ -264,6 +266,161 @@ BASE_ONTOLOGY = {
         "inverse": "replaces",
         "category": "refinement",
     },
+    # --- Knowledge-work relationships ---
+    "owns": {
+        "description": "Agent owns or is accountable for a work resource",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "owned_by",
+        "category": "knowledge_work",
+    },
+    "owned_by": {
+        "description": "Work resource is owned by an agent",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "owns",
+        "category": "knowledge_work",
+    },
+    "responsible_for": {
+        "description": "Agent is assigned or responsible for a work resource",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "assigned_to",
+        "category": "knowledge_work",
+    },
+    "assigned_to": {
+        "description": "Work resource is assigned to a responsible agent",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "responsible_for",
+        "category": "knowledge_work",
+    },
+    "authored": {
+        "description": "Agent created or authored an artifact",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "authored_by",
+        "category": "knowledge_work",
+    },
+    "authored_by": {
+        "description": "Artifact was created or authored by an agent",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "authored",
+        "category": "knowledge_work",
+    },
+    "contributed_to": {
+        "description": "Agent made a contribution to a work resource",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "has_contributor",
+        "category": "knowledge_work",
+    },
+    "has_contributor": {
+        "description": "Work resource has a contributing agent",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "contributed_to",
+        "category": "knowledge_work",
+    },
+    "reviewed": {
+        "description": "Agent reviewed a work resource",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "reviewed_by",
+        "category": "knowledge_work",
+    },
+    "reviewed_by": {
+        "description": "Work resource was reviewed by an agent",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "reviewed",
+        "category": "knowledge_work",
+    },
+    "approved": {
+        "description": "Agent approved a work resource or decision",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "approved_by",
+        "category": "knowledge_work",
+    },
+    "approved_by": {
+        "description": "Work resource or decision was approved by an agent",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "approved",
+        "category": "knowledge_work",
+    },
+    "decided": {
+        "description": "Agent made or authorized a decision",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "decided_by",
+        "category": "knowledge_work",
+    },
+    "decided_by": {
+        "description": "Decision was made or authorized by an agent",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "decided",
+        "category": "knowledge_work",
+    },
+    "based_on": {
+        "description": "Decision or artifact is based on source evidence",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "basis_for",
+        "category": "knowledge_work",
+    },
+    "basis_for": {
+        "description": "Evidence or artifact provides the basis for another resource",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "based_on",
+        "category": "knowledge_work",
+    },
+    "affects": {
+        "description": "Decision, event, or work item affects another resource",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "affected_by",
+        "category": "knowledge_work",
+    },
+    "affected_by": {
+        "description": "Resource is affected by a decision, event, or work item",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "affects",
+        "category": "knowledge_work",
+    },
+    "about": {
+        "description": "Artifact or work resource is primarily about a topic",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "subject_of",
+        "category": "knowledge_work",
+    },
+    "subject_of": {
+        "description": "Topic is the subject of an artifact or work resource",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "about",
+        "category": "knowledge_work",
+    },
+    "member_of": {
+        "description": "Agent is a member of an organization or team",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "has_member",
+        "category": "knowledge_work",
+    },
+    "has_member": {
+        "description": "Organization or team has an agent as a member",
+        "symmetric": False,
+        "transitive": False,
+        "inverse": "member_of",
+        "category": "knowledge_work",
+    },
     # --- Reference relationships ---
     "references": {
         "description": "References or cites",
@@ -468,11 +625,102 @@ BASE_ONTOLOGY = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Entity-type vocabulary (the ontology's third dimension, alongside relationship
+# types and memory subtypes). This is the CANONICAL home for the set of entity
+# types and their NER labels — the GLiNER2 extractor derives its label set from
+# here rather than from a hard-coded enum, so a deployment/domain can add types
+# (e.g. equipment, chemical, standard) via env config or an OntologyContributor
+# without touching code. ``EntityType`` (models.entity_registry) stays as the
+# small CORE/reserved set with special resolution semantics (person promotion,
+# concept catch-all); everything here is a superset of it.
+#
+# Each entry: {ner_label: str | None, description: str, core: bool}. ``ner_label``
+# is the label sent to the zero-shot NER model; ``None`` means the type exists but
+# is NOT extracted by NER (e.g. ``concept`` is the catch-all fallback — as a NER
+# label it would tag common words).
+# ---------------------------------------------------------------------------
+BASE_ENTITY_TYPES: dict[str, dict] = {
+    "person": {"ner_label": "person", "description": "An individual person.", "core": True},
+    "org": {"ner_label": "organization", "description": "A company, institution, or group.", "core": True},
+    "project": {"ner_label": "project", "description": "A named project, product, method, or system.", "core": True},
+    "place": {"ner_label": "location", "description": "A geographic or physical location.", "core": True},
+    "event": {"ner_label": "event", "description": "A named event or occurrence.", "core": True},
+    "artifact": {
+        "ner_label": None,
+        "description": "A document, dataset, model, design, message, or other knowledge-work output.",
+        "core": False,
+    },
+    "work_item": {
+        "ner_label": None,
+        "description": "A task, issue, requirement, deliverable, or unit of planned work.",
+        "core": False,
+    },
+    "decision": {
+        "ner_label": None,
+        "description": "A named choice, approval, or policy decision.",
+        "core": False,
+    },
+    "topic": {
+        "ner_label": None,
+        "description": "A named subject area used to organize knowledge resources.",
+        "core": False,
+    },
+    "concept": {"ner_label": None, "description": "Catch-all for any other named concept.", "core": True},
+}
+
+_REQUIRED_ENTITY_TYPE_META_FIELDS = ("ner_label", "description")
+
+
 from abc import ABC, abstractmethod
 
 
 class OntologyService(ABC):
     """Interface for ontology service."""
+
+    # -- Entity-type vocabulary (base + contributions + tenant/workspace) -----
+    @abstractmethod
+    def list_entity_types(self, tenant_id: str = "_default", workspace_id: str | None = None) -> list[str]:
+        """List all entity types in the merged vocabulary (base + contributed)."""
+        ...
+
+    @abstractmethod
+    def validate_entity_type(
+        self, entity_type: str, tenant_id: str = "_default", workspace_id: str | None = None
+    ) -> bool:
+        """Return True if ``entity_type`` is in the merged entity-type vocabulary."""
+        ...
+
+    @abstractmethod
+    def get_entity_type_info(
+        self, entity_type: str, tenant_id: str = "_default", workspace_id: str | None = None
+    ) -> dict | None:
+        """Return metadata (ner_label, description, core) for an entity type, or None."""
+        ...
+
+    @abstractmethod
+    def get_ner_labels(self, tenant_id: str = "_default", workspace_id: str | None = None) -> list[str]:
+        """The NER label set for extraction — every entity type with a non-null ner_label."""
+        ...
+
+    @abstractmethod
+    def ner_label_to_entity_type(
+        self, tenant_id: str = "_default", workspace_id: str | None = None
+    ) -> dict[str, str]:
+        """Reverse map ``ner_label -> entity_type`` for classifying NER output."""
+        ...
+
+    @abstractmethod
+    def extend_entity_types(
+        self, entity_types: dict[str, dict] | None = None, *, source: str = "runtime"
+    ) -> None:
+        """Push entity types into the vocabulary after init (mirrors extend_subtypes).
+
+        ``entity_types`` maps ``type_name -> {ner_label, description}``. Use this
+        (push) path for runtime/config contributions; a plugin's
+        ``OntologyContributorPlugin.get_entity_types()`` is the pull equivalent.
+        """
+        ...
 
     @abstractmethod
     def get_merged_ontology(self, tenant_id: str, workspace_id: str | None = None) -> dict:
@@ -513,6 +761,33 @@ class OntologyService(ABC):
         Falls back to related_to if classification fails.
         """
         pass
+
+    async def classify_relationships_batch(
+        self,
+        content_a: str,
+        candidates: list[tuple[str, str]],
+        tenant_id: str = "_default",
+        workspace_id: str | None = None,
+    ) -> dict[str, str]:
+        """Classify ``content_a``'s relationship to each candidate.
+
+        ``candidates`` is a list of ``(candidate_id, candidate_content)``.
+        Returns ``{candidate_id: relationship_type}``.
+
+        This concrete default loops :meth:`classify_relationship` (one LLM
+        call per candidate) so any subclass works out of the box.
+        :class:`DefaultOntologyService` overrides it to do the whole batch in
+        a SINGLE LLM call, which is the cost-reduction path.
+        """
+        results: dict[str, str] = {}
+        for cand_id, cand_content in candidates:
+            results[cand_id] = await self.classify_relationship(
+                content_a=content_a,
+                content_b=cand_content,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
+        return results
 
     @abstractmethod
     def get_relationships_by_category(

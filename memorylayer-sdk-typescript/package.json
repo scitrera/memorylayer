@@ -1,6 +1,6 @@
 {
   "name": "@scitrera/memorylayer-sdk",
-  "version": "0.1.22",
+  "version": "0.2.0",
   "description": "TypeScript SDK for MemoryLayer.ai - memory infrastructure for AI agents",
   "type": "module",
   "main": "dist/index.js",
@@ -42,5 +42,12 @@
   },
   "author": "scitrera.ai",
   "homepage": "https://memorylayer.ai",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "files": [
+    "dist/"
+  ],
+  "browser": {
+    "fs/promises": false,
+    "path": false
+  }
 }

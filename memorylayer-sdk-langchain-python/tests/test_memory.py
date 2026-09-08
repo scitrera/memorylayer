@@ -4,8 +4,17 @@ import pytest
 import respx
 from httpx import Response
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from memorylayer.exceptions import ServerError
 
 from memorylayer_langchain import MemoryLayerConversationSummaryMemory, MemoryLayerMemory
+
+_MEMORY_DEFAULTS = {
+    "workspace_id": "ws_test",
+    "type": "episodic",
+    "importance": 0.5,
+    "created_at": "2026-01-27T10:00:00Z",
+    "updated_at": "2026-01-27T10:00:00Z",
+}
 
 
 @pytest.fixture
@@ -80,11 +89,13 @@ def test_load_memory_variables_with_messages(memory: MemoryLayerMemory, base_url
     mock_response = {
         "memories": [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_123",
                 "content": "Hello",
                 "metadata": {"role": "human", "message_index": 0},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_124",
                 "content": "Hi there!",
                 "metadata": {"role": "ai", "message_index": 1},
@@ -120,11 +131,13 @@ def test_load_memory_variables_return_messages(base_url: str, api_key: str, work
     mock_response = {
         "memories": [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_123",
                 "content": "Hello",
                 "metadata": {"role": "human", "message_index": 0},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_124",
                 "content": "Hi there!",
                 "metadata": {"role": "ai", "message_index": 1},
@@ -165,11 +178,13 @@ def test_load_memory_variables_custom_prefixes(base_url: str, api_key: str, work
     mock_response = {
         "memories": [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_123",
                 "content": "Hello",
                 "metadata": {"role": "human", "message_index": 0},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_124",
                 "content": "Hi there!",
                 "metadata": {"role": "ai", "message_index": 1},
@@ -195,16 +210,18 @@ def test_save_context(memory: MemoryLayerMemory, base_url: str) -> None:
         return_value=Response(
             200,
             json={
-                "id": "mem_125",
-                "workspace_id": "ws_test",
-                "content": "test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_125",
+                    "workspace_id": "ws_test",
+                    "content": "test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -246,16 +263,18 @@ def test_save_context_with_input_output_keys(base_url: str, api_key: str, worksp
         return_value=Response(
             200,
             json={
-                "id": "mem_126",
-                "workspace_id": "ws_test",
-                "content": "test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_126",
+                    "workspace_id": "ws_test",
+                    "content": "test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -280,16 +299,18 @@ def test_save_context_non_string_values(memory: MemoryLayerMemory, base_url: str
         return_value=Response(
             200,
             json={
-                "id": "mem_127",
-                "workspace_id": "ws_test",
-                "content": "test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_127",
+                    "workspace_id": "ws_test",
+                    "content": "test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -307,8 +328,8 @@ def test_clear(memory: MemoryLayerMemory, base_url: str) -> None:
     # Mock recall response
     mock_response = {
         "memories": [
-            {"id": "mem_123", "content": "Hello", "metadata": {}},
-            {"id": "mem_124", "content": "Hi", "metadata": {}},
+            {**_MEMORY_DEFAULTS, "id": "mem_123", "content": "Hello", "metadata": {}},
+            {**_MEMORY_DEFAULTS, "id": "mem_124", "content": "Hi", "metadata": {}},
         ],
         "total_count": 2,
     }
@@ -376,16 +397,18 @@ def test_custom_memory_tags(base_url: str, api_key: str, workspace_id: str, sess
         return_value=Response(
             200,
             json={
-                "id": "mem_128",
-                "workspace_id": "ws_test",
-                "content": "test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_128",
+                    "workspace_id": "ws_test",
+                    "content": "test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -402,13 +425,12 @@ def test_custom_memory_tags(base_url: str, api_key: str, workspace_id: str, sess
 @respx.mock
 def test_http_error_on_save_context(memory: MemoryLayerMemory, base_url: str) -> None:
     """Test HTTP error handling when saving context."""
-    import httpx
 
     # Mock error response
     respx.post(f"{base_url}/v1/memories").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ServerError):
         memory.save_context(inputs={"input": "Test"}, outputs={"output": "Response"})
 
 
@@ -432,7 +454,7 @@ def test_http_error_on_clear_delete(memory: MemoryLayerMemory, base_url: str) ->
     # Mock successful recall response
     mock_response = {
         "memories": [
-            {"id": "mem_123", "content": "Hello", "metadata": {}},
+            {**_MEMORY_DEFAULTS, "id": "mem_123", "content": "Hello", "metadata": {}},
         ],
         "total_count": 1,
     }
@@ -445,8 +467,10 @@ def test_http_error_on_clear_delete(memory: MemoryLayerMemory, base_url: str) ->
     # (based on the implementation which uses logger.warning for delete failures)
     memory.clear()
 
-    # Verify: 1 recall + 1 delete attempt
-    assert len(respx.calls) == 2
+    # Verify the recall and the SDK's bounded DELETE retry attempts.
+    assert respx.calls[0].request.method == "POST"
+    delete_calls = [call for call in respx.calls if call.request.method == "DELETE"]
+    assert len(delete_calls) == memory._client.max_retries + 1
 
 
 @respx.mock
@@ -469,11 +493,13 @@ def test_messages_sorted_by_index(memory: MemoryLayerMemory, base_url: str) -> N
     mock_response = {
         "memories": [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_124",
                 "content": "Second message",
                 "metadata": {"role": "ai", "message_index": 1},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_123",
                 "content": "First message",
                 "metadata": {"role": "human", "message_index": 0},
@@ -587,16 +613,18 @@ def test_summary_save_context(summary_memory: MemoryLayerConversationSummaryMemo
         return_value=Response(
             200,
             json={
-                "id": "mem_130",
-                "workspace_id": "ws_test",
-                "content": "test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_130",
+                    "workspace_id": "ws_test",
+                    "content": "test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -614,8 +642,8 @@ def test_summary_clear(summary_memory: MemoryLayerConversationSummaryMemory, bas
     # Mock recall response
     mock_response = {
         "memories": [
-            {"id": "mem_131", "content": "Hello", "metadata": {}},
-            {"id": "mem_132", "content": "Hi", "metadata": {}},
+            {**_MEMORY_DEFAULTS, "id": "mem_131", "content": "Hello", "metadata": {}},
+            {**_MEMORY_DEFAULTS, "id": "mem_132", "content": "Hi", "metadata": {}},
         ],
         "total_count": 2,
     }
@@ -765,16 +793,18 @@ def test_summary_custom_memory_tags(base_url: str, api_key: str, workspace_id: s
         return_value=Response(
             200,
             json={
-                "id": "mem_133",
-                "workspace_id": "ws_test",
-                "content": "test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_133",
+                    "workspace_id": "ws_test",
+                    "content": "test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )

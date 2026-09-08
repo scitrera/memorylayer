@@ -266,6 +266,7 @@ def test_build_provider_from_env_reads_per_profile_fields():
         "MEMORYLAYER_EMBED_LLM_PROFILE_QWEN_TENSOR_PARALLEL_SIZE": "2",
         "MEMORYLAYER_EMBED_LLM_PROFILE_QWEN_EXTRA_ARGS": "--quantization fp8",
         "MEMORYLAYER_EMBED_LLM_PROFILE_QWEN_CMD": "/usr/local/bin/vllm",
+        "MEMORYLAYER_EMBED_LLM_PROFILE_QWEN_ENABLE_PROMPT_EMBEDS": "true",
     }
     provider = build_provider_from_env(
         _FakeVars(env),
@@ -282,7 +283,20 @@ def test_build_provider_from_env_reads_per_profile_fields():
     assert "--tensor-parallel-size" in argv and argv[argv.index("--tensor-parallel-size") + 1] == "2"
     assert "--enforce-eager" in argv
     assert "--quantization" in argv and argv[argv.index("--quantization") + 1] == "fp8"
+    assert "--enable-prompt-embeds" in argv
     assert argv[0] == "/usr/local/bin/vllm"
+
+
+def test_build_provider_from_env_omits_prompt_embeds_by_default():
+    from memorylayer_embed_server.services.llm.vllm_subprocess import build_provider_from_env
+
+    provider = build_provider_from_env(
+        _FakeVars({"MEMORYLAYER_EMBED_LLM_PROFILE_QWEN_MODEL": "Qwen/Qwen2.5-7B-Instruct"}),
+        MagicMock(),
+        profile_name="qwen",
+        port=18101,
+    )
+    assert "--enable-prompt-embeds" not in provider._runner.build_argv()
 
 
 def test_build_provider_from_env_missing_model_raises():

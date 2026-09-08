@@ -36,6 +36,14 @@ class Knowledgebase(BaseModel):
     community_count: int = 0
     generated_at: datetime
     stats: GraphStats | None = None
+    coverage: dict | None = Field(
+        None,
+        description=(
+            "Share of graph memories that reached an article, with the counts dropped "
+            "by min_community_size and max_communities. None when read from a KB "
+            "generated before coverage was recorded."
+        ),
+    )
 
 
 class KnowledgebaseService(ABC):

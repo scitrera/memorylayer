@@ -45,6 +45,9 @@ describe("Tool Definitions", () => {
       expect(toolNames).toContain("memory_session_end");
       expect(toolNames).toContain("memory_session_commit");
       expect(toolNames).toContain("memory_session_status");
+      expect(toolNames).toContain("memory_session_checkpoint");
+      expect(toolNames).toContain("memory_context_pack");
+      expect(toolNames).toContain("memory_context_delta");
     });
 
     it("should have valid input schemas", () => {

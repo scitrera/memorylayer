@@ -25,16 +25,24 @@ out to OpenAI.
 | Single-vector provider | Multi-vector provider | When to use |
 |---|---|---|
 | `mock`             | `mock`     | CI / unit tests / docker-compose smoke tests. No GPU, no network. |
-| `vllm`             | `colpali`  | Default production: vLLM hosts a real text-embedding model (Qwen3-VL-Embedding-2B by default) **in-process**, ColPali handles multi-vector. Needs GPU + vllm/colpali extras. |
+| `sentence_transformers` | `colpali_inprocess` | **Default single-vector.** In-process sentence-transformers on CPU (`all-MiniLM-L6-v2`, 384-d, ~90 MB). No GPU, no CUDA toolchain, no model server — the local quick start. Needs the `[local]` extra. Pair with `colpali_inprocess` (which also runs on CPU) for a fully GPU-free deployment that still serves multi-vector. |
+| `vllm`             | `colpali`  | Production GPU: vLLM hosts a real text-embedding model (Qwen3-VL-Embedding-2B by default) **in-process**, ColPali handles multi-vector. Needs GPU + vllm/colpali extras. |
 | `vllm_subprocess`  | `colpali`  | Same shape as `vllm`, but vLLM runs as a child process (separate asyncio loop + CUDA context). Better isolation: vLLM crashes don't take down the embed-server; memory accounting is independent. The embed-server talks to it over OpenAI-compat HTTP at `http://127.0.0.1:18000/v1`. |
 | `openai`           | `colpali`  | Self-hosted multi-vector retrieval, single-vector outsourced to OpenAI (or any OpenAI-compat endpoint — vLLM, LocalAI, Ollama, …). No vLLM dependency on-box. |
 | `google`           | `colpali`  | Same shape as `openai` but using Google GenAI for single-vector. |
 | `colpali`          | `colpali`  | One model for both — ColPali serves multi-vector natively and mean-pools its token vectors for the single-vector path. No vLLM needed. |
 
 The selector for the single-vector provider is the env var
-`MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` (default `vllm`). The
-multi-vector side is always ColPali in production, or mocked when
-`MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=true`.
+`MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` (default
+`sentence_transformers`). The multi-vector side is always ColPali in
+production, or mocked when `MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=true`.
+
+> ⚠ **Providers do not produce the same vector width**, and the width is
+> written into every stored memory — it is a property of your *data*, not
+> just of this server's config. Switching provider (384-d MiniLM ↔ 2048-d
+> Qwen3-VL) requires re-embedding, not just a restart. GPU deployments
+> should set the selector explicitly rather than inherit the CPU default.
+> See "Embedding dimensions" in the README.
 
 ---
 
@@ -52,9 +60,10 @@ which provider to instantiate using the rules below, applied in order:
    provider. The single-vector init step is skipped, so the vLLM /
    OpenAI / Google plugins are never imported.
 3. Otherwise the single-vector provider is dispatched by
-   `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` (default `vllm`). Valid
-   values: `vllm`, `vllm_subprocess`, `openai`, `google`, `mock`,
-   `colpali`.
+   `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` (default
+   `sentence_transformers`). Valid values: `sentence_transformers`
+   (aliases: `sentence-transformers`, `local`), `vllm`,
+   `vllm_subprocess`, `openai`, `google`, `mock`, `colpali`.
 
 The multi-vector provider is always ColPali except in mock mode.
 
@@ -98,6 +107,61 @@ export MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=true
 
 ---
 
+### `sentence_transformers` — in-process sentence-transformers (CPU)
+
+* Module: `memorylayer_embed_server.services.embedding.sentence_transformers`
+* Class: `SentenceTransformersEmbeddingProvider`
+* **The default single-vector provider.** Loads a small model in-process
+  and encodes on the CPU: no GPU, no CUDA toolchain, no child process, no
+  network egress after the first download.
+* Default model `sentence-transformers/all-MiniLM-L6-v2` — 6-layer MiniLM,
+  ~90 MB, **384-d**, 256-token input window.
+* **This provider is single-vector only** — sentence-transformers has no
+  late-interaction path, so it never serves `/v1/embeddings/multi`,
+  `/v1/embeddings/images`, or `/v1/score`. That is a property of *this
+  provider*, not of CPU deployments: the multi-vector side is selected
+  independently and `colpali_inprocess` runs on CPU too, so a GPU-free
+  box can serve both. Set
+  `MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER=colpali_inprocess` +
+  `MEMORYLAYER_EMBEDDING_DEVICE=cpu` — the multi-vector **default is
+  `vllm_subprocess`, which needs a GPU**, so on a CPU-only host you must
+  set this explicitly or multi-vector requests return 503.
+* `encode()` is synchronous and CPU-bound, so it runs on a worker thread
+  (`asyncio.to_thread`) — a long batch won't stall the event loop or the
+  liveness probe.
+* Vectors are L2-normalized (`normalize_embeddings=True`) so a dot product
+  is cosine similarity, which is what `recall()` assumes.
+* Model load is lazy, guarded by a lock (concurrent first requests load
+  once, not N times), and hoisted to startup by
+  `MEMORYLAYER_EMBED_PRELOAD_MODELS=true` (the default).
+* Requires the `[local]` extra (`pip install "memorylayer-embed-server[local]"`).
+  Because this is the *default* provider, a bare install with no extra is
+  the most likely first-run failure — the log names the exact install
+  command rather than raising a bare `ImportError` traceback.
+
+**Env knobs**:
+
+| Env var | Default | Notes |
+|---|---|---|
+| `MEMORYLAYER_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Any sentence-transformers-compatible HuggingFace repo id. |
+| `MEMORYLAYER_EMBEDDING_DIMENSIONS` | `384` | Must match the model. Checked against the loaded model at startup; on disagreement **the model wins** and a warning is logged (writing a wrong-width vector is worse than a noisy log). |
+| `MEMORYLAYER_EMBEDDING_ST_DEVICE` | _(unset → auto)_ | `cpu`, `cuda`, `mps`… Unset lets sentence-transformers pick (CUDA when present). Pin to `cpu` to keep the GPU free for ColPali. |
+| `MEMORYLAYER_EMBEDDING_ST_BATCH_SIZE` | `32` | `batch_size` passed to `encode()`. |
+
+**Enable**:
+
+```bash
+export MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=sentence_transformers  # (also the default)
+export MEMORYLAYER_EMBEDDING_ST_DEVICE=cpu                            # optional; pin off the GPU
+```
+
+Swapping the model changes the vector width (e.g. `all-mpnet-base-v2` is
+768-d), which existing stored memories will not match. Set
+`MEMORYLAYER_EMBEDDING_DIMENSIONS` on **both** this server and the main
+`memorylayer-server` to agree with whatever you run.
+
+---
+
 ### `vllm` — in-process vLLM (`AsyncLLM`)
 
 * Module: `memorylayer_embed_server.services.embedding.vllm`
@@ -126,7 +190,7 @@ export MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=true
 **Enable**:
 
 ```bash
-export MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=vllm   # (also the default)
+export MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=vllm
 ```
 
 ---
@@ -394,7 +458,7 @@ multi-vector endpoints will 503.
 |---|---|---|
 | `MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS` | `false` | Replace **both** providers with deterministic mocks. Highest priority. |
 | `MEMORYLAYER_EMBED_USE_MULTI_FOR_SINGLE` | `false` | Reuse ColPali as the single-vector provider (mean-pooled). Skips the single-vector init step entirely. |
-| `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` | `vllm` | One of `vllm`, `openai`, `google`, `colpali`, `mock`. `colpali` is an alias for `MEMORYLAYER_EMBED_USE_MULTI_FOR_SINGLE=true`. |
+| `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` | `sentence_transformers` | One of `sentence_transformers`, `vllm`, `vllm_subprocess`, `openai`, `google`, `colpali`, `mock`. `colpali` is an alias for `MEMORYLAYER_EMBED_USE_MULTI_FOR_SINGLE=true`. |
 
 ### Server boot / lifecycle
 
@@ -421,6 +485,15 @@ Install with `pip install memorylayer-embed-server[observability]`
 
 `GET /health/load` is always available regardless of these settings —
 load balancers polling it don't need a metrics pipeline.
+
+### Single-vector — sentence-transformers (local/CPU, default)
+
+| Env var | Default |
+|---|---|
+| `MEMORYLAYER_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` |
+| `MEMORYLAYER_EMBEDDING_DIMENSIONS` | `384` |
+| `MEMORYLAYER_EMBEDDING_ST_DEVICE` | (unset; sentence-transformers auto-selects) |
+| `MEMORYLAYER_EMBEDDING_ST_BATCH_SIZE` | `32` |
 
 ### Single-vector — vLLM (in-process)
 
@@ -491,6 +564,54 @@ config keys are documented separately.
 ---
 
 ## Recipes
+
+### Local / CPU quick start (no GPU, real embeddings)
+
+```bash
+pip install "memorylayer-embed-server[local]"
+memorylayer-embed serve
+```
+
+All defaults, i.e. effectively:
+
+```
+MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=sentence_transformers
+MEMORYLAYER_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+MEMORYLAYER_EMBEDDING_DIMENSIONS=384
+```
+
+First boot downloads ~90 MB into the HuggingFace cache; after that it runs
+fully offline. Point the main server at it with
+`MEMORYLAYER_EMBEDDING_DIMENSIONS=384`.
+
+Single-vector only as written: the multi-vector default is
+`vllm_subprocess` (GPU), so `/v1/embeddings/multi`, `/v1/embeddings/images`,
+and `/v1/score` return 503 here. Add the section below to fix that without
+a GPU.
+
+### Fully GPU-free, single **and** multi vector
+
+```bash
+pip install "memorylayer-embed-server[local,colpali]"
+```
+
+```
+MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=sentence_transformers
+MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER=colpali_inprocess
+MEMORYLAYER_EMBEDDING_ST_DEVICE=cpu
+MEMORYLAYER_EMBEDDING_DEVICE=cpu
+```
+
+`colpali_inprocess` (ModernVBERT, 128-d per token) runs on CPU — it
+auto-selects `cpu` when CUDA is absent and loads in `float32` there. GPU is
+still strongly preferred for anything throughput-sensitive: measured on CPU,
+a text query multivector takes ~1s and a single 512×512 page image ~7s, so
+bulk document ingestion is impractical without a GPU. Ad-hoc queries and
+small-scale dev work are fine.
+
+Note the two device knobs are separate — `MEMORYLAYER_EMBEDDING_ST_DEVICE`
+for sentence-transformers, `MEMORYLAYER_EMBEDDING_DEVICE` for ColPali — which
+is what lets you keep MiniLM on CPU while ColPali uses the GPU.
 
 ### Lightweight CI test (no GPU, no network)
 

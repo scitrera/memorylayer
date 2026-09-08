@@ -39,6 +39,26 @@ export const TOOLS = [
           type: "string",
           enum: ["solution", "problem", "code_pattern", "fix", "error", "workflow", "preference", "decision", "directive"],
           description: "Optional domain-specific classification"
+        },
+        metadata: {
+          type: "object",
+          description: "Arbitrary memory metadata"
+        },
+        relations: {
+          type: "array",
+          description: "Explicit typed entity relations evidenced by this memory",
+          items: {
+            type: "object",
+            properties: {
+              source_entity_id: { type: "string" },
+              source_entity_name: { type: "string" },
+              target_entity_id: { type: "string" },
+              target_entity_name: { type: "string" },
+              relationship: { type: "string" },
+              confidence: { type: "number", minimum: 0, maximum: 1 }
+            },
+            required: ["relationship"]
+          }
         }
       },
       required: ["content"]
@@ -79,6 +99,21 @@ export const TOOLS = [
           type: "array",
           items: { type: "string" },
           description: "Filter by tags (AND logic)"
+        },
+        budget_tokens: {
+          type: "integer",
+          minimum: 1,
+          description: "Hard estimated-token budget for returned memory content"
+        },
+        include_confidence: {
+          type: "boolean",
+          default: true,
+          description: "Include deterministic retrieval-confidence metadata"
+        },
+        include_relations: {
+          type: "boolean",
+          default: true,
+          description: "Allow bounded typed-relation retrieval when enabled"
         }
       },
       required: ["query"]
@@ -345,6 +380,54 @@ export const SESSION_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {}
+    }
+  },
+  {
+    name: "memory_session_checkpoint",
+    description: "Durably capture a raw transcript segment before compaction; derived indexing and enrichment never block raw capture.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        transcript_segment: { type: "string", description: "Exact raw transcript segment to preserve" },
+        content_hash: { type: "string", description: "Lowercase SHA-256 digest of the UTF-8 segment" },
+        idempotency_key: { type: "string", description: "Stable key for safe retry" },
+        source_kind: { type: "string", default: "transcript" },
+        source_sequence: { type: "integer", minimum: 0 },
+        source_boundary: { type: "integer", minimum: 0 }
+      },
+      required: ["transcript_segment", "content_hash", "idempotency_key"]
+    }
+  },
+  {
+    name: "memory_context_pack",
+    description: "Build one deterministic, hard-budgeted session resume payload with directives, working memory, recent activity, contradictions, and checkpoint recovery.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: { type: "string", description: "Optional topic focus" },
+        entity_ids: { type: "array", items: { type: "string" } },
+        entity_names: { type: "array", items: { type: "string" } },
+        budget_tokens: { type: "integer", minimum: 32, default: 2048 },
+        section_limits: { type: "object", description: "Per-section item caps" },
+        include_directives: { type: "boolean", default: true },
+        include_working_memory: { type: "boolean", default: true },
+        include_recent_activity: { type: "boolean", default: true },
+        include_contradictions: { type: "boolean", default: true },
+        include_sandbox_summary: { type: "boolean", default: true },
+        include_checkpoint_recovery: { type: "boolean", default: true }
+      }
+    }
+  },
+  {
+    name: "memory_context_delta",
+    description: "Return collapsed context changes and tombstones since a signed context-pack cursor under a hard token budget.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cursor: { type: "string", description: "Cursor from a context pack or prior delta" },
+        budget_tokens: { type: "integer", minimum: 32, default: 2048 }
+      },
+      required: ["cursor"]
     }
   },
 ];
@@ -1007,6 +1090,9 @@ export const TOOL_NAMES = {
   sessionEnd: "memory_session_end",
   sessionCommit: "memory_session_commit",
   sessionStatus: "memory_session_status",
+  sessionCheckpoint: "memory_session_checkpoint",
+  contextPack: "memory_context_pack",
+  contextDelta: "memory_context_delta",
 
   // Context environment (server-side sandbox)
   contextExec: "memory_context_exec",
@@ -1076,6 +1162,9 @@ export const TOOL_PROFILES: Record<ToolProfile, string[]> = {
     TOOL_NAMES.sessionEnd,
     TOOL_NAMES.sessionCommit,
     TOOL_NAMES.sessionStatus,
+    TOOL_NAMES.sessionCheckpoint,
+    TOOL_NAMES.contextPack,
+    TOOL_NAMES.contextDelta,
     // Context environment
     TOOL_NAMES.contextExec,
     TOOL_NAMES.contextInspect,
@@ -1118,6 +1207,9 @@ export const TOOL_PROFILES: Record<ToolProfile, string[]> = {
     TOOL_NAMES.sessionEnd,
     TOOL_NAMES.sessionCommit,
     TOOL_NAMES.sessionStatus,
+    TOOL_NAMES.sessionCheckpoint,
+    TOOL_NAMES.contextPack,
+    TOOL_NAMES.contextDelta,
     // Context environment
     TOOL_NAMES.contextExec,
     TOOL_NAMES.contextInspect,

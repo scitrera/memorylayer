@@ -10,6 +10,7 @@ import hashlib
 import pytest
 
 from memorylayer_server.models.skill import Skill, SkillFile
+from memorylayer_server.models.versioned_resource import VersionedResourceConflictError
 from memorylayer_server.services.storage.in_memory import MemoryStorageBackend
 
 WORKSPACE_ID = "ws_skill_test"
@@ -133,7 +134,7 @@ class TestSkillCRUD:
         result = await backend.delete_skill(WORKSPACE_ID, "skl_gone")
         assert result is False
 
-    async def test_delete_skill_cascades_to_files(self, backend):
+    async def test_delete_skill_retains_files_for_tombstone_restore(self, backend):
         skill = _make_skill(name="cascade-test")
         await backend.create_skill(skill)
         sf = _make_skill_file(skill.id)
@@ -144,9 +145,19 @@ class TestSkillCRUD:
 
         await backend.delete_skill(WORKSPACE_ID, skill.id)
 
-        # File should be gone after skill delete
-        assert await backend.get_skill_file(skill.id, sf.path) is None
-        assert await backend.list_skill_files(skill.id) == []
+        # The active manifest is hidden, but its bundle remains recoverable.
+        assert await backend.get_skill(WORKSPACE_ID, skill.id) is None
+        assert await backend.get_skill_file(skill.id, sf.path) is not None
+        assert len(await backend.list_skill_files(skill.id)) == 1
+
+    async def test_scoped_name_remains_reserved_by_tombstone(self, backend):
+        first = _make_skill(name="reserved-skill")
+        duplicate = first.model_copy(update={"id": "skl_reserved_duplicate"})
+        await backend.create_skill(first)
+        await backend.delete_skill(WORKSPACE_ID, first.id)
+
+        with pytest.raises(VersionedResourceConflictError):
+            await backend.create_skill(duplicate)
 
 
 @pytest.mark.asyncio
@@ -205,6 +216,56 @@ class TestListSkills:
     async def test_list_skills_empty_workspace(self, backend):
         results = await backend.list_skills("ws_empty_skills")
         assert results == []
+
+
+@pytest.mark.asyncio
+class TestListSkillsGlobalUnion:
+    """Test the include_global union of tenant-shared _global skills."""
+
+    async def test_default_excludes_global(self, backend):
+        ws = "ws_glob_default"
+        await backend.create_skill(_make_skill(name="ws-local", workspace_id=ws))
+        await backend.create_skill(_make_skill(name="global-shared", workspace_id="_global"))
+
+        results = await backend.list_skills(ws)
+        names = {s.name for s in results}
+        assert names == {"ws-local"}
+
+    async def test_include_global_unions_global_skills(self, backend):
+        ws = "ws_glob_union"
+        await backend.create_skill(_make_skill(name="ws-local", workspace_id=ws))
+        await backend.create_skill(_make_skill(name="global-shared", workspace_id="_global"))
+
+        results = await backend.list_skills(ws, include_global=True)
+        names = {s.name for s in results}
+        assert names == {"ws-local", "global-shared"}
+
+    async def test_include_global_skips_user_scoped_global(self, backend):
+        ws = "ws_glob_userscoped"
+        await backend.create_skill(_make_skill(name="ws-local", workspace_id=ws))
+        # A user-scoped row that happens to live in _global must NOT leak in.
+        await backend.create_skill(_make_skill(name="global-user", workspace_id="_global", user_id=USER_ID))
+
+        results = await backend.list_skills(ws, include_global=True)
+        names = {s.name for s in results}
+        assert names == {"ws-local"}
+
+    async def test_user_filter_suppresses_global_union(self, backend):
+        ws = "ws_glob_userfilter"
+        await backend.create_skill(_make_skill(name="ws-user", workspace_id=ws, user_id=USER_ID))
+        await backend.create_skill(_make_skill(name="global-shared", workspace_id="_global"))
+
+        # Filtering to a specific user never fans in tenant-shared globals.
+        results = await backend.list_skills(ws, user_id=USER_ID, include_global=True)
+        names = {s.name for s in results}
+        assert names == {"ws-user"}
+
+    async def test_include_global_noop_when_workspace_is_global(self, backend):
+        await backend.create_skill(_make_skill(name="only-global", workspace_id="_global"))
+
+        results = await backend.list_skills("_global", include_global=True)
+        names = {s.name for s in results}
+        assert names == {"only-global"}
 
 
 @pytest.mark.asyncio

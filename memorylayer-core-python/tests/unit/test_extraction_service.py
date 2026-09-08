@@ -323,3 +323,70 @@ class TestCategoryMapping:
             assert category in CATEGORY_MAPPING
             memory_type, memory_subtype = CATEGORY_MAPPING[category]
             assert memory_type is not None
+
+
+class TestExtractEntitiesContract:
+    """Tests for the extract_entities contract (entity_types key)."""
+
+    @pytest.fixture
+    def extraction_service(self):
+        return DefaultExtractionService(
+            llm_service=None,
+            storage=None,
+            deduplication_service=None,
+            embedding_service=None,
+        )
+
+    def test_default_provider_returns_empty_entity_types(self, extraction_service):
+        """The regex/default provider cannot type spans -> entity_types == {}."""
+        result = extraction_service.extract_entities("[2026-06-01 10:00] Alice: I shipped Orion")
+        assert result["speaker"] == "Alice"
+        assert "Orion" in result["entities"]
+        assert "Alice" in result["entities"]
+        # Back-compat: entity_types is present but empty for the regex provider.
+        assert result["entity_types"] == {}
+
+    def test_default_provider_empty_content(self, extraction_service):
+        result = extraction_service.extract_entities("")
+        assert result == {"speaker": None, "entities": [], "entity_types": {}}
+
+    def test_regex_util_returns_entity_types_key(self):
+        """The shared regex util always returns the entity_types key (empty)."""
+        from memorylayer_server.services.memory.entities import extract_entities
+
+        result = extract_entities("[2026-06-01 10:00] Bob: hello World")
+        assert "entity_types" in result
+        assert result["entity_types"] == {}
+
+    def test_typed_provider_returns_entity_type_values(self):
+        """A typed provider maps names -> EntityType values (str)."""
+        from memorylayer_server.models.entity_registry import EntityType
+        from memorylayer_server.services.extraction.base import ExtractionService
+
+        class _TypedProvider(ExtractionService):
+            async def extract_from_session(self, *a, **k):  # pragma: no cover
+                raise NotImplementedError
+
+            async def decompose_to_facts(self, content):  # pragma: no cover
+                return []
+
+            async def classify_content(self, content):  # pragma: no cover
+                raise NotImplementedError
+
+            def extract_entities(self, content):
+                return {
+                    "speaker": "Alice",
+                    "entities": ["Alice", "Acme", "Paris"],
+                    "entity_types": {
+                        "Alice": EntityType.PERSON.value,
+                        "Acme": EntityType.ORG.value,
+                        "Paris": EntityType.PLACE.value,
+                    },
+                }
+
+        result = _TypedProvider().extract_entities("ignored")
+        # entity_types values are valid EntityType values.
+        for name, value in result["entity_types"].items():
+            assert EntityType(value)  # does not raise
+        assert result["entity_types"]["Acme"] == EntityType.ORG.value
+        assert result["entity_types"]["Paris"] == EntityType.PLACE.value

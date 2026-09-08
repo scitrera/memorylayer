@@ -127,7 +127,7 @@ export default async function memorylayerPlugin(
      * server-side sandbox so state survives context compaction.
      */
     "experimental.session.compacting": async (input, output) => {
-      const context = await handleCompacting(input.sessionID);
+      const context = await handleCompacting(input);
       output.context.push(...context);
     },
 

@@ -1,0 +1,78 @@
+[project]
+name = "memorylayer-server-rpg"
+version = "0.2.0"
+description = "Repository Planning Graph services for MemoryLayer"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "scitrera.ai", email = "open-source-team@scitrera.com" }
+]
+keywords = ["ai", "memory", "agents", "code-graph", "repository"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "memorylayer-server==0.2.0",
+    "scitrera-app-framework==0.0.69",
+    "fastapi==0.136.1",
+    "pydantic==2.13.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "httpx>=0.28.1",
+    "ruff>=0.15.0",
+]
+
+[project.entry-points."memorylayer_server.plugin_packages"]
+rpg = "memorylayer_server_rpg"
+
+[project.urls]
+Homepage = "https://memorylayer.ai"
+Documentation = "https://docs.memorylayer.ai"
+Repository = "https://github.com/scitrera/memorylayer"
+Issues = "https://github.com/scitrera/memorylayer/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# Package builders must exclude local state even when building from a dirty checkout.
+exclude = [
+    "**/.omc/**", "**/.claude/**", "**/.codex/**", "**/.agents/**", "**/.slop/**",
+    "**/.venv/**", "**/__pycache__/**", "**/node_modules/**",
+    "**/.env", "**/.env.*", "**/.mcp.json",
+    "**/*.db", "**/*.db-shm", "**/*.db-wal", "**/*.sqlite", "**/*.sqlite3",
+    "**/*.pem", "**/*.key", "**/*.pyc",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memorylayer_server_rpg"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/memorylayer_server_rpg", "tests", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.uv.sources]
+memorylayer-server = { path = "../memorylayer-core-python", editable = true }
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]

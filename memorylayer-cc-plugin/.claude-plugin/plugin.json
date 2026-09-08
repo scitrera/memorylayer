@@ -1,6 +1,6 @@
 {
   "name": "memorylayer",
-  "version": "0.1.22",
+  "version": "0.2.0",
   "description": "Persistent memory for Claude Code — knowledge graph, context sandbox, and recall that survives compaction",
   "author": {
     "name": "scitrera.ai",

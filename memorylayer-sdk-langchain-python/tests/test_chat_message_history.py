@@ -4,6 +4,7 @@ import pytest
 import respx
 from httpx import Response
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from memorylayer.exceptions import ServerError
 
 from memorylayer_langchain import MemoryLayerChatMessageHistory
 
@@ -38,7 +39,7 @@ def test_add_message_human(chat_history: MemoryLayerChatMessageHistory, base_url
         "created_at": "2026-01-26T10:00:00Z",
         "updated_at": "2026-01-26T10:00:00Z",
     }
-    respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=mock_response))
+    respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": mock_response}))
 
     # Test
     chat_history.add_message(HumanMessage(content="Hello, how are you?"))
@@ -70,7 +71,7 @@ def test_add_message_ai(chat_history: MemoryLayerChatMessageHistory, base_url: s
         "created_at": "2026-01-26T10:00:00Z",
         "updated_at": "2026-01-26T10:00:00Z",
     }
-    respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=mock_response))
+    respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": mock_response}))
 
     # Test
     chat_history.add_message(AIMessage(content="I'm doing well, thank you!"))
@@ -92,16 +93,18 @@ def test_add_messages_multiple(chat_history: MemoryLayerChatMessageHistory, base
         return_value=Response(
             200,
             json={
-                "id": "mem_125",
-                "workspace_id": "ws_test",
-                "content": "test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_125",
+                    "workspace_id": "ws_test",
+                    "content": "test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -307,16 +310,18 @@ def test_system_message(chat_history: MemoryLayerChatMessageHistory, base_url: s
         return_value=Response(
             200,
             json={
-                "id": "mem_126",
-                "workspace_id": "ws_test",
-                "content": "You are a helpful assistant.",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": ["session:sess_test_123", "chat_message", "role:system"],
-                "metadata": {"session_id": "sess_test_123", "role": "system", "message_index": 0},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_126",
+                    "workspace_id": "ws_test",
+                    "content": "You are a helpful assistant.",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": ["session:sess_test_123", "chat_message", "role:system"],
+                    "metadata": {"session_id": "sess_test_123", "role": "system", "message_index": 0},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -392,16 +397,18 @@ def test_custom_memory_tags(base_url: str, api_key: str, workspace_id: str, sess
         return_value=Response(
             200,
             json={
-                "id": "mem_127",
-                "workspace_id": "ws_test",
-                "content": "Test",
-                "type": "episodic",
-                "importance": 0.5,
-                "tags": [],
-                "metadata": {},
-                "access_count": 0,
-                "created_at": "2026-01-26T10:00:00Z",
-                "updated_at": "2026-01-26T10:00:00Z",
+                "memory": {
+                    "id": "mem_127",
+                    "workspace_id": "ws_test",
+                    "content": "Test",
+                    "type": "episodic",
+                    "importance": 0.5,
+                    "tags": [],
+                    "metadata": {},
+                    "access_count": 0,
+                    "created_at": "2026-01-26T10:00:00Z",
+                    "updated_at": "2026-01-26T10:00:00Z",
+                }
             },
         )
     )
@@ -418,7 +425,6 @@ def test_custom_memory_tags(base_url: str, api_key: str, workspace_id: str, sess
 @respx.mock
 def test_http_error_on_add_message(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test HTTP error handling when adding messages."""
-    import httpx
 
     # Mock the empty messages response for getting current count
     respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
@@ -427,20 +433,19 @@ def test_http_error_on_add_message(chat_history: MemoryLayerChatMessageHistory, 
     respx.post(f"{base_url}/v1/memories").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ServerError):
         chat_history.add_message(HumanMessage(content="Test"))
 
 
 @respx.mock
 def test_http_error_on_clear(chat_history: MemoryLayerChatMessageHistory, base_url: str) -> None:
     """Test HTTP error handling when clearing."""
-    import httpx
 
     # Mock error response on recall
     respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
     # Test
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ServerError):
         chat_history.clear()
 
 

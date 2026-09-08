@@ -12,6 +12,7 @@ from .base import (
 from .noop import LLMNotConfiguredError
 from .registry import LLMProviderRegistry
 from .service_default import LLMService
+from ...models.generation import GenerationBudgetExceededError, GenerationNotAllowedError
 
 
 def get_llm_registry(v: Variables = None) -> LLMProviderRegistry:
@@ -35,4 +36,6 @@ __all__ = (
     "EXT_LLM_REGISTRY",
     "EXT_LLM_SERVICE",
     "LLMNotConfiguredError",
+    "GenerationNotAllowedError",
+    "GenerationBudgetExceededError",
 )

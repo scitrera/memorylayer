@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Local CI — mirrors .github/workflows/ci.yml
+# Local lint, tests, and builds for selected components.
 # Usage: ./scripts/ci-local.sh [--fix] [component...]
 #   --fix       Auto-fix lint/format issues instead of just checking
-#   component   One or more of: server, sdk, typescript (default: all)
+#   component   One or more of: server, rpg, sdk, typescript (default: all)
 #
 # Python steps shell out to ``uv run --extra dev …`` so each package's
 # venv is managed by uv — independent of whatever venv (if any) is
@@ -31,14 +31,14 @@ COMPONENTS=()
 for arg in "$@"; do
     case "$arg" in
         --fix) FIX=true ;;
-        server|sdk|typescript|ts) COMPONENTS+=("$arg") ;;
+        server|rpg|sdk|typescript|ts) COMPONENTS+=("$arg") ;;
         *) echo -e "${RED}Unknown argument: $arg${NC}"; exit 1 ;;
     esac
 done
 
 # Default: run all
 if [ ${#COMPONENTS[@]} -eq 0 ]; then
-    COMPONENTS=(server sdk typescript)
+    COMPONENTS=(server rpg sdk typescript)
 fi
 
 FAILURES=()
@@ -104,6 +104,25 @@ run_server() {
 }
 
 # ──────────────────────────────────────────────────────────────────
+# Python RPG server plugin (memorylayer-server-rpg-python)
+# ──────────────────────────────────────────────────────────────────
+run_rpg() {
+    need_uv
+    echo -e "\n${YELLOW}━━━ Python: memorylayer-server-rpg ━━━${NC}"
+    local dir="memorylayer-server-rpg-python"
+
+    if [ "$FIX" = true ]; then
+        run_step_in "$dir" "rpg: ruff fix"    uv run --extra dev -- ruff check --fix --unsafe-fixes .
+        run_step_in "$dir" "rpg: ruff format" uv run --extra dev -- ruff format .
+    else
+        run_step_in "$dir" "rpg: ruff check"  uv run --extra dev -- ruff check .
+        run_step_in "$dir" "rpg: ruff format" uv run --extra dev -- ruff format --check .
+    fi
+
+    run_step_in "$dir" "rpg: pytest" uv run --extra dev -- pytest tests/ -x -q
+}
+
+# ──────────────────────────────────────────────────────────────────
 # Python SDK (memorylayer-sdk-python)
 # ──────────────────────────────────────────────────────────────────
 run_sdk() {
@@ -146,7 +165,7 @@ run_typescript() {
 
     # Plugins depend on MCP being built (file:../memorylayer-mcp-typescript).
     # MCP was just built above, so npm ci here picks up its dist/.
-    for plugin in memorylayer-opencode-plugin memorylayer-cc-plugin; do
+    for plugin in memorylayer-opencode-plugin memorylayer-cc-plugin memorylayer-openclaw-plugin; do
         echo -e "\n${YELLOW}━━━ TypeScript: ${plugin} ━━━${NC}"
         run_step_in "$plugin" "${plugin}: npm ci" npm ci
         run_step_in "$plugin" "${plugin}: build"  npm run build
@@ -160,6 +179,7 @@ run_typescript() {
 for component in "${COMPONENTS[@]}"; do
     case "$component" in
         server)     run_server ;;
+        rpg)        run_rpg ;;
         sdk)        run_sdk ;;
         typescript|ts) run_typescript ;;
     esac

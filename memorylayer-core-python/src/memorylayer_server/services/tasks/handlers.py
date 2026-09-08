@@ -8,10 +8,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterable
 from logging import Logger
 
-from scitrera_app_framework import Plugin, Variables, get_extensions
+from scitrera_app_framework import Plugin, Variables, ext_parse_bool, get_extensions
 
 from ..memory import EXT_MEMORY_SERVICE
 from ..session import EXT_SESSION_SERVICE
+from .aether import (
+    DEFAULT_MEMORYLAYER_TASKS_INPROCESS_WORKER,
+    MEMORYLAYER_TASKS_INPROCESS_WORKER,
+)
 from .base import EXT_MULTI_TASK_HANDLERS, EXT_TASK_SERVICE, TaskSchedule, TaskService
 
 
@@ -92,8 +96,32 @@ class TaskHandlersSetupPlugin(Plugin):
         logger.info("Initializing Task Service Handlers")
         task_service: TaskService = self.get_extension(EXT_TASK_SERVICE, v)
 
+        # Only register handlers when the server acts as an in-process worker.
+        # When disabled (prod split-role), the server still schedules/produces
+        # tasks but does not register handlers (and does not claim — see
+        # AetherTaskService.bind_client); dedicated WorkerRunner processes
+        # consume the "memorylayer" POOL instead.
+        inprocess_worker = v.environ(
+            MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            DEFAULT_MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            type_fn=ext_parse_bool,
+        )
+        if not inprocess_worker:
+            logger.info(
+                "In-process worker disabled (%s=false): skipping task handler registration "
+                "(run dedicated workers instead)",
+                MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            )
+            return task_service
+
         # Register task service handlers
         for handler_plugin in get_extensions(EXT_MULTI_TASK_HANDLERS, v).values():  # type: TaskHandlerPlugin
+            # The multi-extension collection also carries this setup plugin's own
+            # return value (the TaskService), which is not a handler — skip it so
+            # a non-handler entry can't abort the loop mid-iteration (leaving
+            # later handlers unregistered depending on init/insertion order).
+            if not isinstance(handler_plugin, TaskHandlerPlugin):
+                continue
             task_type: str = handler_plugin.get_task_type()
             handler: Callable[[Variables, dict], Awaitable[None]] = handler_plugin.handle
             task_service.register_handler(task_type, handler)
@@ -104,6 +132,11 @@ class TaskHandlersSetupPlugin(Plugin):
         task_service: TaskService = value
         logger.info("Scheduling Recurring Task Handlers")
         for handler_plugin in get_extensions(EXT_MULTI_TASK_HANDLERS, v).values():  # type: TaskHandlerPlugin
+            # Skip non-handler entries (e.g. this setup plugin's own TaskService
+            # return value, which lacks get_schedule): a bare AttributeError here
+            # would abort scheduling for every handler ordered after it.
+            if not isinstance(handler_plugin, TaskHandlerPlugin):
+                continue
             # Schedule recurring tasks
             schedule = handler_plugin.get_schedule(v)
             if schedule:

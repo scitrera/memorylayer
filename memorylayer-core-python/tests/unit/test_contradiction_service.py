@@ -60,6 +60,34 @@ class TestNegationPatternDetection:
             assert len(pair) == 2
             assert pair[0] != pair[1]
 
+    # -- regression: substring matching produced false contradictions -------------
+    # Matching used to be `term in text`, so a term matched inside a longer word and a
+    # text carrying only the NEGATIVE form also satisfied the positive test (the positive
+    # term is a substring of its own negation). Both directions are covered here.
+
+    def test_same_polarity_negatives_do_not_contradict(self):
+        """Two texts that are BOTH negative agree; they do not contradict.
+
+        `"is"` is a substring of `"is not"`, so every pair of sentences containing
+        "is not" used to flag as contradicting each other.
+        """
+        assert not DefaultContradictionService._has_negation_pattern("This is not what I expected.", "That is not going to work.")
+
+    def test_same_polarity_cannot_does_not_contradict(self):
+        """`"can"` is a substring of `"cannot"` / `"can't"`."""
+        assert not DefaultContradictionService._has_negation_pattern("I cannot make it Tuesday.", "I cannot make it Thursday.")
+        assert not DefaultContradictionService._has_negation_pattern("You can't park there.", "You can't smoke inside.")
+
+    def test_term_inside_larger_word_does_not_match(self):
+        """`"is"` must not match inside `"island"`, nor `"add"` inside `"address"`."""
+        assert not DefaultContradictionService._has_negation_pattern("The island stretches for miles.", "Tokyo is a large city.")
+        assert not DefaultContradictionService._has_negation_pattern("Update the address field.", "Remove the trailing comma.")
+
+    def test_true_negation_still_detected_after_boundary_fix(self):
+        """The fix must not cost recall on genuine opposites."""
+        assert DefaultContradictionService._has_negation_pattern("The meeting is on Tuesday.", "The meeting is not on Tuesday.")
+        assert DefaultContradictionService._has_negation_pattern("I can attend the review.", "I cannot attend the review.")
+
 
 # =============================================================================
 # ContradictionRecord tests

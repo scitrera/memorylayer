@@ -85,6 +85,34 @@ def clean_transcription_output(content: str) -> str:
     return content.strip()
 
 
+# Grounding markup emitted by the DeepSeek-OCR lineage (DeepSeek-OCR-2, Baidu
+# Unlimited-OCR). Each recognized region is rendered as a text span followed by
+# its bounding box:
+#     <|ref|>Section 1<|/ref|><|det|>[[12, 34, 56, 78]]<|/det|>
+# The text belongs in the markdown; the coordinates do not.
+_GROUNDING_REF_RE = re.compile(r"<\|ref\|>(.*?)<\|/ref\|>", re.DOTALL)
+_GROUNDING_DET_RE = re.compile(r"<\|det\|>.*?<\|/det\|>", re.DOTALL)
+# Whatever markers survive the pass above — an unpaired opener from output
+# truncated at max_tokens, or a special token left in because the request ran
+# with skip_special_tokens=False (which the Unlimited-OCR recipe requires).
+# Both the ASCII bar and the fullwidth bar the DeepSeek tokenizers use are
+# matched. Bounded length so a stray "<|" in real document text can't eat a
+# paragraph.
+_RESIDUAL_SPECIAL_TOKEN_RE = re.compile(r"<[|｜][^<>\n]{0,64}?[|｜]>")
+
+
+def strip_grounding_tokens(content: str) -> str:
+    """Unwrap ``<|ref|>`` spans and drop ``<|det|>`` coordinate boxes.
+
+    Turns the grounded OCR transcript into plain markdown: the referenced text
+    is kept in place, the bounding boxes are discarded, and any residual
+    special-token markers are removed.
+    """
+    content = _GROUNDING_DET_RE.sub("", content)
+    content = _GROUNDING_REF_RE.sub(lambda m: m.group(1), content)
+    return _RESIDUAL_SPECIAL_TOKEN_RE.sub("", content)
+
+
 class TranscriptionProvider(ABC):
     """Abstract transcription provider."""
 

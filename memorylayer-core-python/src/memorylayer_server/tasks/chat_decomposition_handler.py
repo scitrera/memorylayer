@@ -24,8 +24,15 @@ from ..config import (
     MEMORYLAYER_CHAT_DECOMPOSE_CHUNK_SIZE,
     MEMORYLAYER_CHAT_DECOMPOSE_OVERLAP,
 )
+from ..models.llm import LLMMessage, LLMRequest, LLMRole
+from ..models.generation import GenerationActivity
 from ..models.memory import RememberInput
 from ..services.llm import EXT_LLM_SERVICE
+
+# LLM profile for chat decomposition (memory extraction from chat). Aligns with
+# the extraction service; the registry falls back to the 'default' profile when
+# unconfigured.
+DECOMPOSITION_LLM_PROFILE = "extraction"
 from ..services.memory import EXT_MEMORY_SERVICE, MemoryService
 from ..services.storage import EXT_STORAGE_BACKEND, StorageBackend
 from ..services.tasks import TaskHandlerPlugin, TaskSchedule
@@ -79,6 +86,9 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
 
         workspace_id = payload.get("workspace_id")
         thread_id = payload.get("thread_id")
+        # Owner scope: threads are keyed by (workspace_id, user_id, id); a shared
+        # client id like "_default" resolves to the correct owner only with user_id.
+        user_id = payload.get("user_id")
 
         if not workspace_id or not thread_id:
             logger.warning(
@@ -88,8 +98,8 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
             )
             return
 
-        # 1. Load thread
-        thread = await storage.get_thread(workspace_id, thread_id)
+        # 1. Load thread (owner-scoped)
+        thread = await storage.get_thread(workspace_id, thread_id, user_id=user_id)
         if not thread:
             logger.warning("Thread %s not found in workspace %s", thread_id, workspace_id)
             return
@@ -98,13 +108,14 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
             logger.debug("Thread %s has no unprocessed messages, skipping", thread_id)
             return
 
-        # 2. Fetch unprocessed messages
+        # 2. Fetch unprocessed messages (owner-scoped)
         messages = await storage.get_messages(
             workspace_id=workspace_id,
             thread_id=thread_id,
             after_index=thread.last_decomposed_index - 1 if thread.last_decomposed_index > 0 else None,
             limit=10000,  # Get all unprocessed
             order="asc",
+            user_id=user_id,
         )
 
         if not messages:
@@ -159,6 +170,7 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
         await storage.update_thread(
             workspace_id,
             thread_id,
+            user_id=user_id,
             last_decomposed_index=max_index,
             last_decomposed_at=now,
         )
@@ -197,6 +209,13 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
         # Format conversation for LLM
         conversation_lines = []
         for msg in messages:
+            # System-role messages (system prompts, injected scaffolding/context)
+            # are not conversational user/assistant content and must not seed
+            # long-term memories — skip them so no facts are decomposed from them.
+            # They still count toward the watermark (advanced by the caller over
+            # the full message range), so they are never re-examined.
+            if getattr(msg, "role", None) == "system":
+                continue
             content = msg.content
             if not isinstance(content, str):
                 # Structured content — extract text parts
@@ -209,6 +228,10 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
                 content = " ".join(parts) if parts else "[structured content]"
             conversation_lines.append(f"{msg.role}: {content}")
 
+        # Nothing to extract when the chunk was entirely system messages.
+        if not conversation_lines:
+            return 0
+
         conversation_text = "\n".join(conversation_lines)
 
         # Try LLM extraction
@@ -220,11 +243,19 @@ class ChatDecompositionTaskHandler(TaskHandlerPlugin):
 
         prompt = DECOMPOSITION_USER_TEMPLATE.format(conversation=conversation_text)
 
+        request = LLMRequest(
+            messages=[
+                LLMMessage(role=LLMRole.SYSTEM, content=DECOMPOSITION_SYSTEM_PROMPT),
+                LLMMessage(role=LLMRole.USER, content=prompt),
+            ],
+        )
         try:
-            response = await llm_service.generate(
-                system_prompt=DECOMPOSITION_SYSTEM_PROMPT,
-                user_prompt=prompt,
+            llm_response = await llm_service.complete(
+                request,
+                profile=DECOMPOSITION_LLM_PROFILE,
+                activity=GenerationActivity.SESSION_EXTRACTION,
             )
+            response = llm_response.content
         except Exception as e:
             logger.error("LLM generation failed during decomposition: %s", e)
             return 0

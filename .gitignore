@@ -1,5 +1,35 @@
 .astro/
 .omc/
+# Local AI-agent config/state. These are developer-machine artifacts (and can
+# carry internal workflow detail or MCP endpoints), so they must never reach a
+# public commit. `.slop/` is the scratch convention used across this monorepo.
+.claude/
+.mcp.json
+# Shipped plugin templates contain environment references, not local credentials.
+!/memorylayer-cc-plugin/.mcp.json
+!/memorylayer-codex-plugin/.mcp.json
+.slop/
+.codex/
+.agents/
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+*.egg-info/
 dist/
 node_modules/
 node-modules/
@@ -7,4 +37,4 @@ node-modules/
 __pycache__/
 *.pyc
 uv.lock
-/memorylayer-embed-server/.slop/
+/memorylayer-core-python/memorylayer.db

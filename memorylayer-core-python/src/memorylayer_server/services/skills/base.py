@@ -9,10 +9,22 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ...models.memory import MemoryType, RememberInput
-from ...models.skill import Skill, SkillCreateInput, SkillFile, SkillUpdateInput
+from ...models.skill import (
+    Skill,
+    SkillCreateInput,
+    SkillFile,
+    SkillMutation,
+    SkillMutationResult,
+    SkillReplaceInput,
+    SkillRevision,
+    SkillUpdateInput,
+)
+from ...models.versioned_resource import VersionedResourceConflictError, VersionedResourceNotFoundError
 from ...utils import generate_id
 from ..storage import StorageBackend
+from ..versioned_resources import VersionedResourceService
 from .frontmatter import render_skill_md
+from .versioning import canonical_hash, manifest_state
 
 if TYPE_CHECKING:
     from ..memory import MemoryService
@@ -76,6 +88,42 @@ class SkillsService:
         user_id: str | None = None,
     ) -> Skill:
         """Create a new skill, computing manifest hash."""
+        result = await self.create_skill_versioned(
+            input,
+            workspace_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            operation_id=generate_id("op"),
+            expected_etag="*",
+        )
+        return result.skill
+
+    async def create_skill_versioned(
+        self,
+        input: SkillCreateInput,
+        workspace_id: str,
+        *,
+        tenant_id: str = "",
+        user_id: str | None = None,
+        operation_id: str,
+        expected_etag: str,
+    ) -> SkillMutationResult:
+        """Create one native skill manifest with CAS and exact retry semantics."""
+
+        request_hash = canonical_hash(
+            {
+                "action": "create",
+                "tenant_id": tenant_id,
+                "workspace_id": workspace_id,
+                "user_id": user_id if user_id else input.user_id,
+                "input": input.model_dump(mode="json"),
+                "expected_etag": expected_etag,
+            }
+        )
+        if replay := await self._storage.get_skill_operation(
+            tenant_id, workspace_id, operation_id, request_hash
+        ):
+            return replay
         now = datetime.now(UTC)
         skill = Skill(
             id=generate_id("skl"),
@@ -98,17 +146,46 @@ class SkillsService:
             updated_at=now,
         )
         skill = skill.model_copy(update={"manifest_hash": _compute_manifest_hash(skill)})
-        result = await self._storage.create_skill(skill)
+        mutation_result = await self._storage.mutate_skill(
+            SkillMutation(
+                action="create",
+                skill=skill,
+                operation_id=operation_id,
+                request_hash=request_hash,
+                expected_etag=expected_etag,
+            )
+        )
+        result = mutation_result.skill
+        # Persist any inline bundle files (utils.py, references/*, assets/*). Each
+        # upsert recomputes bundle_hash; re-fetch so the returned skill reflects it.
+        # Without this, files sent via the SDK's save(files=...) were dropped.
+        if input.files:
+            for f in input.files:
+                await self.upsert_file(
+                    skill_id=result.id,
+                    path=f.path,
+                    content=f.content.encode("utf-8"),
+                    mime_type=f.mime_type,
+                    workspace_id=workspace_id,
+                )
+            if refreshed := await self._storage.get_skill(workspace_id, result.id):
+                result = refreshed
         await self._maybe_index(result)
-        return result
+        return SkillMutationResult(skill=result, replayed=mutation_result.replayed)
 
     async def get_skill(
         self,
         workspace_id: str,
         skill_id: str,
+        *,
+        include_deleted: bool = False,
     ) -> Skill | None:
         """Get a skill by ID."""
-        return await self._storage.get_skill(workspace_id, skill_id)
+        return await self._storage.get_skill(
+            workspace_id,
+            skill_id,
+            include_deleted=include_deleted,
+        )
 
     async def list_skills(
         self,
@@ -118,8 +195,14 @@ class SkillsService:
         enabled: bool | None = None,
         limit: int = 100,
         offset: int = 0,
+        include_global: bool = True,
     ) -> list[Skill]:
-        """List skills with optional filters."""
+        """List skills with optional filters.
+
+        By default tenant-shared ``_global`` skills are unioned into the result
+        so global skills are honored consistently with name-based resolution;
+        pass ``include_global=False`` to restrict to the workspace's own skills.
+        """
         return await self._storage.list_skills(
             workspace_id=workspace_id,
             user_id=user_id,
@@ -127,6 +210,7 @@ class SkillsService:
             enabled=enabled,
             limit=limit,
             offset=offset,
+            include_global=include_global,
         )
 
     async def update_skill(
@@ -136,27 +220,199 @@ class SkillsService:
         input: SkillUpdateInput,
     ) -> Skill | None:
         """Apply partial updates to a skill, recomputing manifest_hash if content changed."""
-        updates: dict[str, Any] = {k: v for k, v in input.model_dump(exclude_none=True).items()}
-        updates["updated_at"] = datetime.now(UTC)
-
-        result = await self._storage.update_skill(workspace_id, skill_id, updates)
-        if result is None:
+        current = await self.get_skill(workspace_id, skill_id)
+        if current is None:
             return None
+        updates: dict[str, Any] = {k: v for k, v in input.model_dump(exclude_none=True).items()}
+        desired = current.model_copy(update={**updates, "updated_at": datetime.now(UTC)})
+        desired = desired.model_copy(update={"manifest_hash": _compute_manifest_hash(desired)})
+        result = await self._storage.mutate_skill(
+            SkillMutation(
+                action="replace",
+                skill=desired,
+                operation_id=generate_id("op"),
+                request_hash=canonical_hash(
+                    {"action": "replace", "state": manifest_state(desired), "expected_etag": current.etag}
+                ),
+                expected_etag=current.etag,
+            )
+        )
+        await self._maybe_index(result.skill)
+        return result.skill
 
-        # Recompute manifest hash after any content change
-        new_hash = _compute_manifest_hash(result)
-        if new_hash != result.manifest_hash:
-            result = await self._storage.update_skill(workspace_id, skill_id, {"manifest_hash": new_hash})
+    async def replace_skill_versioned(
+        self,
+        workspace_id: str,
+        skill_id: str,
+        input: SkillReplaceInput,
+        *,
+        tenant_id: str,
+        operation_id: str,
+        expected_etag: str,
+    ) -> SkillMutationResult:
+        """Replace the complete semantic manifest under an expected ETag."""
 
-        await self._maybe_index(result)
+        request_hash = canonical_hash(
+            {
+                "action": "replace",
+                "tenant_id": tenant_id,
+                "workspace_id": workspace_id,
+                "skill_id": skill_id,
+                "input": input.model_dump(mode="json"),
+                "expected_etag": expected_etag,
+            }
+        )
+        if replay := await self._storage.get_skill_operation(
+            tenant_id, workspace_id, operation_id, request_hash
+        ):
+            return replay
+        current = await self.get_skill(workspace_id, skill_id)
+        if current is None or current.tenant_id != tenant_id:
+            raise VersionedResourceNotFoundError("skill not found")
+        desired = current.model_copy(
+            update={
+                **input.model_dump(),
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        desired = desired.model_copy(update={"manifest_hash": _compute_manifest_hash(desired)})
+        result = await self._storage.mutate_skill(
+            SkillMutation(
+                action="replace",
+                skill=desired,
+                operation_id=operation_id,
+                request_hash=request_hash,
+                expected_etag=expected_etag,
+            )
+        )
+        await self._maybe_index(result.skill)
         return result
 
     async def delete_skill(self, workspace_id: str, skill_id: str) -> bool:
-        """Delete a skill, its files, and its memory mirror."""
+        """Write a durable tombstone and remove the active memory mirror."""
         result = await self._storage.delete_skill(workspace_id, skill_id)
         if result and self._memory_service:
             await self._delete_mirror_memory(workspace_id, skill_id)
         return result
+
+    async def delete_skill_versioned(
+        self,
+        workspace_id: str,
+        skill_id: str,
+        *,
+        tenant_id: str,
+        operation_id: str,
+        expected_etag: str,
+    ) -> SkillMutationResult:
+        return await self._change_deleted_state(
+            action="delete",
+            workspace_id=workspace_id,
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+            expected_etag=expected_etag,
+        )
+
+    async def restore_skill_versioned(
+        self,
+        workspace_id: str,
+        skill_id: str,
+        *,
+        tenant_id: str,
+        operation_id: str,
+        expected_etag: str,
+    ) -> SkillMutationResult:
+        return await self._change_deleted_state(
+            action="restore",
+            workspace_id=workspace_id,
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+            expected_etag=expected_etag,
+        )
+
+    async def _change_deleted_state(
+        self,
+        *,
+        action: str,
+        workspace_id: str,
+        skill_id: str,
+        tenant_id: str,
+        operation_id: str,
+        expected_etag: str,
+    ) -> SkillMutationResult:
+        request_hash = canonical_hash(
+            {
+                "action": action,
+                "tenant_id": tenant_id,
+                "workspace_id": workspace_id,
+                "skill_id": skill_id,
+                "expected_etag": expected_etag,
+            }
+        )
+        if replay := await self._storage.get_skill_operation(
+            tenant_id, workspace_id, operation_id, request_hash
+        ):
+            return replay
+        current = await self.get_skill(workspace_id, skill_id, include_deleted=True)
+        if current is None or current.tenant_id != tenant_id:
+            raise VersionedResourceNotFoundError("skill not found")
+        if action == "restore" and current.deleted_at is None:
+            raise VersionedResourceConflictError("skill is not deleted")
+        now = datetime.now(UTC)
+        desired = current.model_copy(
+            update={
+                "updated_at": now,
+                "deleted_at": None if action == "restore" else now,
+            }
+        )
+        result = await self._storage.mutate_skill(
+            SkillMutation(
+                action=action,
+                skill=desired,
+                operation_id=operation_id,
+                request_hash=request_hash,
+                expected_etag=expected_etag,
+            )
+        )
+        if action == "delete" and self._memory_service:
+            await self._delete_mirror_memory(workspace_id, skill_id)
+        elif action == "restore":
+            await self._maybe_index(result.skill)
+        return result
+
+    async def list_revision_page(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        skill_id: str,
+        *,
+        limit: int,
+        page_token: str | None = None,
+    ) -> tuple[list[SkillRevision], str | None]:
+        cursor_scope = VersionedResourceService.cursor_scope(
+            "skill-revisions", tenant_id, workspace_id, skill_id
+        )
+        before = (
+            VersionedResourceService.decode_cursor(page_token, cursor_scope)
+            if page_token
+            else None
+        )
+        revisions = await self._storage.list_skill_revisions(
+            tenant_id,
+            workspace_id,
+            skill_id,
+            limit=limit + 1,
+            before_sequence=before,
+        )
+        has_more = len(revisions) > limit
+        revisions = revisions[:limit]
+        next_token = (
+            VersionedResourceService.encode_cursor(revisions[-1].sequence, cursor_scope)
+            if has_more
+            else None
+        )
+        return revisions, next_token
 
     # ------------------------------------------------------------------
     # Skill file operations

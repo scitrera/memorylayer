@@ -10,6 +10,10 @@ from logging import Logger
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
+from ...config import (
+    DEFAULT_MEMORYLAYER_INFERENCE_MAX_TOKENS,
+    MEMORYLAYER_INFERENCE_MAX_TOKENS,
+)
 from ...models import (
     Memory,
     MemorySubtype,
@@ -18,6 +22,7 @@ from ...models import (
     RecallMode,
     RememberInput,
 )
+from ...models.generation import GenerationActivity
 from ..association import EXT_ASSOCIATION_SERVICE, AssociationService
 from ..cache import EXT_CACHE_SERVICE, CacheService
 from ..llm import EXT_LLM_SERVICE, LLMNotConfiguredError, LLMService
@@ -65,6 +70,12 @@ class DefaultInferenceService:
         self.association_service = association_service
         self.cache = cache_service
         self.logger = get_logger(v, name=self.__class__.__name__)
+        # Completion cap for entity-insight synthesis (env-tunable, generative).
+        self.inference_max_tokens = (
+            v.get(MEMORYLAYER_INFERENCE_MAX_TOKENS,
+                  DEFAULT_MEMORYLAYER_INFERENCE_MAX_TOKENS)
+            if v is not None else DEFAULT_MEMORYLAYER_INFERENCE_MAX_TOKENS
+        )
         self.logger.info("Initialized DefaultInferenceService")
 
     async def derive_insights(
@@ -249,8 +260,9 @@ Output each insight on its own line with an importance score."""
         try:
             response = await self.llm.synthesize(
                 prompt=prompt,
-                max_tokens=2048,
+                max_tokens=self.inference_max_tokens,
                 profile="inference",
+                activity=GenerationActivity.SYNTHESIS,
             )
             return self._parse_insights(response)
         except LLMNotConfiguredError:

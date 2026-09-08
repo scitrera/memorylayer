@@ -112,6 +112,51 @@ export interface Memory {
   deleted_at?: string;
   created_at: string;
   updated_at: string;
+  match_signals?: string[];
+  relation_write_result?: EntityRelationWriteResult;
+}
+
+export interface EntityRelationInput {
+  source_entity_id?: string;
+  source_entity_name?: string;
+  target_entity_id?: string;
+  target_entity_name?: string;
+  relationship: string;
+  confidence?: number;
+  source_span_start?: number;
+  source_span_end?: number;
+}
+
+export interface EntityRelationWriteResult {
+  resolved: number;
+  unresolved: number;
+  rejected: number;
+  duplicate: number;
+  relation_ids: string[];
+  errors: string[];
+}
+
+export interface BudgetSummary {
+  requested?: number;
+  used: number;
+  estimator: string;
+  truncated_items: number;
+  omitted_items: number;
+}
+
+export interface GenerationSummary {
+  policy: "deterministic" | "adaptive" | "generative";
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface EntityRelationPath {
+  seed_entity_id: string;
+  entity_ids: string[];
+  relations: Array<Record<string, unknown>>;
+  evidence_ids: string[];
+  evidence_memory_ids: string[];
 }
 
 export interface RecallResult {
@@ -129,6 +174,11 @@ export interface RecallResult {
     full_would_be: number;
     savings_percent: number;
   };
+  retrieval_confidence: "strong" | "moderate" | "weak";
+  confidence_reasons: string[];
+  budget_summary?: BudgetSummary;
+  generation_summary?: GenerationSummary;
+  relation_paths: EntityRelationPath[];
 }
 
 export interface ReflectResult {
@@ -181,11 +231,76 @@ export interface SessionBriefing {
   memories: Array<Record<string, unknown>>;
 }
 
+export interface SessionCheckpoint {
+  id: string;
+  workspace_id: string;
+  session_id: string;
+  raw_memory_id: string;
+  source_kind: string;
+  source_sequence?: number;
+  source_boundary?: number;
+  content_hash: string;
+  byte_count: number;
+  capture_status: string;
+  index_status: string;
+  enrichment_status: string;
+  idempotency_key: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextPackItem {
+  id: string;
+  kind: string;
+  content: string;
+  importance: number;
+  event_time?: string;
+  match_signals: string[];
+  source_references: string[];
+  tombstone: boolean;
+}
+
+export interface ContextPack {
+  rendered: string;
+  items: ContextPackItem[];
+  open_threads: Array<Record<string, unknown>>;
+  unresolved_contradictions: Array<Record<string, unknown>>;
+  budget_summary: BudgetSummary;
+  generation_summary: GenerationSummary;
+  cursor: string;
+  degradation_notices: string[];
+}
+
+export interface ContextDelta {
+  rendered: string;
+  items: ContextPackItem[];
+  budget_summary: BudgetSummary;
+  generation_summary: GenerationSummary;
+  cursor: string;
+  has_more: boolean;
+  degradation_notices: string[];
+}
+
+export interface ContextPackOptions {
+  topic?: string;
+  entityIds?: string[];
+  entityNames?: string[];
+  budgetTokens?: number;
+  sectionLimits?: Record<string, number>;
+  includeDirectives?: boolean;
+  includeWorkingMemory?: boolean;
+  includeRecentActivity?: boolean;
+  includeContradictions?: boolean;
+  includeSandboxSummary?: boolean;
+  includeCheckpointRecovery?: boolean;
+}
+
 export interface Workspace {
   id: string;
   tenant_id: string;
   name: string;
   settings: Record<string, unknown>;
+  tags: string[];
   created_at: string;
   updated_at: string;
 }
@@ -221,6 +336,7 @@ export interface RememberOptions {
   contextId?: string;
   userId?: string;
   authority?: AuthorityContext;
+  relations?: EntityRelationInput[];
 }
 
 export interface RecallOptions {
@@ -240,11 +356,26 @@ export interface RecallOptions {
   maxExpansion?: number;
   createdAfter?: Date;
   createdBefore?: Date;
+  /** Skip this many results (pagination). Maps to `offset`. */
+  offset?: number;
+  /** Keep memories whose effective event time is >= this. Maps to `event_after`. */
+  eventAfter?: Date;
+  /** Keep memories whose effective event time is <= this. Maps to `event_before`. */
+  eventBefore?: Date;
+  /** Order results by effective event time: 'asc' or 'desc' (omit = by relevance). */
+  timeOrder?: 'asc' | 'desc';
+  /** Include the _global workspace in search (default true server-side). */
+  includeGlobal?: boolean;
+  /** Include the user-scoped global workspace (_global_user), filtered by user_id. */
+  includeGlobalUser?: boolean;
   conversationContext?: Array<{ role: string; content: string }>;
   ragThreshold?: number;
   detailLevel?: DetailLevel | 'abstract' | 'overview' | 'full';
   userId?: string;
   authority?: AuthorityContext;
+  budgetTokens?: number;
+  includeConfidence?: boolean;
+  includeRelations?: boolean;
 }
 
 export interface ReflectOptions {
@@ -279,6 +410,26 @@ export interface ClientConfig {
   sessionId?: string;
   timeout?: number;
   defaultAuthority?: AuthorityContext;
+  /**
+   * Maximum number of retries for transient failures (5xx, 429). Defaults to 3.
+   * Set to 0 to disable retries.
+   */
+  maxRetries?: number;
+  /**
+   * Base delay in milliseconds for exponential backoff between retries.
+   * Defaults to 500. Actual delay is `retryBaseDelay * 2^attempt`, or the
+   * `Retry-After` header value when the server provides one.
+   */
+  retryBaseDelay?: number;
+  /**
+   * Custom fetch implementation. Defaults to globalThis.fetch.
+   *
+   * Use this to route requests through an alternate transport — for example,
+   * `AetherFetchTransport` from `@scitrera/aether-client` so requests tunnel
+   * over an Aether sidecar instead of a direct HTTP call. The implementation
+   * must match the WHATWG fetch signature.
+   */
+  fetch?: typeof fetch;
 }
 
 // Session options
@@ -790,4 +941,279 @@ export interface DatasetMemoriesResponse {
     created_at: string;
   }>;
   total_count: number;
+}
+
+// ------------------------------------------------------------------ //
+// Token types — GET/POST /v1/tokens, GET/DELETE /v1/tokens/{id},
+// POST /v1/tokens/{id}/revoke
+// ------------------------------------------------------------------ //
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  principal_type: string;
+  workspace_patterns: string[];
+  scopes: string[];
+  created_at: string;
+  expires_at?: string | null;
+  revoked: boolean;
+}
+
+/**
+ * Response from creating a token — extends {@link ApiToken} with the
+ * plaintext `token` value, which is only ever returned at creation time.
+ */
+export interface ApiTokenWithSecret extends ApiToken {
+  token: string;
+}
+
+export interface TokenCreateOptions {
+  name: string;
+  /** Principal type for the token. Defaults to "User" server-side. */
+  principalType?: string;
+  /** Workspace glob patterns the token may access. Defaults to ["*"]. */
+  workspacePatterns?: string[];
+  /** Permission scopes. Defaults to ["*"]. */
+  scopes?: string[];
+  /** Token lifetime in days. Omit for a non-expiring token. */
+  expiresInDays?: number;
+}
+
+export interface TokenListResponse {
+  tokens: ApiToken[];
+}
+
+// ------------------------------------------------------------------ //
+// Memory list (browse) — GET /v1/memories
+// ------------------------------------------------------------------ //
+
+export interface MemoryListOptions {
+  limit?: number;
+  offset?: number;
+  type?: MemoryType | string;
+  subtype?: MemorySubtype | string;
+  /** Filter by a single tag. */
+  tag?: string;
+  contextId?: string;
+}
+
+export interface MemoryListResponse {
+  memories: Memory[];
+  total_count: number;
+}
+
+// ------------------------------------------------------------------ //
+// Entity Registry types — GET /v1/entities, GET /v1/entities/{id},
+// GET /v1/entities/resolve, POST /v1/entities/merge
+// (gated by MEMORYLAYER_ENTITY_REGISTRY_ENABLED; may return 501)
+// ------------------------------------------------------------------ //
+
+export type EntityTypeValue = "person" | "org" | "project" | "place" | "concept" | "event";
+
+export interface Entity {
+  id: string;
+  workspace_id: string;
+  entity_type: EntityTypeValue | string;
+  canonical_name: string;
+  normalized_name: string;
+  aliases: string[];
+  confidence: number;
+  provenance: Record<string, unknown>;
+  representative_memory_id?: string | null;
+  status: string;
+  merged_into?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EntityResolution {
+  entity: Entity;
+  matched_via: "exact" | "alias" | "created" | "embedding";
+  score: number;
+}
+
+export interface EntityListResponse {
+  entities: Entity[];
+  total_count: number;
+}
+
+export interface EntityResponse {
+  entity: Entity;
+}
+
+export interface EntityResolveResponse {
+  resolution: EntityResolution;
+}
+
+export interface EntityListOptions {
+  workspaceId?: string;
+  /** Entity status filter: 'active' (default) or 'merged'. */
+  status?: "active" | "merged";
+  limit?: number;
+}
+
+export interface EntityResolveOptions {
+  workspaceId?: string;
+  /** Entity type to resolve against. Defaults to 'person' server-side. */
+  entityType?: EntityTypeValue | string;
+}
+
+export interface EntityMergeOptions {
+  sourceId: string;
+  targetId: string;
+  /** Audit reason recorded in the merged entity's provenance. */
+  reason: string;
+  workspaceId?: string;
+}
+
+// ------------------------------------------------------------------ //
+// Association update — PATCH /v1/memories/{memory_id}/associations/{id}
+// ------------------------------------------------------------------ //
+
+export interface AssociationUpdateOptions {
+  /** New relationship strength (omit = unchanged). */
+  strength?: number;
+  /** New metadata dict, replaces existing (omit = unchanged). */
+  metadata?: Record<string, unknown>;
+}
+
+// ------------------------------------------------------------------ //
+// Thread update — PUT /v1/threads/{id}; user threads — GET /v1/threads/user/{id}
+// ------------------------------------------------------------------ //
+
+export interface ThreadUpdateOptions {
+  title?: string;
+  metadata?: Record<string, unknown>;
+  workspaceId?: string;
+}
+
+export interface UserThreadListOptions {
+  /** Ownership filter: 'user' (default) or 'workspace'. */
+  ownership?: "user" | "workspace";
+  /** Scope filter: 'web' | 'office' | undefined (all). */
+  scopeFilter?: "web" | "office";
+  limit?: number;
+  offset?: number;
+}
+
+// ------------------------------------------------------------------ //
+// Knowledgebase types — /v1/knowledgebase*
+// ------------------------------------------------------------------ //
+
+export interface GraphStats {
+  node_count: number;
+  edge_count: number;
+  community_count: number;
+  density: number;
+  avg_degree: number;
+  max_degree: number;
+  god_node_count: number;
+}
+
+export interface Knowledgebase {
+  workspace_id: string;
+  article_count: number;
+  community_count: number;
+  generated_at: string;
+  stats?: GraphStats | null;
+}
+
+export interface KBArticle {
+  id: string;
+  article_type: string;
+  title: string;
+  content_md: string;
+  metadata: Record<string, unknown>;
+  generated_at: string;
+}
+
+export interface KBArticleListResponse {
+  articles: KBArticle[];
+  total: number;
+}
+
+export interface KBGenerateOptions {
+  workspaceId?: string;
+  contextId?: string;
+  includeRpg?: boolean;
+  maxCommunities?: number;
+  maxGodNodes?: number;
+  regenerate?: boolean;
+}
+
+export interface KBArticleListOptions {
+  /** Filter by article type: 'index', 'community', 'entity'. */
+  articleType?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface GraphSnapshot {
+  workspace_id: string;
+  context_id?: string | null;
+  node_count: number;
+  edge_count: number;
+  includes_rpg: boolean;
+}
+
+export interface GraphCommunity {
+  id: number;
+  memory_ids: string[];
+  size: number;
+  cohesion_score: number;
+  central_node_ids: string[];
+  label?: string | null;
+}
+
+export interface GraphCentralNode {
+  memory_id: string;
+  degree: number;
+  betweenness: number;
+  community_id: number;
+}
+
+export interface GraphBridge {
+  source_community_id: number;
+  target_community_id: number;
+  memory_id_source: string;
+  memory_id_target: string;
+  relationship_type: string;
+  strength: number;
+}
+
+export interface GraphAnalysis {
+  snapshot: GraphSnapshot;
+  communities: GraphCommunity[];
+  central_nodes: GraphCentralNode[];
+  bridges: GraphBridge[];
+  stats: GraphStats;
+}
+
+export interface GraphAnalysisResponse {
+  analysis?: GraphAnalysis | null;
+  cached: boolean;
+}
+
+// ------------------------------------------------------------------ //
+// MCP server import/export — POST /v1/mcp-servers/import,
+// GET /v1/mcp-servers/export
+// ------------------------------------------------------------------ //
+
+/** Standard .mcp.json document shape: { mcpServers: { name: config, ... } }. */
+export interface McpJsonDocument {
+  mcpServers: Record<string, Record<string, unknown>>;
+}
+
+export interface McpServerImportOptions {
+  workspaceId?: string;
+  userId?: string;
+  /** Provenance: 'server' (default) | 'filesystem' | 'mirrored'. */
+  sourceMode?: string;
+}
+
+export interface McpServerImportResult {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
 }

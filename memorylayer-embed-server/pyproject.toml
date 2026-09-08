@@ -1,6 +1,6 @@
 [project]
 name = "memorylayer-embed-server"
-version = "0.1.23"
+version = "0.2.0"
 description = "MemoryLayer.ai Embed Server - Stateless transcription and embedding GPU server"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,7 +19,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "memorylayer-server==0.1.22",
+    "memorylayer-server==0.2.0",
     "fastapi==0.136.1",
     "uvicorn[standard]==0.46.0",
     "pydantic==2.13.4",
@@ -29,8 +29,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Local/CPU single-vector embeddings (sentence-transformers, all-MiniLM-L6-v2).
+# This backs the DEFAULT single-vector provider, so it is what a local install
+# needs: pip install "memorylayer-embed-server[local]". Kept an extra rather than
+# a base dependency because it pulls torch, and deployments that only use the
+# openai/google passthrough should not pay for that.
+local = ["sentence-transformers>=3.0.0", "torch>=2.11.0,<2.12.0"]
 ocr = ["transformers>=5.5.0", "torch>=2.11.0,<2.12.0", "accelerate>=0.26.0", "addict", 'matplotlib']
 vllm = ["vllm>=0.19.0", "instanttensor"]
+# Launch the vLLM lanes through sparkrun (recipes + local executor) instead of
+# our own subprocess runner. GPU-path only — deliberately NOT in `local`, so the
+# CPU image does not carry it.
+sparkrun = ["sparkrun>=0.3.2"]
 colpali = ["colpali-engine>=0.3.0", "torch>=2.11.0,<2.12.0"]
 google = ["google-genai>=2.3.0"]
 # Observability: Prometheus /metrics endpoint + OpenTelemetry SDK / OTLP
@@ -45,7 +55,7 @@ observability = [
     "opentelemetry-instrumentation-httpx>=0.48b0",
 ]
 gpu = ["memorylayer-embed-server[ocr,vllm,colpali]"]
-all = ["memorylayer-embed-server[gpu,google,observability]"]
+all = ["memorylayer-embed-server[local,gpu,google,observability]"]
 # Visual-tokenizer (Qwen3.5) lives in the proprietary
 # memorylayer-embed-server-enterprise package; install that separately.
 dev = [
@@ -65,6 +75,16 @@ Documentation = "https://docs.memorylayer.ai"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# Package builders must exclude local state even when building from a dirty checkout.
+exclude = [
+    "**/.omc/**", "**/.claude/**", "**/.codex/**", "**/.agents/**", "**/.slop/**",
+    "**/.venv/**", "**/__pycache__/**", "**/node_modules/**",
+    "**/.env", "**/.env.*", "**/.mcp.json",
+    "**/*.db", "**/*.db-shm", "**/*.db-wal", "**/*.sqlite", "**/*.sqlite3",
+    "**/*.pem", "**/*.key", "**/*.pyc",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memorylayer_embed_server"]

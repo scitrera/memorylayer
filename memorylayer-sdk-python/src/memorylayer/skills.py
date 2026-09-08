@@ -5,23 +5,19 @@ Provides CRUD, resolve, pull/push/materialize, and parse_skill_folder.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from .client import MemoryLayerClient
     from .models import AuthorityContext
     from .sync_client import SyncMemoryLayerClient
-
-# Agentskills spec: dirs that map to known kinds
-_KIND_MAP = {
-    "scripts": "script",
-    "references": "reference",
-    "assets": "asset",
-}
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)", re.DOTALL)
 
@@ -55,20 +51,41 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 def _parse_simple_yaml(text: str) -> dict[str, Any]:
-    """Parse simple key: value YAML without external dependencies."""
+    """Parse FLAT ``key: value`` YAML without external dependencies.
+
+    This is a degraded fallback for when PyYAML is unavailable. It CANNOT
+    represent nested maps or lists — a key heading a nested block collapses to
+    an empty string and list items are dropped — so a SKILL.md with nested
+    frontmatter (e.g. ``metadata.scitrera.{prereq_skills: [...], preferred_model}``)
+    is silently mangled. When that shape is detected we log loudly rather than
+    corrupt metadata invisibly; the real fix is installing PyYAML (a base dep).
+    """
     result: dict[str, Any] = {}
+    lossy = False
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
+            continue
+        if line.startswith("- "):
+            lossy = True  # list item — the flat parser has no place to put it
             continue
         if ":" in line:
             key, _, val = line.partition(":")
             key = key.strip()
             val = val.strip()
+            if not val:
+                lossy = True  # a key heading a nested map/list; its content is dropped
             # Strip surrounding quotes
             if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                 val = val[1:-1]
             result[key] = val
+    if lossy:
+        logger.warning(
+            "SKILL.md frontmatter has nested YAML (maps/lists) but PyYAML is not "
+            "installed; the fallback parser dropped nested values, so skill "
+            "metadata (e.g. prereq_skills/preferred_model) will be incomplete. "
+            "Install pyyaml (a base SDK dependency) to parse skill frontmatter."
+        )
     return result
 
 
@@ -76,7 +93,8 @@ def parse_skill_folder(path: Path) -> tuple[dict[str, Any], list[tuple[str, byte
     """Parse a skill directory into (manifest_dict, [(rel_path, content), ...]).
 
     Reads SKILL.md for frontmatter (name, description, version, etc.) + body.
-    Walks scripts/, references/, assets/ for bundle files.
+    Walks the skill directory RECURSIVELY for bundle files (including nested
+    python packages), excluding SKILL.md, __pycache__ dirs, and *.pyc/*.pyo.
     """
     path = Path(path)
     skill_md = path / "SKILL.md"
@@ -95,27 +113,36 @@ def parse_skill_folder(path: Path) -> tuple[dict[str, Any], list[tuple[str, byte
     for key in ("license", "compatibility", "allowed_tools"):
         if key in fm:
             manifest[key] = fm[key]
-    # Remaining frontmatter keys go to metadata
+    # Build the skill's metadata. An explicit `metadata:` frontmatter block IS the
+    # metadata (the convention consumers read, e.g. metadata.scitrera.prereq_skills
+    # / preferred_model); any OTHER non-known top-level frontmatter keys are folded
+    # in without clobbering. Do NOT re-wrap the `metadata:` key under another
+    # `metadata` — that double-nesting (metadata.metadata.scitrera) hides prereqs /
+    # preferred_model from the harness, which reads metadata.scitrera directly.
     known = {"name", "description", "version", "license", "compatibility", "allowed_tools"}
-    extras = {k: v for k, v in fm.items() if k not in known}
-    if extras:
-        manifest["metadata"] = extras
-
-    # Collect bundle files
-    files: list[tuple[str, bytes]] = []
-    for kind_dir, kind in _KIND_MAP.items():
-        dir_path = path / kind_dir
-        if not dir_path.is_dir():
+    fm_meta = fm.get("metadata")
+    meta: dict[str, Any] = dict(fm_meta) if isinstance(fm_meta, dict) else {}
+    for k, v in fm.items():
+        if k in known or k == "metadata":
             continue
-        for file_path in sorted(dir_path.rglob("*")):
-            if file_path.is_file():
-                rel = str(file_path.relative_to(path))
-                files.append((rel, file_path.read_bytes()))
+        meta.setdefault(k, v)
+    if meta:
+        manifest["metadata"] = meta
 
-    # Also pick up any other files at root (not SKILL.md, not known subdirs)
-    for file_path in sorted(path.iterdir()):
-        if file_path.is_file() and file_path.name != "SKILL.md":
-            files.append((file_path.name, file_path.read_bytes()))
+    # Collect ALL bundle files by walking the skill directory RECURSIVELY: the
+    # known subdirs (scripts/, references/, assets/), root-level files, AND any
+    # arbitrary nested directories — e.g. a python package like `nbme_pipeline/`
+    # whose modules must ship intact. Exclude SKILL.md, __pycache__ dirs, and
+    # compiled *.pyc/*.pyo so build artifacts never leak into a skill bundle.
+    files: list[tuple[str, bytes]] = []
+    for file_path in sorted(path.rglob("*")):
+        if not file_path.is_file():
+            continue
+        rel = file_path.relative_to(path)
+        if str(rel) == "SKILL.md" or "__pycache__" in rel.parts \
+                or rel.suffix in (".pyc", ".pyo"):
+            continue
+        files.append((str(rel), file_path.read_bytes()))
 
     return manifest, files
 
@@ -258,9 +285,27 @@ class SkillsAPI:
         data = await self._client._request("POST", "/skills", json=payload, authority=authority)
         return SkillModel(**data["skill"])
 
-    async def delete(self, skill_id: str, authority: AuthorityContext | None = None) -> None:
-        """Delete a skill and its files."""
-        await self._client._request("DELETE", f"/skills/{skill_id}", authority=authority)
+    async def delete(
+        self,
+        skill_id: str,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> None:
+        """Delete a skill and its files.
+
+        workspace_id must scope the delete the same way list/save do: the server
+        resolves ``workspace_id or ctx.workspace_id`` and filters the DELETE on it,
+        so a skill in a non-default workspace (e.g. a ``_global`` skill) is only
+        found when the workspace is sent. Omitting it falls back to the caller's
+        default context workspace and 404s a global/cross-workspace skill.
+        """
+        params: dict[str, str] = {}
+        ws_id = self._ws(workspace_id)
+        if ws_id:
+            params["workspace_id"] = ws_id
+        await self._client._request(
+            "DELETE", f"/skills/{skill_id}", params=params, authority=authority
+        )
 
     async def resolve(
         self,
@@ -489,9 +534,13 @@ class SyncSkillsAPI:
         data = self._client._request("POST", "/skills", json=payload)
         return SkillModel(**data["skill"])
 
-    def delete(self, skill_id: str) -> None:
-        """Delete a skill and its files."""
-        self._client._request("DELETE", f"/skills/{skill_id}")
+    def delete(self, skill_id: str, workspace_id: str | None = None) -> None:
+        """Delete a skill and its files. See AsyncSkills.delete on workspace_id."""
+        params: dict[str, str] = {}
+        ws_id = self._ws(workspace_id)
+        if ws_id:
+            params["workspace_id"] = ws_id
+        self._client._request("DELETE", f"/skills/{skill_id}", params=params)
 
     def resolve(
         self,

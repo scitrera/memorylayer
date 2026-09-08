@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
 from ...models.llm import LLMRequest, LLMResponse, LLMStreamChunk
-from .._constants import EXT_LLM_REGISTRY, EXT_LLM_SERVICE
+from .._constants import EXT_API_KEY_STORE, EXT_LLM_REGISTRY, EXT_LLM_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
 # Registry config constants
@@ -87,6 +87,7 @@ LLMProviderRegistryPluginBase = make_service_plugin_base(
     ext_name=EXT_LLM_REGISTRY,
     config_key=MEMORYLAYER_LLM_REGISTRY,
     default_value=DEFAULT_MEMORYLAYER_LLM_REGISTRY,
+    dependencies=(EXT_API_KEY_STORE,),
 )
 
 # noinspection PyAbstractClass

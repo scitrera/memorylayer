@@ -1,18 +1,34 @@
 # Authoritative Versions for all MemoryLayer packages
 # scripts/update-versions.py can check all versions against this file and update all package to be in sync
 
-memorylayer-core-python: 0.1.22
-memorylayer-embed-server: 0.1.23
+memorylayer-core-python: 0.2.0
+memorylayer-server-rpg-python: 0.2.0
+memorylayer-embed-server: 0.2.0
 
-memorylayer-sdk-python: 0.1.22
-memorylayer-sdk-typescript: 0.1.22
+memorylayer-sdk-python: 0.2.0
+memorylayer-sdk-typescript: 0.2.0
+# Go module versions come from git tags (`memorylayer-sdk-go/vX.Y.Z`), not from a
+# manifest; the `go_version` rule below keeps the in-source `const Version` in
+# step so the SDK reports the same number the tag claims.
+memorylayer-sdk-go: 0.2.0
+# Thin optional Aether transport in its own Go module. It releases in lockstep
+# with the root Go SDK so downstream consumers can resolve both without local
+# replacements.
+memorylayer-sdk-go-aether: 0.2.0
 
-memorylayer-mcp-typescript: 0.1.22
-memorylayer-cc-plugin: 0.1.22
-memorylayer-opencode-plugin: 0.1.22
+memorylayer-mcp-typescript: 0.2.0
+memorylayer-cc-plugin: 0.2.0
+memorylayer-opencode-plugin: 0.2.0
+# New in 0.2.0. Tracked and CI-tested, but deliberately absent from
+# ci.npm.publish_projects — adding it there would make 0.2.0 its first public
+# npm release, which is a separate decision (cf. memorylayer-embed-server).
+memorylayer-openclaw-plugin: 0.2.0
+# New in 0.2.0. Not an npm package (no package.json): a plugin folder consumed
+# by Codex, so there is no publish job for it either way.
+memorylayer-codex-plugin: 0.2.0
 
-memorylayer-sdk-langchain-python: 0.1.22
-memorylayer-sdk-llamaindex-python: 0.1.22
+memorylayer-sdk-langchain-python: 0.2.0
+memorylayer-sdk-llamaindex-python: 0.2.0
 
 memorylayer-explorer: 0.0.6
 
@@ -22,7 +38,7 @@ preferred_versions:
     "scitrera-app-framework": "0.0.69"
     "scitrera-ext-cachetools": "0.0.1"
     "scitrera-rt-data[all]": "0.0.7"
-    "scitrera-aether-client": ">=0.1.59" # TODO: pin later (heavy dev right now)
+    "scitrera-aether-client": ">=0.2.2"
     "aiosqlite": "0.22.1"
     "sqlite-vec": "0.1.9"
     "sqlalchemy[asyncio]": "2.0.46"
@@ -30,15 +46,42 @@ preferred_versions:
     "pydantic-settings": "2.14.0"
     "fastapi": "0.136.1"
     "uvicorn[standard]": "0.46.0"
-    "python-multipart": "0.0.27"
+    "python-multipart": "0.0.31"
     "click": "8.3.3"
+    # NOTE: add a "ruff" pin here when ci.python.lint is switched back on, so
+    # the generated lint step installs an exact version instead of floating.
+    # Left out for now because it has no consumer while lint is off, and adding
+    # it would rewrite the `ruff` specifier in four pyproject.toml files as a
+    # side effect of a CI change.
     # TODO: opentelemetry versions
   typescript:
     "@modelcontextprotocol/sdk": "^1.26.0"
+  # Container image tags. Not a package ecosystem — sync-versions has no rewriter
+  # for this bucket — but it is the same "one place versions are pinned" contract,
+  # and docker build_args can substitute from it.
+  container:
+    # The Aether release the embed-server image bundles. ONE release, two artifacts
+    # that must match: the sidecar container image tag, and the
+    # scitrera-aether-client version installed from PyPI. Both embed-server build
+    # args resolve from this single entry so they cannot drift apart — a sidecar
+    # binary and a client library from different releases is exactly the kind of
+    # skew that only shows up at runtime.
+    #
+    # Pinned rather than `latest` so rebuilding a release tag reproduces the same
+    # image. No leading "v" — that is how these are published, and PyPI agrees
+    # (image 0.2.2 / client 0.2.2 / go modules v0.2.2 are one release).
+    #
+    # NOTE this is a BARE version, which is why it can be interpolated into the
+    # Dockerfile's `scitrera-aether-client==${AETHER_CLIENT_VERSION}`.
+    # preferred_versions.python holds a SPEC (">=0.2.2") for the same package
+    # because that is the right constraint for a library dependency; the two serve
+    # different purposes and must stay compatible (this pin must satisfy that floor).
+    "ghcr.io/scitrera/aether": "0.2.2"
 
 sources:
   python:
     - "memorylayer-core-python/uv.lock"
+    - "memorylayer-server-rpg-python/uv.lock"
     - "memorylayer-sdk-python/uv.lock"
   typescript:
     - "memorylayer-sdk-typescript/package-lock.json"
@@ -46,6 +89,179 @@ sources:
     - "memorylayer-cc-plugin/package-lock.json"
     - "memorylayer-opencode-plugin/package-lock.json"
     - "memorylayer-explorer/package-lock.json"
+
+# GitHub Actions generation. Run: generate-ci-gha [--check|--force]
+#
+# only_workflows is an allowlist. All release lanes are generated. Repo-tools
+# 0.1.30 builds npm siblings before rewriting local refs and validates npm tags.
+# That upstream release is published and verified for this release candidate.
+#
+# release-manual.yml was retired once the generated publish lanes became
+# idempotent. It existed to re-publish individual packages after a partially
+# successful tag release, one checkbox per package. publish-python and publish-npm
+# now skip any version already on the registry, so re-dispatching either lane
+# publishes exactly what is missing — and does it without the operator having to
+# work out which package failed. Its Docker job had gone stale besides: it gated
+# on "verify memorylayer-server on PyPI" for an image that builds from source now,
+# so it would have blocked rebuilding a tag whose package was never published, and
+# it built one multi-platform image where the generated lane pushes per-arch by
+# digest and merges a manifest. The single capability lost is publishing an
+# arbitrary version string unconnected to any tag, which is not something we want
+# to be able to do.
+#
+# release-embed-server.yml was retired in favour of the generated build-docker
+# lane. It could not be generated until repo-tools 0.1.23 grew docker build_args
+# (the image passes AETHER_VERSION / AETHER_CLIENT_VERSION), and its per-image
+# cache scoping and OCI labels are now generated too. The one capability lost is
+# the ad-hoc workflow_dispatch override of the Aether versions; those are pinned
+# in preferred_versions.container instead, which is the point — rebuilding a
+# release tag now reproduces the same bundled sidecar binary rather than whatever
+# `latest` pointed at that day. The gain is that the image can no longer publish
+# from code whose tests fail: the generated lane gates on the python suites, the
+# hand-written one gated on nothing.
+ci:
+  # Pinned, not floating: the `ci:` block rejects unknown keys, so the version
+  # that understands this file is a hard requirement, and a floating pin would
+  # surface unrelated generator changes as drift on whatever PR ran next.
+  repo_tools_source: "scitrera-repo-tools==0.1.30"
+  test_branches: [ main, develop ]
+  only_workflows:
+    - version-check
+    - test-python
+    - test-npm
+    - test-go
+    - publish-go
+    - publish-python
+    - publish-npm
+    - build-docker
+  python:
+    # ci.yml pinned 3.12 for every python job; nothing here is tested on 3.11
+    # or 3.13 today. Widen once the suites are known to pass on them.
+    test_versions: [ "3.12" ]
+    install: 'pip install -e ".[dev]"'
+    # Test each adapter against the SDK from this checkout.
+    install_local_deps: true
+    test_command: 'pytest tests/ -x'
+    # Disabled for now, and not for lack of generator support: ci.yml ran
+    # `ruff check .` and `ruff format --check .`, and `lint: ruff` plus
+    # `format_check: true` reproduces both exactly. The blocker is the current
+    # tree — 47 check errors (45 core, 2 sdk) and 118 files that would be
+    # reformatted. CI last ran on 2026-05-22 and 159 commits have accumulated on
+    # develop since without being pushed, so nothing has linted this code in two
+    # months. Every finding is auto-fixable:
+    #
+    #   (cd memorylayer-core-python && ruff check --fix . && ruff format .)
+    #   (cd memorylayer-sdk-python  && ruff check --fix . && ruff format .)
+    #
+    # Run that, then set `lint: ruff` and `format_check: true`. Turning them on
+    # first would make the first push red for reasons unrelated to adopting
+    # generated CI.
+    lint: none
+    # Every published Python package is tested against its local dependencies.
+    # The embed-server GPU suites remain separate from the release unit lane.
+    test_projects:
+      - memorylayer-core-python
+      - memorylayer-server-rpg-python
+      - memorylayer-sdk-python
+      - memorylayer-sdk-langchain-python
+      - memorylayer-sdk-llamaindex-python
+    projects:
+      memorylayer-core-python:
+        # `observability` is not optional in practice: tests/unit/
+        # test_tenant_tag_middleware.py imports opentelemetry.trace
+        # unconditionally, so a plain [dev] install fails at collection.
+        install: 'pip install -e ".[dev,context,observability]"'
+        # The slow/integration/llm suites need services and API keys that CI
+        # does not have.
+        test_command: 'pytest tests/ -m "not slow and not integration and not llm and not llm_quality" -x'
+        extra_steps:
+          # Retrieval-regression gate: scores recall() over the bundled fixture
+          # corpus and fails the build when quality drops below threshold. Not
+          # a pytest suite, so it cannot ride along in test_command.
+          - name: Retrieval eval gate
+            run: memorylayer-eval gate
+    # Refuse to publish when the pushed tag disagrees with versions.yaml. Names
+    # the package whose version tracks the tag; embed-server and explorer are
+    # versioned independently, so one tag cannot verify them.
+    verify_tag_version: memorylayer-sdk-python
+    # Makes a re-run of a release idempotent rather than a 400 from PyPI.
+    skip_if_published: true
+    # Include the RPG plugin's first PyPI release in v0.2.0. Its dependency
+    # mapping orders publication after the matching core server package.
+    # memorylayer-embed-server remains container-only and is excluded here.
+    publish_projects:
+      - memorylayer-sdk-python
+      - memorylayer-core-python
+      - memorylayer-server-rpg-python
+      - memorylayer-sdk-langchain-python
+      - memorylayer-sdk-llamaindex-python
+  # NOTE — `test-go` is ON as of repo-tools 0.1.21, which added the `type: gomod`
+  # rule (see memorylayer-sdk-go in project_rules). Before that, discovery
+  # resolved the project through its `gomod_require` rule and pointed the lane at
+  # the nested `aether/` module: 3 test funcs instead of the root module's 17. A
+  # green check on the wrong module is worse than no lane, so it stayed off.
+  #
+  # The nested `aether/` transport is a second module and therefore a second Go
+  # project below. A root-module `./...` never descends into it; keeping the
+  # explicit project prevents exported SDK changes from bypassing compilation
+  # and gives the release workflow both module directories to tag.
+
+  go:
+    # Match Aether v0.2.3's minimum patched toolchain for both SDK modules.
+    go_version: "1.25.14"
+    # One root release tag reconciles both Go module tags at the same commit.
+    # Go modules are published by tags, not an upload step; without this setting
+    # the versions declared above remain unresolvable outside this checkout.
+    module_tags: push
+    verify_tag_version: memorylayer-sdk-go
+
+  npm:
+    # The security-updated OpenClaw development dependency requires Node >=24.16.
+    node_version: "24.16.0"
+    # Required, not cosmetic. These packages reference each other with `file:`
+    # specifiers and resolve types from the producer's dist/. npm runs `prepare`
+    # for a file: dependency, and these declare `prepublishOnly`, so nothing
+    # else builds them — the consumer would type-check against a directory that
+    # does not exist. Turning this on also chains the test jobs along the
+    # dependency edges declared below and threads dist/ between them, which is
+    # what ci.yml did by hand with upload/download-artifact.
+    build: true
+    cache: true
+    use_provenance: true
+    skip_if_published: true
+    require_matching_tag: true
+    # Matches what ci.yml ran. memorylayer-explorer is out: it is a Next.js
+    # application whose build has never run on a runner, and `next build` can
+    # need configuration that CI does not have. Add it once that is confirmed.
+    test_projects:
+      - memorylayer-sdk-typescript
+      - memorylayer-mcp-typescript
+      - memorylayer-cc-plugin
+      - memorylayer-opencode-plugin
+      # Added in 0.2.0. Its suite (34 tests) and `npm run build` (tsc + esbuild
+      # bundle) both pass on a clean install; the cross-repo `file:` devDependency
+      # on @scitrera/aether-client that would have broken CI here was replaced
+      # with the published ^0.2.2.
+      - memorylayer-openclaw-plugin
+    # release.yml published exactly these four. memorylayer-explorer is
+    # excluded: it is a Next.js application, not an npm package, and has never
+    # been published.
+    publish_projects:
+      - memorylayer-sdk-typescript
+      - memorylayer-mcp-typescript
+      - memorylayer-cc-plugin
+      - memorylayer-opencode-plugin
+
+  # with native extensions are slow enough to dominate the run.
+  docker:
+    default_platforms: [ linux/amd64, linux/arm64 ]
+    platform_runners:
+      linux/amd64: ubuntu-latest
+      linux/arm64: ubuntu-24.04-arm
+    # Gate the image on the python suite only. The server image contains no
+    # TypeScript or Go, so blocking it on those lanes would couple it to failures
+    # it cannot cause and cannot be fixed by rebuilding it.
+    test_prereqs: [ python ]
 
 project_rules:
   memorylayer-cc-plugin:
@@ -55,6 +271,9 @@ project_rules:
   memorylayer-core-python:
     - { type: pyproject, path: memorylayer-core-python/pyproject.toml }
     - { type: init_py,   path: memorylayer-core-python/src/memorylayer_server/__init__.py }
+  memorylayer-server-rpg-python:
+    - { type: pyproject, path: memorylayer-server-rpg-python/pyproject.toml }
+    - { type: init_py,   path: memorylayer-server-rpg-python/src/memorylayer_server_rpg/__init__.py }
   memorylayer-embed-server:
     - { type: pyproject, path: memorylayer-embed-server/pyproject.toml }
     - { type: init_py,   path: memorylayer-embed-server/src/memorylayer_embed_server/__init__.py }
@@ -71,6 +290,28 @@ project_rules:
     - { type: init_py,   path: memorylayer-sdk-python/src/memorylayer/__init__.py }
   memorylayer-sdk-typescript:
     - { type: package, path: memorylayer-sdk-typescript/package.json }
+  memorylayer-sdk-go:
+    # Go has no version manifest; this is the exported `const Version` the SDK
+    # reports, kept in step with the Python/TypeScript SDKs.
+    - { type: go_version,    path: memorylayer-sdk-go/doc.go }
+    # Declares WHICH directory is this project's Go module. Rewrites nothing —
+    # it exists because module identity and "pin this require line" are two
+    # different questions, and only `gomod_require` used to answer both. Without
+    # it, discovery fell back to the gomod_require rule below and resolved the
+    # project to the NESTED aether module, so the test lane ran aether's 3 test
+    # funcs and never the root's 17. Requires repo-tools >= 0.1.21.
+    - { type: gomod,         path: memorylayer-sdk-go/go.mod }
+    # The nested aether module requires the parent by module path. A `replace`
+    # makes the version inert for a local build, but it must still name a real
+    # version for anyone resolving the module from a tag.
+    - { type: gomod_require, path: memorylayer-sdk-go/aether/go.mod, args: [ github.com/scitrera/memorylayer/memorylayer-sdk-go ] }
+  memorylayer-sdk-go-aether:
+    - { type: gomod, path: memorylayer-sdk-go/aether/go.mod }
+  memorylayer-openclaw-plugin:
+    - { type: package, path: memorylayer-openclaw-plugin/package.json }
+    - { type: plugin,  path: memorylayer-openclaw-plugin/openclaw.plugin.json }
+  memorylayer-codex-plugin:
+    - { type: plugin,  path: memorylayer-codex-plugin/.codex-plugin/plugin.json }
   memorylayer-explorer:
     - { type: package, path: memorylayer-explorer/package.json }
   memorylayer-opencode-plugin:
@@ -83,9 +324,12 @@ dependency_mappings:
     packages:
       "memorylayer-sdk-python": "memorylayer-client"
       "memorylayer-core-python": "memorylayer-server"
+      "memorylayer-server-rpg-python": "memorylayer-server-rpg"
 
     dependencies:
       memorylayer-embed-server:
+        - "memorylayer-core-python"
+      memorylayer-server-rpg-python:
         - "memorylayer-core-python"
       memorylayer-sdk-langchain-python:
         - "memorylayer-sdk-python"
@@ -98,6 +342,7 @@ dependency_mappings:
       "memorylayer-mcp-typescript": "@scitrera/memorylayer-mcp-server"
       "memorylayer-cc-plugin": "@scitrera/memorylayer-cc-plugin"
       "memorylayer-opencode-plugin": "@scitrera/memorylayer-opencode-plugin"
+      "memorylayer-openclaw-plugin": "@scitrera/memorylayer-openclaw-plugin"
       "memorylayer-explorer": "@scitrera/memorylayer-explorer"
 
     dependencies:
@@ -107,5 +352,64 @@ dependency_mappings:
         - "memorylayer-mcp-typescript"
       memorylayer-opencode-plugin:
         - "memorylayer-mcp-typescript"
+      # Consumes the SDK directly (not via the MCP server) — it implements
+      # OpenClaw's memory capability against the client rather than over MCP.
+      memorylayer-openclaw-plugin:
+        - "memorylayer-sdk-typescript"
       memorylayer-explorer:
         - "memorylayer-sdk-typescript"
+
+  # Docker build lane. Native per-architecture runners rather than QEMU, matching
+  # the hand-written release-embed-server.yml — QEMU arm64 builds of a Python image
+
+# Container images. Only the main server image is generated here; the embed-server
+# image stays on the hand-written release-embed-server.yml (see only_workflows) —
+# it pulls the Aether proxy-sidecar binary from a separate registry image, which is
+# not something the generated lane models.
+#
+# NOTE the Dockerfile builds from the SOURCE TREE (COPY memorylayer-core-python),
+# not from PyPI. It previously did `pip install memorylayer-server[all]`, so the
+# image had no relationship to the commit that produced it and a v0.2.0 tag would
+# have shipped 0.1.22. A build lane over the old file would have been validating
+# PyPI rather than the code under review.
+docker:
+  ghcr: scitrera
+  dockerhub: scitrera
+  images:
+    memorylayer-server:
+      context: .
+      dockerfile: Dockerfile
+    # Embed server, two build variants sharing ONE repository, told apart by tag:
+    #
+    #   memorylayer-embed-server:<v>           CPU  (this descriptor)
+    #   memorylayer-embed-server:<v>-cuda13    CUDA 13 + vLLM (below)
+    #
+    # The CPU build is the unsuffixed default because it is the one a first-time
+    # user can actually run: the CUDA image needs a GPU, which left self-hosted
+    # embeddings impossible on a laptop. It serves the server's own default
+    # single-vector provider (sentence-transformers) and ColPali multi-vector,
+    # which runs on CPU; vLLM and OCR are GPU-only and stay in the -cuda13 build.
+    #
+    # ⚠ This CHANGES what `:latest` resolves to for existing pullers — it was the
+    # CUDA build. Anyone on a GPU box must move to the -cuda13 tag.
+    memorylayer-embed-server:
+      context: .
+      dockerfile: memorylayer-embed-server/Dockerfile.cpu
+      # Both resolve from the SAME entry: the sidecar binary and the python client
+      # are two artifacts of one Aether release and are kept in lockstep.
+      build_args:
+        AETHER_VERSION: "${preferred_versions:container:ghcr.io/scitrera/aether}"
+        AETHER_CLIENT_VERSION: "${preferred_versions:container:ghcr.io/scitrera/aether}"
+    # GPU image. Multi-stage: pulls the Aether proxy-sidecar out of a separate
+    # registry image, then builds a CUDA venv from the local source tree. The tag
+    # names the CUDA MAJOR deliberately — the wheels and the JIT-compiled vLLM
+    # kernels are built against that toolkit, so it is not an implementation
+    # detail a user can ignore when picking an image.
+    memorylayer-embed-server-cuda13:
+      context: .
+      dockerfile: memorylayer-embed-server/Dockerfile
+      image_name: memorylayer-embed-server
+      tag_suffix: -cuda13
+      build_args:
+        AETHER_VERSION: "${preferred_versions:container:ghcr.io/scitrera/aether}"
+        AETHER_CLIENT_VERSION: "${preferred_versions:container:ghcr.io/scitrera/aether}"

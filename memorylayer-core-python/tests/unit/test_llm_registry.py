@@ -354,6 +354,74 @@ class TestDefaultLLMProviderRegistryPlugin:
     @patch.dict(
         os.environ,
         {
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER": "noop",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL": "unused",
+            # 'reflect' is not an activity — the real one is 'reflection'. Parses fine,
+            # routes nothing. Must not pass silently.
+            "MEMORYLAYER_LLM_ASSIGN_REFLECT": "cheap",
+        },
+        clear=True,
+    )
+    def test_assignment_to_unknown_activity_warns(self):
+        plugin = DefaultLLMProviderRegistryPlugin()
+        mock_logger = MagicMock()
+
+        plugin.initialize(self._make_v(), mock_logger)
+
+        warned = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        assert "reflect" in warned
+        assert "unknown activity" in warned.lower()
+
+    @patch.dict(
+        os.environ,
+        {
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER": "noop",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL": "unused",
+        },
+        clear=True,
+    )
+    def test_unrouted_activities_are_reported(self):
+        """Maintenance activities inheriting 'default' must be visible at startup.
+
+        They run on every stored memory, so silently inheriting a large chat model is a
+        standing cost with no signal.
+        """
+        plugin = DefaultLLMProviderRegistryPlugin()
+        mock_logger = MagicMock()
+
+        plugin.initialize(self._make_v(), mock_logger)
+
+        logged = " ".join(str(c) for c in mock_logger.info.call_args_list)
+        assert "tier_generation" in logged
+        assert "extraction" in logged
+        assert "default" in logged
+
+    @patch.dict(
+        os.environ,
+        {
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_PROVIDER": "noop",
+            "MEMORYLAYER_LLM_PROFILE_DEFAULT_MODEL": "unused",
+            "MEMORYLAYER_LLM_PROFILE_CHEAP_PROVIDER": "noop",
+            "MEMORYLAYER_LLM_PROFILE_CHEAP_MODEL": "unused",
+            "MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION": "cheap",
+        },
+        clear=True,
+    )
+    def test_routed_activity_not_reported_as_unrouted(self):
+        plugin = DefaultLLMProviderRegistryPlugin()
+        mock_logger = MagicMock()
+
+        registry = plugin.initialize(self._make_v(), mock_logger)
+
+        assert registry.get_provider("tier_generation") is registry.get_provider("cheap")
+        unrouted_lines = [str(c) for c in mock_logger.info.call_args_list if "using profile 'default'" in str(c)]
+        assert unrouted_lines, "expected an unrouted-activity report"
+        assert "tier_generation" not in unrouted_lines[0]
+        assert "extraction" in unrouted_lines[0]
+
+    @patch.dict(
+        os.environ,
+        {
             "MEMORYLAYER_LLM_PROFILE_BAD_MODEL": "gpt-4o-mini",
             "MEMORYLAYER_LLM_PROFILE_BAD_API_KEY": "test-key",
             # Missing PROVIDER

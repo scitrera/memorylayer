@@ -1,0 +1,59 @@
+{
+  "bridges": [
+    {
+      "relationship_type": "related_to",
+      "strength": 0.9
+    },
+    {
+      "relationship_type": "related_to",
+      "strength": 0.8
+    }
+  ],
+  "central_nodes": [
+    {
+      "betweenness": 0.666667,
+      "degree": 3
+    },
+    {
+      "betweenness": 0.0,
+      "degree": 2
+    },
+    {
+      "betweenness": 0.0,
+      "degree": 2
+    },
+    {
+      "betweenness": 0.0,
+      "degree": 1
+    }
+  ],
+  "communities": [
+    {
+      "central_node_count": 2,
+      "cohesion_score": 1.0,
+      "label": null,
+      "size": 2
+    },
+    {
+      "central_node_count": 2,
+      "cohesion_score": 1.0,
+      "label": null,
+      "size": 2
+    }
+  ],
+  "snapshot": {
+    "context_id": null,
+    "edge_count": 4,
+    "includes_rpg": false,
+    "node_count": 4
+  },
+  "stats": {
+    "avg_degree": 2.0,
+    "community_count": 2,
+    "density": 0.666667,
+    "edge_count": 4,
+    "god_node_count": 0,
+    "max_degree": 3,
+    "node_count": 4
+  }
+}

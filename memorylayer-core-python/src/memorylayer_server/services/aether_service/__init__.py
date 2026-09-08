@@ -76,17 +76,30 @@ Configuration (environment variables)
       header set.  Use during transition periods or for downstream
       services that don't enforce scope/audience.  Direct-mode requests
       are unaffected by this knob.
+``MEMORYLAYER_AETHER_LIVENESS_ENABLED``
+    Enable the connection liveness watchdog that detects a silently dropped
+    gateway connection (hard pod kill) and forces the SDK to reconnect.
+    Default: ``true``.  The Aether SDK's ``auto_reconnect`` only fires on a
+    *graceful* disconnect; without gRPC keepalive (which the SDK does not
+    expose) a silent TCP drop is otherwise never noticed.
+``MEMORYLAYER_AETHER_LIVENESS_INTERVAL_S``
+    Seconds between liveness probes (default: ``30``).
+``MEMORYLAYER_AETHER_LIVENESS_TIMEOUT_S``
+    Per-probe timeout in seconds (default: ``10``).
+``MEMORYLAYER_AETHER_LIVENESS_FAILURES``
+    Consecutive probe failures before forcing a reconnect (default: ``2``).
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 import warnings
 from collections.abc import Callable
 from logging import Logger
 
-from scitrera_app_framework import Variables, get_logger
+from scitrera_app_framework import Variables, ext_parse_bool, get_logger
 
 from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
 from memorylayer_server.services._plugin_factory import make_service_plugin_base
@@ -147,6 +160,145 @@ _FRONT_DOOR_SIDECAR = "sidecar"
 
 MEMORYLAYER_AETHER_TERMINATOR_OBO_POLICY = "MEMORYLAYER_AETHER_TERMINATOR_OBO_POLICY"
 DEFAULT_MEMORYLAYER_AETHER_TERMINATOR_OBO_POLICY = "require_resolver"
+
+# ProxyHttpTerminator header mode. "strict" makes the terminator re-mint the
+# X-Auth-* trusted header set itself; "passthrough" makes it trust the headers
+# the gateway already minted (the gateway is now the single minting point via
+# identityheaders.MintIntoMap on every ProxyHttpRequest). Default stays
+# "strict" for backward compatibility; deployments fronted by a minting gateway
+# set "passthrough" so direct-service-call X-Auth-Workspace-Access is honored.
+MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE = "MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE"
+DEFAULT_MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE = "strict"
+_TERMINATOR_HEADER_MODES = ("strict", "passthrough")
+
+# Connection liveness watchdog (silent-drop detection).
+#
+# The Aether SDK (``scitrera_aether_client``) supports ``auto_reconnect``
+# (exponential backoff + GRACEFUL_DISCONNECT handling) but builds its gRPC
+# channel WITHOUT keepalive options and exposes no channel-options surface to
+# pass them in.  A *graceful* gateway disconnect is detected (the listen loop
+# sees a stream error and reconnect fires), but a *silently dropped* TCP
+# connection — e.g. a hard gateway pod kill — produces no stream error, so the
+# SDK's receive loop blocks forever believing it is still connected and
+# reconnect never triggers.  Symptom: after a gateway restart the service
+# disappears from the gateway's connection list indefinitely, with no error
+# logs ("it doesn't realize it got disconnected"), and only a pod restart
+# recovers it.
+#
+# Since the SDK is an external package (not vendored in this repo) and offers
+# no keepalive knob, we detect the dead connection ourselves with a periodic
+# application-level liveness probe (a cheap ``kv_get`` round-trip).  When the
+# probe fails repeatedly while the SDK still believes it is connected, we close
+# the dead channel — which surfaces a stream error in the SDK's listen loop and
+# lets its native ``auto_reconnect`` machinery re-establish the connection.
+MEMORYLAYER_AETHER_LIVENESS_ENABLED = "MEMORYLAYER_AETHER_LIVENESS_ENABLED"
+DEFAULT_MEMORYLAYER_AETHER_LIVENESS_ENABLED = True
+MEMORYLAYER_AETHER_LIVENESS_INTERVAL_S = "MEMORYLAYER_AETHER_LIVENESS_INTERVAL_S"
+DEFAULT_MEMORYLAYER_AETHER_LIVENESS_INTERVAL_S = 30.0
+MEMORYLAYER_AETHER_LIVENESS_TIMEOUT_S = "MEMORYLAYER_AETHER_LIVENESS_TIMEOUT_S"
+DEFAULT_MEMORYLAYER_AETHER_LIVENESS_TIMEOUT_S = 10.0
+MEMORYLAYER_AETHER_LIVENESS_FAILURES = "MEMORYLAYER_AETHER_LIVENESS_FAILURES"
+DEFAULT_MEMORYLAYER_AETHER_LIVENESS_FAILURES = 2
+
+# Max concurrent POOL task handlers (document ingestion/render/embed, decay,
+# doc_verify, …) run on this connection. A doc_verify sweep can resume many docs
+# at once; without a cap every assignment spawns an unbounded ``asyncio.Task`` so
+# a burst runs ALL of them concurrently — pressuring the thread pool (the
+# ``to_thread`` PDF rasterize is CPU-bound), the DB, and the embed backend, and
+# starving the event loop / HTTP ``/livez`` probe. Most pool tasks are light
+# (decay, doc_verify/kb_refresh sweeps); only document render/embed is heavy and
+# is itself memory-bounded (batched per MEMORYLAYER_RENDER_BATCH_PAGES), so the
+# cap is generous — it exists to bound a runaway burst, not to serialize work.
+# ``<= 0`` disables the cap (unbounded — the legacy behavior).
+MEMORYLAYER_TASK_CONCURRENCY = "MEMORYLAYER_TASK_CONCURRENCY"
+DEFAULT_MEMORYLAYER_TASK_CONCURRENCY = 16
+
+# Task-handler concurrency LANES.
+#
+# A single shared cap is not enough, because ``asyncio.Semaphore`` is strictly
+# FIFO: whoever queues first runs first, regardless of what the work is. Fact
+# decomposition fans out hard — one decomposed page yields ~35-40 facts, and
+# each fact schedules its own ``generate_tiers`` + ``auto_enrich`` — so a
+# document ingest routinely parks >1000 enrichment tasks in the queue. Under one
+# cap the NEXT document_transcribe lands behind all of them and the document
+# pipeline stalls for as long as the backlog takes to burn down, even though the
+# backlog is not what anyone is waiting on.
+#
+# Splitting into lanes gives each class its own reserved slots, so document
+# progress is never gated on enrichment backlog. Lanes are independent: total
+# possible concurrency is the SUM of the caps, which is the point — the document
+# lane's slots must not be consumable by fan-out work.
+TASK_LANE_DOCUMENT = "document"
+TASK_LANE_FANOUT = "fanout"
+TASK_LANE_DEFAULT = "default"
+
+# Memory fan-out: enqueued per-fact and unbounded in the document's page count,
+# so this is the lane that floods. It keeps the historical cap.
+MEMORYLAYER_TASK_CONCURRENCY_FANOUT = "MEMORYLAYER_TASK_CONCURRENCY_FANOUT"
+DEFAULT_MEMORYLAYER_TASK_CONCURRENCY_FANOUT = 16
+# Document pipeline: bounded per document and latency-visible to callers, so it
+# gets dedicated slots rather than competing for the shared pool.
+MEMORYLAYER_TASK_CONCURRENCY_DOCUMENT = "MEMORYLAYER_TASK_CONCURRENCY_DOCUMENT"
+DEFAULT_MEMORYLAYER_TASK_CONCURRENCY_DOCUMENT = 8
+
+#: Task types whose volume scales with fact count rather than document count.
+_FANOUT_TASK_TYPES = frozenset({
+    "auto_enrich",
+    "generate_tiers",
+    "decompose_facts",
+    "reindex_memory",
+    "kb_update",
+})
+
+#: Prefixes of the document ingestion pipeline (document_render/_transcribe/
+#: _embed/_finalize, doc_added, doc_verify).
+_DOCUMENT_TASK_PREFIXES = ("document_", "doc_")
+
+
+def resolve_task_lane(task_type: str | None) -> str:
+    """Map a task type to its concurrency lane.
+
+    Unknown types land in the default lane deliberately: a new task type gets
+    ordinary shared capacity rather than silently borrowing the document lane's
+    reserved slots.
+    """
+    if not task_type:
+        return TASK_LANE_DEFAULT
+    # Task types arrive NAMESPACED on the wire ("memorylayer-task.auto_enrich")
+    # while the tables above hold bare names. Match on the last dot-segment so
+    # both spellings route identically. Matching the raw value alone made every
+    # lane inert in production: nothing matched, so all work -- document phases
+    # and fan-out alike -- fell through to the default lane and starved each
+    # other exactly as it had before lanes existed.
+    name = task_type.rsplit(".", 1)[-1]
+    if name in _FANOUT_TASK_TYPES:
+        return TASK_LANE_FANOUT
+    if name.startswith(_DOCUMENT_TASK_PREFIXES):
+        return TASK_LANE_DOCUMENT
+    return TASK_LANE_DEFAULT
+
+# Grace (seconds) to let in-flight task handlers finish on disconnect before they
+# are cancelled, and the timeout for the Aether client ``close()`` (which can
+# block on a silently-dead channel). Together these BOUND shutdown so a handler
+# awaiting a dead channel can't hang the pod past the k8s termination grace
+# (-> SIGKILL/exit 137). Ingestion is resumable (doc_verify re-sweeps + ingestion
+# is idempotent), so cancelling an in-flight render mid-shutdown is safe.
+MEMORYLAYER_SHUTDOWN_DRAIN_TIMEOUT_S = "MEMORYLAYER_SHUTDOWN_DRAIN_TIMEOUT_S"
+DEFAULT_MEMORYLAYER_SHUTDOWN_DRAIN_TIMEOUT_S = 8.0
+MEMORYLAYER_SHUTDOWN_CLOSE_TIMEOUT_S = "MEMORYLAYER_SHUTDOWN_CLOSE_TIMEOUT_S"
+DEFAULT_MEMORYLAYER_SHUTDOWN_CLOSE_TIMEOUT_S = 5.0
+
+# Periodic INFO log of the in-flight POOL task count (+ per-type breakdown, and
+# running-vs-waiting against the concurrency cap) WHILE tasks are running —
+# observability for long ingestion bursts where individual handlers log little.
+# Emits only while there ARE live tasks, plus one line when the last drains, so
+# an idle worker stays quiet. ``<= 0`` disables.
+MEMORYLAYER_TASK_MONITOR_INTERVAL_S = "MEMORYLAYER_TASK_MONITOR_INTERVAL_S"
+DEFAULT_MEMORYLAYER_TASK_MONITOR_INTERVAL_S = 30.0
+
+# Well-known key the liveness probe reads. Its value is irrelevant — a hit OR
+# a miss both prove the round-trip works; only a timeout/error signals trouble.
+_LIVENESS_PROBE_KEY = "__memorylayer_aether_liveness__"
 
 # Path globs the in-process terminator accepts. Matches the Phase 2 plan;
 # ``/`` (root metadata page) is intentionally NOT included so the metadata
@@ -237,6 +389,17 @@ class AetherServiceConnection:
         resolver_max_entries: int = DEFAULT_MEMORYLAYER_AETHER_RESOLVER_MAX_ENTRIES,
         rest_front_door: str = DEFAULT_MEMORYLAYER_AETHER_REST_FRONT_DOOR,
         terminator_obo_policy: str = DEFAULT_MEMORYLAYER_AETHER_TERMINATOR_OBO_POLICY,
+        liveness_enabled: bool = DEFAULT_MEMORYLAYER_AETHER_LIVENESS_ENABLED,
+        liveness_interval_s: float = DEFAULT_MEMORYLAYER_AETHER_LIVENESS_INTERVAL_S,
+        liveness_timeout_s: float = DEFAULT_MEMORYLAYER_AETHER_LIVENESS_TIMEOUT_S,
+        liveness_failures: int = DEFAULT_MEMORYLAYER_AETHER_LIVENESS_FAILURES,
+        task_concurrency: int = DEFAULT_MEMORYLAYER_TASK_CONCURRENCY,
+        document_task_concurrency: int = DEFAULT_MEMORYLAYER_TASK_CONCURRENCY_DOCUMENT,
+        fanout_task_concurrency: int = DEFAULT_MEMORYLAYER_TASK_CONCURRENCY_FANOUT,
+        shutdown_drain_timeout_s: float = DEFAULT_MEMORYLAYER_SHUTDOWN_DRAIN_TIMEOUT_S,
+        shutdown_close_timeout_s: float = DEFAULT_MEMORYLAYER_SHUTDOWN_CLOSE_TIMEOUT_S,
+        task_monitor_interval_s: float = DEFAULT_MEMORYLAYER_TASK_MONITOR_INTERVAL_S,
+        consumes_pool_tasks: bool = True,
     ) -> None:
         self._v = v
         self._gateway_addr = gateway_addr
@@ -251,8 +414,51 @@ class AetherServiceConnection:
         self._tls_ca_cert = tls_ca_cert
         self._tls_client_cert = tls_client_cert
         self._tls_client_key = tls_client_key
+        # When False (in-process worker disabled → serve-only), the Aether
+        # connection declares no_pool_consumer so the gateway never routes POOL
+        # task assignments to this instance (they go to dedicated workers).
+        self._consumes_pool_tasks = consumes_pool_tasks
         self._client = None
         self._task_assignment_handler: Callable | None = None
+        # POOL task-handler concurrency cap + in-flight tracking. The semaphore
+        # bounds concurrent handlers so a burst of assignments (e.g. a doc_verify
+        # sweep) can't run all at once; the set lets disconnect() drain/cancel
+        # stragglers within a bounded grace. ``task_concurrency <= 0`` => no cap.
+        # (asyncio.Semaphore does not bind a loop at construction on 3.10+, so
+        # building it here — possibly before the loop runs — is safe.)
+        self._task_concurrency = task_concurrency
+        self._task_semaphore: asyncio.Semaphore | None = (
+            asyncio.Semaphore(task_concurrency) if task_concurrency and task_concurrency > 0 else None
+        )
+        # Per-lane caps (see TASK_LANE_* above). The default lane reuses
+        # ``_task_semaphore`` so the existing knob keeps its meaning and a
+        # ``task_concurrency <= 0`` still disables capping for that lane.
+        self._lane_concurrency = {
+            TASK_LANE_DOCUMENT: document_task_concurrency,
+            TASK_LANE_FANOUT: fanout_task_concurrency,
+            TASK_LANE_DEFAULT: task_concurrency,
+        }
+        self._lane_semaphores: dict[str, asyncio.Semaphore | None] = {
+            TASK_LANE_DOCUMENT: (
+                asyncio.Semaphore(document_task_concurrency)
+                if document_task_concurrency and document_task_concurrency > 0
+                else None
+            ),
+            TASK_LANE_FANOUT: (
+                asyncio.Semaphore(fanout_task_concurrency)
+                if fanout_task_concurrency and fanout_task_concurrency > 0
+                else None
+            ),
+            TASK_LANE_DEFAULT: self._task_semaphore,
+        }
+        self._inflight_tasks: set[asyncio.Task] = set()
+        self._shutdown_drain_timeout_s = shutdown_drain_timeout_s
+        self._shutdown_close_timeout_s = shutdown_close_timeout_s
+        # Periodic in-flight task-count logger (started on connect, stopped on
+        # disconnect). Handler tasks are named by their task_type so the log can
+        # break the count down by type.
+        self._task_monitor_interval_s = task_monitor_interval_s
+        self._task_monitor_task: asyncio.Task | None = None
         # Phase 3.5c: lazy-constructed shared authority resolver. Materialised
         # on first :meth:`get_authority_resolver` call so connections that
         # never need OBO resolution do not allocate the cache.
@@ -269,6 +475,13 @@ class AetherServiceConnection:
         self._terminator_obo_policy = terminator_obo_policy
         self._fastapi_app = None
         self._terminator = None
+        # Connection liveness watchdog state (silent-drop detection — see the
+        # module-level config constants for the full rationale).
+        self._liveness_enabled = liveness_enabled
+        self._liveness_interval_s = liveness_interval_s
+        self._liveness_timeout_s = liveness_timeout_s
+        self._liveness_failures = liveness_failures
+        self._liveness_task: asyncio.Task | None = None
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info(
             "Initialized AetherServiceConnection (gateway=%s, workspace=%s, specifier=%s, tls=%s, rest_front_door=%s)",
@@ -400,14 +613,47 @@ class AetherServiceConnection:
         async def _handler(req):
             return await asgi_dispatch(app, req)
 
+        # Per-deployment tenant for the terminator to stamp as X-Auth-Tenant-ID on
+        # every minted request. MemoryLayer runs one deployment per tenant and the
+        # platform framework injects SCITRERA_TENANT (= the tenant id); the cert's
+        # specifier is NOT usable here (it is overridden per-pod for unique connection
+        # identity). Without this, the Python terminator never carries a tenant and the
+        # fail-closed AetherAuthenticationService rejects EVERY request with
+        # "Missing X-Auth-Tenant-ID" (direct-aether path has no Go sidecar to mint it).
+        tenant_id = self._v.environ("SCITRERA_TENANT", None)
+        if not tenant_id:
+            self.logger.warning(
+                "SCITRERA_TENANT unset: ProxyHttpTerminator will not stamp "
+                "X-Auth-Tenant-ID; fail-closed REST auth will reject requests"
+            )
+
+        # Header mode: "strict" re-mints the X-Auth-* set here; "passthrough"
+        # trusts the gateway-minted headers (the gateway is the single minting
+        # point via identityheaders.MintIntoMap). Default "strict" for
+        # backward compatibility; invalid values warn and fall back to strict.
+        header_mode = self._v.environ(
+            MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE,
+            DEFAULT_MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE,
+        )
+        if header_mode not in _TERMINATOR_HEADER_MODES:
+            self.logger.warning(
+                "Invalid %s=%r (expected one of %s); falling back to %r",
+                MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE,
+                header_mode,
+                _TERMINATOR_HEADER_MODES,
+                DEFAULT_MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE,
+            )
+            header_mode = DEFAULT_MEMORYLAYER_AETHER_TERMINATOR_HEADER_MODE
+
         try:
             terminator = ProxyHttpTerminator(
                 client=self._client,
                 handler=_handler,
                 allow_paths=list(_DEFAULT_TERMINATOR_ALLOW_PATHS),
-                header_mode="strict",
+                header_mode=header_mode,
                 resolver=self.get_authority_resolver(),
                 obo_policy=self._terminator_obo_policy,
+                tenant_id=tenant_id,
             )
             await terminator.start()
         except Exception:
@@ -460,7 +706,15 @@ class AetherServiceConnection:
         wait for responses on the same gRPC stream.
         """
         if self._task_assignment_handler is not None:
-            asyncio.create_task(self._run_task_handler(assignment))
+            # Track the task so disconnect() can drain/cancel it on shutdown
+            # (otherwise a handler blocked on a dead channel hangs termination).
+            # Name it by task_type so the task monitor can break the count down.
+            task = asyncio.create_task(
+                self._run_task_handler(assignment),
+                name=str(getattr(assignment, "task_type", "task")),
+            )
+            self._inflight_tasks.add(task)
+            task.add_done_callback(self._inflight_tasks.discard)
         else:
             self.logger.warning(
                 "Received task assignment but no handler registered (task_type=%s)",
@@ -468,15 +722,246 @@ class AetherServiceConnection:
             )
 
     async def _run_task_handler(self, assignment) -> None:
-        """Execute the task assignment handler with error protection."""
+        """Execute the task assignment handler with error protection.
+
+        Bounded by the semaphore of the task's LANE (see ``resolve_task_lane``)
+        so a burst of pool assignments — e.g. a doc_verify sweep resuming many
+        ``document_render`` jobs — doesn't run every handler at once and starve
+        the event loop / thread pool.
+
+        Lanes are what keep that bound from becoming head-of-line blocking: with
+        one shared FIFO semaphore, thousands of queued enrichment tasks delay
+        every later document task behind them.
+        """
+        lane = resolve_task_lane(getattr(assignment, "task_type", None))
+        semaphore = self._lane_semaphores.get(lane)
         try:
-            await self._task_assignment_handler(assignment)
+            if semaphore is not None:
+                async with semaphore:
+                    await self._task_assignment_handler(assignment)
+            else:
+                await self._task_assignment_handler(assignment)
+        except asyncio.CancelledError:
+            # Cancelled by the shutdown drain — propagate quietly (not an error).
+            raise
         except Exception:
             self.logger.error(
                 "Unhandled error in task assignment handler (task_type=%s)",
                 getattr(assignment, "task_type", "<unknown>"),
                 exc_info=True,
             )
+
+    # ------------------------------------------------------------------
+    # Connection liveness watchdog (silent-drop detection)
+    # ------------------------------------------------------------------
+
+    def _start_liveness_watchdog(self) -> None:
+        """Start the background liveness watchdog (idempotent)."""
+        if not self._liveness_enabled:
+            return
+        if self._liveness_task is not None and not self._liveness_task.done():
+            return
+        self._liveness_task = asyncio.create_task(self._liveness_loop())
+        self.logger.info(
+            "Aether liveness watchdog started (interval=%.1fs, timeout=%.1fs, failures=%d)",
+            self._liveness_interval_s,
+            self._liveness_timeout_s,
+            self._liveness_failures,
+        )
+
+    async def _stop_liveness_watchdog(self) -> None:
+        """Stop the background liveness watchdog, if running."""
+        task = self._liveness_task
+        self._liveness_task = None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            self.logger.warning("Error stopping Aether liveness watchdog", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # In-flight POOL task monitor (periodic count logging)
+    # ------------------------------------------------------------------
+
+    def _start_task_monitor(self) -> None:
+        """Start the periodic in-flight task-count logger (idempotent)."""
+        if self._task_monitor_interval_s <= 0:
+            return
+        if self._task_monitor_task is not None and not self._task_monitor_task.done():
+            return
+        self._task_monitor_task = asyncio.create_task(self._task_monitor_loop())
+        self.logger.info(
+            "POOL task monitor started (interval=%.1fs)", self._task_monitor_interval_s,
+        )
+
+    async def _stop_task_monitor(self) -> None:
+        """Stop the periodic task-count logger, if running."""
+        task = self._task_monitor_task
+        self._task_monitor_task = None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            self.logger.warning("Error stopping POOL task monitor", exc_info=True)
+
+    async def _task_monitor_loop(self) -> None:
+        """Log the in-flight POOL task count at INFO while tasks are running.
+
+        Reports the total live handler count, a per-``task_type`` breakdown, and
+        (when a concurrency cap is set) an approximate running-vs-waiting split
+        (``running ≈ min(n, cap)``, the rest parked on the semaphore). Silent
+        while idle; emits a single line when the last task drains.
+        """
+        from collections import Counter
+
+        was_active = False
+        while True:
+            try:
+                await asyncio.sleep(self._task_monitor_interval_s)
+            except asyncio.CancelledError:
+                return
+            live = [t for t in self._inflight_tasks if not t.done()]
+            n = len(live)
+            if n > 0:
+                by_type = Counter(t.get_name() for t in live)
+                breakdown = ", ".join(f"{k}={v}" for k, v in sorted(by_type.items()))
+                # Running-vs-waiting is per LANE: each lane has its own cap, so a
+                # single global cap would misreport (and hide exactly the
+                # starvation lanes exist to prevent — a saturated fan-out lane
+                # next to an idle document lane).
+                by_lane = Counter(resolve_task_lane(t.get_name()) for t in live)
+                lane_parts = []
+                for lane, lane_n in sorted(by_lane.items()):
+                    lane_cap = self._lane_concurrency.get(lane) or 0
+                    if lane_cap > 0:
+                        lane_running = min(lane_n, lane_cap)
+                        lane_parts.append(
+                            "%s ~%d/%d running, %d waiting"
+                            % (lane, lane_running, lane_cap, lane_n - lane_running)
+                        )
+                    else:
+                        lane_parts.append("%s %d unbounded" % (lane, lane_n))
+                self.logger.info(
+                    "POOL tasks in flight: %d (%s) [%s]",
+                    n, "; ".join(lane_parts), breakdown,
+                )
+                was_active = True
+            elif was_active:
+                self.logger.info("POOL tasks in flight: 0 (all drained)")
+                was_active = False
+
+    def _client_believes_connected(self) -> bool:
+        """Return ``True`` when the SDK thinks the stream is live and is not reconnecting.
+
+        We only probe / force a reconnect when the SDK believes it is connected
+        (``_connection_confirmed``) and is not already mid-reconnect
+        (``_reconnecting``).  Those internals are best-effort — if a future SDK
+        version drops them we fall back to "assume connected" so the probe still
+        runs (a dead connection is the failure mode we must catch).
+        """
+        client = self._client
+        if client is None:
+            return False
+        confirmed = getattr(client, "_connection_confirmed", True)
+        reconnecting = getattr(client, "_reconnecting", False)
+        return bool(confirmed) and not bool(reconnecting)
+
+    async def _liveness_probe(self) -> bool:
+        """Issue one cheap round-trip and return ``True`` iff the gateway answered.
+
+        ``kv_get`` returns a ``KVResponse`` on success (hit OR miss) and ``None``
+        on timeout, so a non-``None`` result proves the bidirectional stream is
+        alive.  A silently dropped connection yields ``None`` (the request is
+        queued but never answered) — the signal we use to detect the dead link.
+        """
+        client = self._client
+        if client is None:
+            return False
+        try:
+            resp = await asyncio.wait_for(
+                client.kv_get(_LIVENESS_PROBE_KEY, scope="global", timeout=self._liveness_timeout_s),
+                # Hard ceiling in case the SDK's own timeout is bypassed on a
+                # wedged stream; keep it just above the SDK timeout.
+                timeout=self._liveness_timeout_s + 5.0,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Any RPC error (e.g. channel already failing) counts as a failed
+            # probe; the watchdog will force a reconnect after enough failures.
+            return False
+        return resp is not None
+
+    async def _force_reconnect(self) -> None:
+        """Close the dead channel so the SDK's auto_reconnect machinery fires.
+
+        Closing the underlying gRPC channel surfaces a stream error in the
+        SDK's listen loop, which (with ``auto_reconnect=True`` — the SDK
+        default) triggers ``_attempt_reconnect``.  We deliberately do NOT call
+        ``client.close()`` here (that sets the SDK's stop event and would tear
+        the client down for good); we only nudge the transport so the SDK
+        re-establishes it.
+        """
+        client = self._client
+        if client is None:
+            return
+        channel = getattr(client, "channel", None)
+        if channel is None:
+            return
+        try:
+            await channel.close()
+            self.logger.warning(
+                "Aether liveness watchdog: closed dead channel to force reconnect "
+                "(silent-drop detected; SDK auto_reconnect will re-establish)"
+            )
+        except Exception:
+            self.logger.warning(
+                "Aether liveness watchdog: error closing dead channel", exc_info=True
+            )
+
+    async def _liveness_loop(self) -> None:
+        """Periodically probe the connection and force a reconnect when it is dead."""
+        consecutive_failures = 0
+        while True:
+            try:
+                await asyncio.sleep(self._liveness_interval_s)
+            except asyncio.CancelledError:
+                return
+
+            if not self._client_believes_connected():
+                # Not connected yet, or the SDK is already reconnecting — let it
+                # work and reset our failure counter.
+                consecutive_failures = 0
+                continue
+
+            try:
+                ok = await self._liveness_probe()
+            except asyncio.CancelledError:
+                return
+
+            if ok:
+                consecutive_failures = 0
+                continue
+
+            consecutive_failures += 1
+            self.logger.warning(
+                "Aether liveness probe failed (%d/%d)",
+                consecutive_failures,
+                self._liveness_failures,
+            )
+            if consecutive_failures >= self._liveness_failures:
+                await self._force_reconnect()
+                # Reset so we give the SDK time to reconnect before probing
+                # again; the next loop also skips while ``_reconnecting``.
+                consecutive_failures = 0
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -505,6 +990,7 @@ class AetherServiceConnection:
                 implementation=_SERVICE_IMPLEMENTATION,
                 specifier=self._specifier,
                 credentials=self._credentials,
+                consumes_pool_tasks=self._consumes_pool_tasks,
                 **tls_kwargs,
             )
             # No on_message handler — REST handles the data-plane surface.
@@ -534,15 +1020,36 @@ class AetherServiceConnection:
         # attached — :meth:`attach_fastapi_app` will pick up the slack.
         await self._maybe_start_terminator()
 
+        # Start the liveness watchdog so a silently dropped connection (hard
+        # gateway pod kill) is detected and the SDK's auto_reconnect is fired.
+        self._start_liveness_watchdog()
+        # Periodic in-flight task-count logging (observability during bursts).
+        self._start_task_monitor()
+
     async def disconnect(self) -> None:
         """Disconnect from the Aether gateway."""
-        # Stop the terminator first so it stops accepting new requests
+        # Stop the liveness watchdog first so it does not try to probe (or
+        # force-reconnect) a connection we are deliberately tearing down.
+        await self._stop_liveness_watchdog()
+        await self._stop_task_monitor()
+        # Stop the terminator next so it stops accepting new requests
         # before we tear down the underlying client connection.
         await self._stop_terminator()
+        # Drain in-flight POOL task handlers within a bounded grace, then cancel
+        # the stragglers, so a handler blocked on a (silently) dead channel can't
+        # hang termination past the k8s grace (-> SIGKILL/exit 137).
+        await self._drain_inflight_tasks()
         if self._client is not None:
             try:
-                await self._client.close()
+                # ``close()`` can block on a dead channel — bound it so shutdown
+                # stays within the termination grace.
+                await asyncio.wait_for(self._client.close(), timeout=self._shutdown_close_timeout_s)
                 self.logger.info("Disconnected AetherServiceConnection from Aether gateway")
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Aether client close() timed out after %.1fs; abandoning it",
+                    self._shutdown_close_timeout_s,
+                )
             except Exception:
                 self.logger.error("Error closing AetherServiceConnection client", exc_info=True)
             finally:
@@ -551,6 +1058,33 @@ class AetherServiceConnection:
                 # the old client's identity/connection.  A subsequent connect
                 # will yield a fresh resolver on next get_authority_resolver().
                 self._authority_resolver = None
+
+    async def _drain_inflight_tasks(self) -> None:
+        """Await in-flight task handlers up to the drain grace, then cancel the rest.
+
+        Called on disconnect. Bounds how long shutdown waits on running handlers
+        so a handler blocked on a dead channel can't stall termination; the
+        cancelled work is safe to drop (ingestion is resumable + idempotent).
+        """
+        tasks = [t for t in self._inflight_tasks if not t.done()]
+        if not tasks:
+            return
+        self.logger.info(
+            "Draining %d in-flight task handler(s) on disconnect (grace=%.1fs)",
+            len(tasks),
+            self._shutdown_drain_timeout_s,
+        )
+        _done, pending = await asyncio.wait(tasks, timeout=self._shutdown_drain_timeout_s)
+        if pending:
+            self.logger.warning(
+                "Cancelling %d in-flight task handler(s) that did not drain in %.1fs",
+                len(pending),
+                self._shutdown_drain_timeout_s,
+            )
+            for t in pending:
+                t.cancel()
+            # Let cancellation propagate; swallow the resulting CancelledErrors.
+            await asyncio.gather(*pending, return_exceptions=True)
 
     @property
     def is_connected(self) -> bool:
@@ -577,6 +1111,32 @@ def _read_key_file(path: str, logger: Logger) -> str | None:
     except Exception:
         logger.error("Failed to read API key file: %s", path, exc_info=True)
     return None
+
+
+# Aether variables that indicate the operator actually intends to use Aether.
+# Deliberately excludes anything with a usable default (e.g. AETHER_WORKSPACE):
+# presence of those says nothing about intent.
+_AETHER_INTENT_ENV_KEYS = (
+    AETHER_GATEWAY_ADDR,
+    AETHER_API_KEY,
+    AETHER_API_KEY_FILE,
+    AETHER_AUTH,
+    AETHER_SERVICE_SPECIFIER,
+    AETHER_TLS_ENABLED,
+    AETHER_TLS_CA_CERT,
+    AETHER_TLS_CLIENT_CERT,
+    AETHER_TLS_CLIENT_KEY,
+)
+
+
+def _any_aether_env_configured() -> bool:
+    """True when any Aether variable is set in the environment.
+
+    Read from ``os.environ`` rather than ``Variables`` on purpose: this must
+    distinguish "operator set it" from "a default was applied", and the defaults
+    are exactly what would make the check always true.
+    """
+    return any(os.environ.get(key) for key in _AETHER_INTENT_ENV_KEYS)
 
 
 class AetherServiceConnectionPlugin(_AetherServiceConnectionPluginBase):
@@ -691,6 +1251,86 @@ class AetherServiceConnectionPlugin(_AetherServiceConnectionPluginBase):
             )
             terminator_obo_policy = DEFAULT_MEMORYLAYER_AETHER_TERMINATOR_OBO_POLICY
 
+        # Connection liveness watchdog knobs (silent-drop detection).
+        # Boolean parsed with the same idiom as AETHER_TLS_ENABLED above; the
+        # default (enabled) applies only when the env var is unset.
+        liveness_enabled_raw = v.environ(MEMORYLAYER_AETHER_LIVENESS_ENABLED, None)
+        if liveness_enabled_raw is None:
+            liveness_enabled = DEFAULT_MEMORYLAYER_AETHER_LIVENESS_ENABLED
+        else:
+            liveness_enabled = liveness_enabled_raw.lower() in ("true", "1", "yes")
+        liveness_interval_s = float(
+            v.environ(
+                MEMORYLAYER_AETHER_LIVENESS_INTERVAL_S,
+                DEFAULT_MEMORYLAYER_AETHER_LIVENESS_INTERVAL_S,
+            )
+        )
+        liveness_timeout_s = float(
+            v.environ(
+                MEMORYLAYER_AETHER_LIVENESS_TIMEOUT_S,
+                DEFAULT_MEMORYLAYER_AETHER_LIVENESS_TIMEOUT_S,
+            )
+        )
+        liveness_failures = int(
+            v.environ(
+                MEMORYLAYER_AETHER_LIVENESS_FAILURES,
+                DEFAULT_MEMORYLAYER_AETHER_LIVENESS_FAILURES,
+            )
+        )
+
+        # POOL task-handler concurrency cap + bounded-shutdown knobs.
+        task_concurrency = int(
+            v.environ(MEMORYLAYER_TASK_CONCURRENCY, DEFAULT_MEMORYLAYER_TASK_CONCURRENCY)
+        )
+        document_task_concurrency = int(
+            v.environ(
+                MEMORYLAYER_TASK_CONCURRENCY_DOCUMENT,
+                DEFAULT_MEMORYLAYER_TASK_CONCURRENCY_DOCUMENT,
+            )
+        )
+        fanout_task_concurrency = int(
+            v.environ(
+                MEMORYLAYER_TASK_CONCURRENCY_FANOUT,
+                DEFAULT_MEMORYLAYER_TASK_CONCURRENCY_FANOUT,
+            )
+        )
+        shutdown_drain_timeout_s = float(
+            v.environ(
+                MEMORYLAYER_SHUTDOWN_DRAIN_TIMEOUT_S,
+                DEFAULT_MEMORYLAYER_SHUTDOWN_DRAIN_TIMEOUT_S,
+            )
+        )
+        shutdown_close_timeout_s = float(
+            v.environ(
+                MEMORYLAYER_SHUTDOWN_CLOSE_TIMEOUT_S,
+                DEFAULT_MEMORYLAYER_SHUTDOWN_CLOSE_TIMEOUT_S,
+            )
+        )
+        task_monitor_interval_s = float(
+            v.environ(
+                MEMORYLAYER_TASK_MONITOR_INTERVAL_S,
+                DEFAULT_MEMORYLAYER_TASK_MONITOR_INTERVAL_S,
+            )
+        )
+
+        # A serve-only server (in-process worker disabled) must NOT be an Aether
+        # pool-task consumer: otherwise the gateway load-balances POOL task
+        # assignments (e.g. session_cleanup) onto it by implementation, claims
+        # them on its behalf, and — with no handler registered — they are
+        # dropped and stick assigned until reconcile. Gate pool-consumer status
+        # on the same MEMORYLAYER_TASKS_INPROCESS_WORKER flag the task service
+        # uses to decide whether to register handlers, so server↔consumer stay
+        # consistent. Local import avoids an import cycle with the task service.
+        from ..tasks.aether import (
+            DEFAULT_MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            MEMORYLAYER_TASKS_INPROCESS_WORKER,
+        )
+        consumes_pool_tasks = v.environ(
+            MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            DEFAULT_MEMORYLAYER_TASKS_INPROCESS_WORKER,
+            type_fn=ext_parse_bool,
+        )
+
         return AetherServiceConnection(
             v,
             gateway_addr=gateway_addr,
@@ -706,6 +1346,17 @@ class AetherServiceConnectionPlugin(_AetherServiceConnectionPluginBase):
             resolver_max_entries=resolver_max_entries,
             rest_front_door=rest_front_door,
             terminator_obo_policy=terminator_obo_policy,
+            liveness_enabled=liveness_enabled,
+            liveness_interval_s=liveness_interval_s,
+            liveness_timeout_s=liveness_timeout_s,
+            liveness_failures=liveness_failures,
+            task_concurrency=task_concurrency,
+            document_task_concurrency=document_task_concurrency,
+            fanout_task_concurrency=fanout_task_concurrency,
+            shutdown_drain_timeout_s=shutdown_drain_timeout_s,
+            shutdown_close_timeout_s=shutdown_close_timeout_s,
+            task_monitor_interval_s=task_monitor_interval_s,
+            consumes_pool_tasks=consumes_pool_tasks,
         )
 
     async def async_ready(self, v: Variables, logger: Logger, value: AetherServiceConnection) -> None:
@@ -728,6 +1379,20 @@ class AetherServiceConnectionPlugin(_AetherServiceConnectionPluginBase):
         works; only the in-process REST terminator is skipped.
         """
         auth_mode = value._auth_mode
+
+        # Standalone (typical OSS) deployments never configure Aether at all. Treat
+        # "no Aether environment whatsoever" as "not in use" and stay quiet, rather
+        # than failing the credential check on every start — that surfaced as an
+        # alarming AETHER_API_KEY warning on a server that was working fine and had
+        # never asked for Aether. Any Aether variable being set means the operator
+        # DID intend to use it, so the fail-fast credential check below still runs.
+        if not _any_aether_env_configured():
+            logger.info(
+                "Aether is not configured (no AETHER_* environment set); running standalone. "
+                "Aether-dependent features (cross-service proxying, gRPC token API, task back-channel) are inactive. "
+                "To enable, set AETHER_GATEWAY_ADDR and AETHER_API_KEY (or AETHER_AUTH=none for local development)."
+            )
+            return
 
         if auth_mode and auth_mode.lower() == "none":
             logger.warning("AETHER_AUTH=none: skipping API key requirement. This is intended for local development only.")

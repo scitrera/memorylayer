@@ -67,7 +67,7 @@ def test_unknown_transport_string_raises_on_aenter():
     import asyncio
 
     with pytest.raises(ValueError, match="Unknown transport"):
-        asyncio.get_event_loop().run_until_complete(_enter())
+        asyncio.run(_enter())
 
 
 # ---------------------------------------------------------------------------
@@ -104,8 +104,8 @@ async def test_aether_transport_routes_through_proxy_http_async(monkeypatch):
     call = fake_proxy.await_args
     # Positional first arg is the aether client
     assert call.args[0] is fake_aether
-    # Default target topic
-    assert call.kwargs["target_topic"] == "sv::memorylayer::default"
+    # Default target topic: bare implementation — aether routes to a memorylayer instance
+    assert call.kwargs["target_topic"] == "sv::memorylayer"
     # Path is mounted at /v1/* to match the terminator allow_paths config
     assert call.kwargs["path"].startswith("/v1/")
     # Body round-trips as JSON bytes

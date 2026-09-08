@@ -153,7 +153,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_1", "test", "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", "test", "human", 0)},
             )
         )
 
@@ -194,7 +194,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_3", "test", "human", 2),
+                json={"memory": create_mock_memory_response("mem_3", "test", "human", 2)},
             )
         )
 
@@ -250,7 +250,7 @@ class TestLegacyChainWithMemoryLayerMemory:
                 "updated_at": "2026-01-27T10:00:00Z",
             }
             stored_memories.append(memory)
-            return Response(200, json=memory)
+            return Response(200, json={"memory": memory})
 
         def recall_side_effect(request):
             """Return currently stored memories."""
@@ -341,7 +341,7 @@ class TestLegacyChainWithMemoryLayerMemory:
                 "updated_at": "2026-01-27T10:00:00Z",
             }
             memories_by_session[session_id].append(memory)
-            return Response(200, json=memory)
+            return Response(200, json={"memory": memory})
 
         respx.post(f"{base_url}/v1/memories/recall").mock(side_effect=recall_side_effect)
         respx.post(f"{base_url}/v1/memories").mock(side_effect=create_side_effect)
@@ -393,7 +393,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_3", "test", "human", 2),
+                json={"memory": create_mock_memory_response("mem_3", "test", "human", 2)},
             )
         )
 
@@ -428,7 +428,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_3", "test", "human", 2),
+                json={"memory": create_mock_memory_response("mem_3", "test", "human", 2)},
             )
         )
 
@@ -494,7 +494,7 @@ class TestLegacyChainWithMemoryLayerMemory:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_1", "test", "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", "test", "human", 0)},
             )
         )
 
@@ -543,7 +543,7 @@ class TestLegacyChainWithSummaryMemory:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_1", "test", "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", "test", "human", 0)},
             )
         )
 
@@ -572,13 +572,13 @@ class TestLegacyChainWithSummaryMemory:
         respx.post(f"{base_url}/v1/memories/reflect").mock(
             return_value=Response(
                 200,
-                json={"reflection": "The user introduced themselves as Bob and discussed Python programming."},
+                json={"reflection": "The user introduced themselves as Bob and discussed Python programming.", "confidence": 0.9},
             )
         )
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_1", "test", "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", "test", "human", 0)},
             )
         )
 
@@ -629,7 +629,7 @@ class TestLegacyChainWithSummaryMemory:
                 "updated_at": "2026-01-27T10:00:00Z",
             }
             stored_memories.append(memory)
-            return Response(200, json=memory)
+            return Response(200, json={"memory": memory})
 
         def recall_side_effect(request):
             return Response(
@@ -697,7 +697,7 @@ class TestLegacyChainWithSummaryMemory:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_1", "test", "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", "test", "human", 0)},
             )
         )
 
@@ -801,7 +801,7 @@ class TestLegacyChainMemoryClear:
                 "updated_at": "2026-01-27T10:00:00Z",
             }
             stored_memories.append(memory)
-            return Response(200, json=memory)
+            return Response(200, json={"memory": memory})
 
         def recall_side_effect(request):
             return Response(

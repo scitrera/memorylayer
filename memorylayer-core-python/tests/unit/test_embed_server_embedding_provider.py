@@ -17,9 +17,9 @@ from memorylayer_server.services.embedding.embed_server import (
 )
 
 
-def _provider_with_client(client) -> EmbedServerEmbeddingProvider:
+def _provider_with_client(client, request_dimensions: int | None = None) -> EmbedServerEmbeddingProvider:
     """Build a provider with a stubbed EmbedServerClient already wired."""
-    p = EmbedServerEmbeddingProvider(v=None, output_dimensions=4)
+    p = EmbedServerEmbeddingProvider(v=None, output_dimensions=4, request_dimensions=request_dimensions)
     p._client = client
     return p
 
@@ -45,7 +45,8 @@ async def test_embed_single_routes_to_embed_texts(stub_client):
     result = await provider.embed("hello")
 
     assert result == [0.1, 0.2, 0.3, 0.4]
-    stub_client.embed_texts.assert_awaited_once_with(["hello"])
+    # dimensions is always forwarded; None means "don't truncate" (see below).
+    stub_client.embed_texts.assert_awaited_once_with(["hello"], dimensions=None)
 
 
 async def test_embed_batch_routes_to_embed_texts(stub_client):
@@ -55,13 +56,28 @@ async def test_embed_batch_routes_to_embed_texts(stub_client):
     result = await provider.embed_batch(["a", "b"])
 
     assert len(result) == 2
-    stub_client.embed_texts.assert_awaited_once_with(["a", "b"])
+    stub_client.embed_texts.assert_awaited_once_with(["a", "b"], dimensions=None)
 
 
 async def test_embed_batch_empty_short_circuits(stub_client):
     provider = _provider_with_client(stub_client)
     assert await provider.embed_batch([]) == []
     stub_client.embed_texts.assert_not_called()
+
+
+async def test_request_dimensions_forwarded_for_matryoshka_truncation(stub_client):
+    """``request_dimensions`` becomes the OpenAI ``dimensions`` field.
+
+    A Matryoshka-capable embed server truncates to this width so stored vectors
+    match the configured vector-column size. Unset (None) must not be confused
+    with ``output_dimensions``, which only describes the expected result width.
+    """
+    stub_client.embed_texts.return_value = [[0.1] * 4]
+    provider = _provider_with_client(stub_client, request_dimensions=1920)
+
+    await provider.embed("hello")
+
+    stub_client.embed_texts.assert_awaited_once_with(["hello"], dimensions=1920)
 
 
 # ---------------------------------------------------------------------------

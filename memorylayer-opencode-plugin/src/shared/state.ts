@@ -132,6 +132,23 @@ export function updateSessionInfo(workspaceId: string, sessionId?: string): void
   writeHookState(state);
 }
 
+export function getCheckpointBoundary(hostSessionId: string, transcriptKey: string): number {
+  const entry = readHookState().checkpointBoundaries?.[hostSessionId];
+  return entry?.transcriptKey === transcriptKey ? entry.boundary : 0;
+}
+
+export function acknowledgeCheckpointBoundary(
+  hostSessionId: string,
+  transcriptKey: string,
+  boundary: number,
+): void {
+  const state = readHookState();
+  const boundaries = state.checkpointBoundaries ?? {};
+  boundaries[hostSessionId] = { transcriptKey, boundary };
+  state.checkpointBoundaries = Object.fromEntries(Object.entries(boundaries).slice(-50));
+  writeHookState(state);
+}
+
 /**
  * Get current workspace ID from state
  */

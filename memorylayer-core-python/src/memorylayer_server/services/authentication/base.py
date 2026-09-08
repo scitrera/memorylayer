@@ -18,7 +18,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
 from ...config import (
@@ -36,6 +36,79 @@ from .._plugin_factory import make_service_plugin_base
 # Header names
 HEADER_AUTHORIZATION = "Authorization"
 HEADER_SESSION_ID = "X-Session-ID"
+
+# HTTP methods that must not have side effects. Auth resolves a workspace on
+# EVERY request, so auto-creating during resolution made a plain read create
+# rows: the admin console's cross-workspace list endpoints (GET
+# /v1/admin/{skills,memories,jobs,documents,...}) take ``workspace_id`` as a
+# *filter*, and typing "jgl-field" into that filter box left eight workspaces
+# behind -- one per debounced keystroke (j, jg, jgl, jgl-, ...). The same
+# request shape reaches every one of those endpoints, so the fix belongs here
+# rather than in any single caller.
+SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def request_may_create(request: Request) -> bool:
+    """Whether this request is allowed to materialise resources as a side effect."""
+    return request.method.upper() not in SAFE_HTTP_METHODS
+
+
+async def ensure_resolved_workspace(
+    workspace_service,
+    workspace_id: str,
+    tenant_id: str,
+    *,
+    may_create: bool,
+    implicit_create: bool,
+    explicitly_named: bool,
+) -> None:
+    """Apply the create-during-auth rules. Shared by both authenticators.
+
+    Three cases, in order:
+
+    * **Safe method** (``may_create`` False) — do nothing at all, not even a
+      lookup. A read against a workspace that does not exist finds nothing,
+      which is the correct answer; the admin console's "Filter workspace" box
+      depends on this staying quiet rather than erroring.
+    * **Implicit create enabled** (OSS) — materialise it. A malformed id
+      surfaces as HTTP 400 rather than the service's ``ValueError`` so the
+      broken caller sees which value was rejected.
+    * **Implicit create disabled** (enterprise) — a write that NAMES a
+      workspace must name one that exists, so a missing one is 404 here rather
+      than an opaque foreign-key 500 from whatever the handler writes first.
+      Only checked when the caller named it: falling back to ``_default`` or to
+      the session's workspace is not a request to use a specific workspace, and
+      failing those would deadlock bootstrap (``POST /v1/workspaces`` itself
+      resolves ``_default`` on its way to creating the first workspace).
+    """
+    if not may_create:
+        return
+
+    if implicit_create:
+        try:
+            await workspace_service.ensure_workspace(
+                workspace_id=workspace_id,
+                tenant_id=tenant_id,
+                auto_create=True,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return
+
+    if not explicitly_named:
+        return
+
+    if await workspace_service.ensure_workspace(
+        workspace_id=workspace_id,
+        tenant_id=tenant_id,
+        auto_create=False,
+    ):
+        return
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"workspace not found: {workspace_id}",
+    )
 
 
 class AuthenticationError(Exception):
@@ -95,6 +168,7 @@ class AuthenticationService(ABC):
         request_workspace_id: str | None,
         session: Optional["Session"],
         tenant_id: str,
+        allow_create: bool = True,
     ) -> str:
         """
         Resolve effective workspace_id using priority order.
@@ -104,12 +178,16 @@ class AuthenticationService(ABC):
         2. session.workspace_id (from session)
         3. DEFAULT_WORKSPACE_ID ("_default")
 
-        Also ensures workspace exists (auto-creates in OSS).
+        Ensures the workspace exists (auto-creating in OSS) only when
+        ``allow_create`` is set. Resolution always yields an id either way —
+        a read of a workspace that does not exist simply finds nothing.
 
         Args:
             request_workspace_id: Explicit workspace from request body
             session: Resolved session (may be None)
             tenant_id: Tenant ID for auto-creation
+            allow_create: Whether this request may create the workspace as a
+                side effect. Callers pass False for safe HTTP methods.
 
         Returns:
             Resolved workspace_id
@@ -172,21 +250,45 @@ class AuthenticationService(ABC):
         session_id = request.headers.get(HEADER_SESSION_ID)
         session = await self.resolve_session(session_id) if session_id else None
 
-        # 4. Extract workspace_id from body or X-Workspace-ID header
+        # 4. Extract workspace_id from (in order): request body, query string,
+        # ``X-Workspace-ID`` header. Many endpoints accept ``workspace_id`` as a
+        # FastAPI ``Query`` parameter (e.g. /v1/threads/{id}/messages,
+        # /v1/memories) and then use it in preference to the context's
+        # workspace. Without the query fallback, resolve_workspace's auto-create
+        # ensures a DIFFERENT workspace than the handler goes on to write to.
+        #
+        # That is not cosmetic: ``chat_threads.workspace_id`` is a foreign key
+        # onto ``workspaces(id)``, so appending to a thread in a workspace that
+        # was never created fails with a bare sqlite IntegrityError, surfaced as
+        # an opaque 500 "Failed to append messages" naming nothing about the
+        # workspace. Routes whose body model has no ``workspace_id`` field at
+        # all — MessagesAppendRequest is one — hit this on EVERY call, so a
+        # client using any workspace other than "_default" cannot append.
+        #
+        # The Aether authenticator has carried this fallback for a while; this
+        # is the same fix on the default (OSS) path, in the same order.
         request_workspace_id = getattr(body, "workspace_id", None) if body else None
+        if not request_workspace_id:
+            request_workspace_id = request.query_params.get("workspace_id")
         if not request_workspace_id:
             request_workspace_id = request.headers.get("X-Workspace-ID")
 
         # 5. Resolve effective workspace
+        may_create = request_may_create(request)
         workspace_id = await self.resolve_workspace(
             request_workspace_id=request_workspace_id,
             session=session,
             tenant_id=identity.tenant_id,
+            allow_create=may_create,
         )
 
         # Implicit session creation: if session_id was provided but session
-        # not found, and client explicitly provided a workspace, auto-create
-        if session_id and session is None and request_workspace_id:
+        # not found, and client explicitly provided a workspace, auto-create.
+        # Held to the same rule as the workspace above -- a session row carries
+        # a workspace foreign key, so creating one on a GET both violates the
+        # method's contract and can fail against a workspace that (correctly)
+        # was not created either.
+        if may_create and session_id and session is None and request_workspace_id:
             session = await self.ensure_session(session_id, workspace_id, identity.tenant_id)
 
         self.logger.debug(

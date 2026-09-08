@@ -1,6 +1,6 @@
 [project]
 name = "memorylayer-client"
-version = "0.1.22"
+version = "0.2.0"
 description = "Python SDK for MemoryLayer.ai - memory infrastructure for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,6 +20,12 @@ classifiers = [
 dependencies = [
     "httpx>=0.26.0",
     "pydantic==2.13.4",
+    # parse_skill_folder parses SKILL.md YAML frontmatter, which is NESTED
+    # (metadata.scitrera.{prereq_skills: [...], preferred_model}). Without PyYAML
+    # the parser silently falls back to a flat key:value line-parser that mangles
+    # nested maps/lists into empty strings — corrupting seeded skill metadata. It
+    # is a base requirement, not optional.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -27,7 +33,7 @@ dependencies = [
 # (cowork, enterprise integrations) can route through proxy_http_async on
 # a shared Aether SDK connection. Default httpx transport stays dep-light.
 aether = [
-    "scitrera-aether-client>=0.1.59",
+    "scitrera-aether-client>=0.2.2",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -38,7 +44,7 @@ dev = [
     # Pulled into dev so ``tests/test_transport_aether.py`` can import
     # ``scitrera_aether_client.proxy``. Mirrors the optional ``aether`` extra
     # so the test environment matches a real Aether-enabled install.
-    "scitrera-aether-client>=0.1.59",
+    "scitrera-aether-client>=0.2.2",
 ]
 
 [project.urls]
@@ -53,6 +59,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
 packages = ["src/memorylayer"]
+
+[tool.hatch.build]
+# Package builders must exclude local state even when building from a dirty checkout.
+exclude = [
+    "**/.omc/**", "**/.claude/**", "**/.codex/**", "**/.agents/**", "**/.slop/**",
+    "**/.venv/**", "**/__pycache__/**", "**/node_modules/**",
+    "**/.env", "**/.env.*", "**/.mcp.json",
+    "**/*.db", "**/*.db-shm", "**/*.db-wal", "**/*.sqlite", "**/*.sqlite3",
+    "**/*.pem", "**/*.key", "**/*.pyc",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memorylayer"]

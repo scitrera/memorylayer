@@ -41,8 +41,14 @@ class ChatService(ABC):
         self,
         workspace_id: str,
         thread_id: str,
+        user_id: str | None = None,
     ) -> ChatThread | None:
-        """Get thread metadata by ID."""
+        """Get thread metadata by ID, scoped by owner.
+
+        ``user_id`` scopes the lookup to the owner of a user-owned (``_user_chat``)
+        thread — required so a shared client id like ``"_default"`` resolves to the
+        correct human's thread. ``None`` matches workspace-owned (NULL user) rows.
+        """
         pass
 
     @abstractmethod
@@ -53,8 +59,52 @@ class ChatService(ABC):
         limit: int = 50,
         offset: int = 0,
         scope_filter: str | None = None,
+        ownership_filter: str | None = None,
+        include_hidden: bool = False,
+        parent_thread: str | None = None,
     ) -> list[ChatThread]:
-        """List threads in a workspace, optionally filtered by user and scope."""
+        """List threads in a workspace, optionally filtered by user, scope, and ownership.
+
+        ``include_hidden=False`` (default) excludes archived/hidden threads.
+        ``parent_thread=None`` (default) returns only top-level threads; pass a
+        parent id to list that thread's sub-threads.
+        """
+        pass
+
+    @abstractmethod
+    async def list_user_threads(
+        self,
+        tenant_id: str,
+        user_id: str,
+        *,
+        ownership: str = 'user',
+        scope_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        include_hidden: bool = False,
+        parent_thread: str | None = None,
+    ) -> list[ChatThread]:
+        """List threads owned by a user across all workspaces.
+
+        Unlike list_threads, this method is keyed on (tenant_id, user_id, ownership)
+        and returns threads regardless of workspace. Used for the user-session-scoped
+        right rail in the web app. ``include_hidden=False`` excludes archived threads.
+        ``parent_thread=None`` returns only top-level threads.
+        """
+        pass
+
+    @abstractmethod
+    async def hide_thread(
+        self, workspace_id: str, thread_id: str, user_id: str | None = None
+    ) -> ChatThread | None:
+        """Archive (hide) a thread without deleting it, scoped by owner."""
+        pass
+
+    @abstractmethod
+    async def unhide_thread(
+        self, workspace_id: str, thread_id: str, user_id: str | None = None
+    ) -> ChatThread | None:
+        """Restore (un-archive) a previously hidden thread, scoped by owner."""
         pass
 
     @abstractmethod
@@ -62,9 +112,10 @@ class ChatService(ABC):
         self,
         workspace_id: str,
         thread_id: str,
+        user_id: str | None = None,
         **updates,
     ) -> ChatThread | None:
-        """Update thread fields (e.g. title, metadata)."""
+        """Update thread fields (e.g. title, metadata), scoped by owner."""
         pass
 
     @abstractmethod
@@ -72,8 +123,9 @@ class ChatService(ABC):
         self,
         workspace_id: str,
         thread_id: str,
+        user_id: str | None = None,
     ) -> bool:
-        """Delete a thread and all its messages."""
+        """Delete a thread and all its messages, scoped by owner."""
         pass
 
     @abstractmethod
@@ -83,8 +135,14 @@ class ChatService(ABC):
         thread_id: str,
         input: AppendMessagesInput,
         tenant_id: str = "",
+        user_id: str | None = None,
     ) -> list[ChatMessage]:
-        """Append messages to a thread. Auto-creates the thread if it doesn't exist."""
+        """Append messages to a thread. Auto-creates the thread if it doesn't exist.
+
+        ``user_id``, when provided, is stamped as the owner on an auto-created
+        thread (used to attribute user-owned ``_user_chat`` threads to the OBO
+        human subject).
+        """
         pass
 
     @abstractmethod
@@ -96,8 +154,9 @@ class ChatService(ABC):
         offset: int = 0,
         after_index: int | None = None,
         order: str = "asc",
+        user_id: str | None = None,
     ) -> list[ChatMessage]:
-        """Get messages from a thread with pagination."""
+        """Get messages from a thread with pagination, scoped by owner."""
         pass
 
     @abstractmethod
@@ -108,8 +167,9 @@ class ChatService(ABC):
         limit: int = 100,
         offset: int = 0,
         order: str = "asc",
+        user_id: str | None = None,
     ) -> ChatThreadWithMessages | None:
-        """Get thread metadata with messages inlined."""
+        """Get thread metadata with messages inlined, scoped by owner."""
         pass
 
     @abstractmethod
@@ -118,8 +178,9 @@ class ChatService(ABC):
         workspace_id: str,
         thread_id: str,
         message_id: str,
+        user_id: str | None = None,
     ) -> bool:
-        """Delete a single message from a thread.
+        """Delete a single message from a thread, scoped by owner.
 
         Returns True if found and deleted, False if not found.
         Idempotent: a missing message returns False without raising.
@@ -131,8 +192,9 @@ class ChatService(ABC):
         self,
         workspace_id: str,
         thread_id: str,
+        user_id: str | None = None,
     ) -> DecompositionResult:
-        """Trigger on-demand memory decomposition for unprocessed messages."""
+        """Trigger on-demand memory decomposition for unprocessed messages, scoped by owner."""
         pass
 
 

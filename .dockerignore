@@ -1,0 +1,64 @@
+# Version-control and local configuration. These files are never runtime input
+# and may contain developer identity, endpoints, or credentials.
+.git
+.git/**
+**/.git
+**/.git/**
+**/.env
+**/.env.*
+!**/.env.example
+**/.mcp.json
+
+# Agent/editor state and scratch work. In particular, .slop commonly contains
+# local virtualenvs, cloned references, and experimental data measured in
+# hundreds of megabytes; it must never cross the Docker build-context boundary.
+**/.claude
+**/.claude/**
+**/.codex
+**/.codex/**
+**/.agents
+**/.agents/**
+**/.omc
+**/.omc/**
+**/.slop
+**/.slop/**
+
+# Local dependency trees and generated Python artifacts.
+**/.venv
+**/.venv/**
+**/node_modules
+**/node_modules/**
+**/node-modules
+**/node-modules/**
+**/__pycache__
+**/__pycache__/**
+**/*.pyc
+**/*.pyo
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+**/*.pem
+**/*.key
+**/.mypy_cache
+**/.mypy_cache/**
+**/.pytest_cache
+**/.pytest_cache/**
+**/.ruff_cache
+**/.ruff_cache/**
+**/.coverage
+**/.coverage.*
+**/htmlcov
+**/htmlcov/**
+**/dist
+**/dist/**
+**/build
+**/build/**
+**/*.egg-info
+**/*.egg-info/**
+
+# Benchmark result caches are development data, not package source. The
+# package's runtime evaluation fixtures live under src/ and remain included.
+memorylayer-core-python/benchmarks
+memorylayer-core-python/benchmarks/**

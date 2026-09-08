@@ -106,6 +106,7 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
                         similar_memories=candidates,
                         threshold=self.SIMILARITY_THRESHOLD,
                         new_memory_content=content,
+                        allow_generation=payload.get("allow_generation", True),
                     )
                     logger.info(
                         "Created %d auto-association(s) for memory %s in workspace %s",
@@ -123,7 +124,7 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
             logger.debug("No similar memories found for %s in workspace %s", memory_id, workspace_id)
 
         # Type classification (when flag is set)
-        if payload.get("classify_type", False):
+        if payload.get("allow_generation", True) and payload.get("classify_type", False):
             try:
                 extraction_service = self.get_extension(EXT_EXTRACTION_SERVICE, v)
                 classified_type, classified_subtype = await extraction_service.classify_content(content)

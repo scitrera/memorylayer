@@ -10,6 +10,7 @@ from logging import Logger
 from scitrera_app_framework import Variables, get_extension
 
 from ....config import RerankerProviderType
+from ....models.generation import GenerationActivity
 from ...llm import EXT_LLM_SERVICE
 from ..base import RerankerProvider, RerankerProviderPluginBase
 
@@ -36,6 +37,8 @@ class LLMRerankerProvider(RerankerProvider):
     This is a fallback provider when dedicated reranker models are unavailable.
     It's slower and more expensive than dedicated models but works with any LLM.
     """
+
+    generative = True
 
     def __init__(self, v: Variables = None, llm_service=None):
         super().__init__(v)
@@ -84,7 +87,11 @@ class LLMRerankerProvider(RerankerProvider):
         )
 
         try:
-            response = await self.llm_service.synthesize(prompt, profile="reranker")
+            response = await self.llm_service.synthesize(
+                prompt,
+                profile="reranker",
+                activity=GenerationActivity.RERANKING,
+            )
 
             # Parse JSON array from response
             import json

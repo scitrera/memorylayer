@@ -9,12 +9,13 @@ Extension Points:
 - reranker-service: High-level service wrapping providers
 """
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from logging import Logger
 from typing import Any
 
-from scitrera_app_framework import get_logger
+from scitrera_app_framework import get_extension, get_logger
 from scitrera_app_framework.api import Plugin, Variables, enabled_option_pattern
 
 from ...config import (
@@ -26,7 +27,7 @@ from ...config import (
     MEMORYLAYER_RERANKER_SERVICE,
     assert_supported_reranker_provider,
 )
-from .._constants import EXT_RERANKER_PROVIDER, EXT_RERANKER_SERVICE
+from .._constants import EXT_METRICS_SERVICE, EXT_RERANKER_PROVIDER, EXT_RERANKER_SERVICE
 from .._plugin_factory import make_service_plugin_base
 
 
@@ -46,6 +47,8 @@ class RerankerProvider(ABC):
     Implementations provide low-level document reranking against queries.
     Can be text-only or multimodal (supporting images/video).
     """
+
+    generative: bool = False
 
     def __init__(self, v: Variables = None):
         self.logger = get_logger(v, name=self.__class__.__name__)
@@ -145,6 +148,40 @@ class RerankerService:
     def __init__(self, provider: RerankerProvider, v: Variables = None):
         self.provider = provider
         self.logger = get_logger(v, name=self.__class__.__name__)
+        try:
+            self.metrics = get_extension(EXT_METRICS_SERVICE, v) if v is not None else None
+        except Exception:
+            self.metrics = None
+
+    async def _provider_call(self, awaitable, document_count: int):
+        started = time.monotonic()
+        try:
+            result = await awaitable
+        except Exception:
+            self._record_model_call("failed", document_count, time.monotonic() - started)
+            raise
+        self._record_model_call("completed", document_count, time.monotonic() - started)
+        return result
+
+    def _record_model_call(self, outcome: str, document_count: int, elapsed_seconds: float) -> None:
+        """Count dedicated rerankers without double-counting LLM-backed providers."""
+        if self.metrics is None or self.provider.generative:
+            return
+        labels = {"outcome": outcome}
+        try:
+            self.metrics.counter("memorylayer_reranker_calls_total", labels=labels)
+            self.metrics.counter(
+                "memorylayer_reranker_documents_total",
+                document_count,
+                labels=labels,
+            )
+            self.metrics.histogram(
+                "memorylayer_reranker_latency_seconds",
+                elapsed_seconds,
+                labels=labels,
+            )
+        except Exception:
+            self.logger.debug("Reranker metric emission failed", exc_info=True)
 
     async def rerank(
         self,
@@ -153,7 +190,10 @@ class RerankerService:
         instruction: str | None = None,
     ) -> list[float]:
         """Score documents by relevance to query."""
-        return await self.provider.rerank(query, documents, instruction)
+        return await self._provider_call(
+            self.provider.rerank(query, documents, instruction),
+            len(documents),
+        )
 
     async def rerank_with_indices(
         self,
@@ -163,7 +203,10 @@ class RerankerService:
         top_k: int | None = None,
     ) -> list[tuple[int, float]]:
         """Score documents and return sorted indices with scores."""
-        return await self.provider.rerank_with_indices(query, documents, instruction, top_k)
+        return await self._provider_call(
+            self.provider.rerank_with_indices(query, documents, instruction, top_k),
+            len(documents),
+        )
 
     async def rerank_objects(
         self,
@@ -193,7 +236,7 @@ class RerankerService:
         documents = [content_fn(obj) for obj in objects]
 
         # Get ranked indices
-        ranked = await self.provider.rerank_with_indices(query, documents, instruction, top_k)
+        ranked = await self.rerank_with_indices(query, documents, instruction, top_k)
 
         # Build results with original objects
         results = [RerankResult(index=idx, score=score, document=objects[idx]) for idx, score in ranked]

@@ -11,6 +11,7 @@ from memorylayer_server.models.auth import (
     PrincipalRef,
     RequestContext,
 )
+from memorylayer_server.services.authentication import AuthenticationError
 from memorylayer_server.services.authentication.aether import (
     HEADER_AUTH_ACTOR_ID,
     HEADER_AUTH_ACTOR_TYPE,
@@ -301,8 +302,10 @@ class TestBuildContext:
         assert ctx.effective_subject_id() == ctx.user_id == "alice"
 
     @pytest.mark.asyncio
-    async def test_no_headers_falls_back_to_default_tenant(self):
+    async def test_no_headers_fails_closed(self):
+        # Fail-closed: absent X-Auth-Tenant-ID raises 401 (no default-tenant fallback
+        # unless MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT dev opt-in is set).
         req = _make_request({})
-        ctx = await self.svc.build_context(req)
-        assert ctx.tenant_id is not None  # DEFAULT_TENANT_ID
-        assert ctx.authority.mode == "direct"
+        with pytest.raises(AuthenticationError) as exc_info:
+            await self.svc.build_context(req)
+        assert exc_info.value.status_code == 401

@@ -1,5 +1,6 @@
 """Turso/libSQL storage backend with native vector support."""
 
+import asyncio
 import hashlib
 import json
 import struct
@@ -25,12 +26,38 @@ from ...config import (
     MEMORYLAYER_TURSO_VECTOR_INDEX,
 )
 from ...models.association import AssociateInput, Association, GraphPath, GraphQueryResult
-from ...models.memory import Memory, MemoryStatus, MemoryType, RememberInput
+from ...models.memory import (
+    Memory,
+    MemoryMutation,
+    MemoryMutationResult,
+    MemoryRevision,
+    MemoryStatus,
+    MemoryType,
+    RememberInput,
+)
 from ...models.session import Session, WorkingMemory
-from ...models.workspace import Context, Workspace
-from ...utils import generate_id, parse_datetime_utc, utc_now_iso
+from ...models.versioned_resource import (
+    VersionedResource,
+    VersionedResourceConflictError,
+    VersionedResourceMutation,
+    VersionedResourceMutationResult,
+    VersionedResourceNotFoundError,
+    VersionedResourcePreconditionFailedError,
+    VersionedResourceRevision,
+)
+from ...models.workspace import Context, Workspace, normalize_tags
+from ...utils import generate_id, parse_datetime_utc, to_utc_iso, utc_now_iso
 from ..contradiction.base import ContradictionRecord
+from ..memory.versioning import (
+    SEMANTIC_MEMORY_FIELDS,
+    memory_etag,
+    memory_revision_snapshot,
+    memory_semantic_state,
+)
+from ..skills.versioning import canonical_hash
 from .base import StorageBackend, StoragePluginBase
+from .versioned_resources import RelationalVersionedResourceStore
+from .workspace_purge import purge_workspace
 
 if TYPE_CHECKING:
     pass
@@ -44,6 +71,7 @@ _UPDATABLE_MEMORY_COLUMNS = frozenset(
         "importance",
         "tags",
         "metadata",
+        "refinement_metadata",
         "embedding",
         "abstract",
         "overview",
@@ -71,7 +99,10 @@ _UPDATABLE_THREAD_COLUMNS = frozenset(
         "max_messages",
         "ttl_seconds",
         "expires_at",
+        "idle_action",
+        "hidden_at",
         "last_decomposed_index",
+        "last_decomposed_at",
     }
 )
 
@@ -104,6 +135,8 @@ class TursoStorageBackend(StorageBackend):
         self.vector_index = vector_index
         self._connection = None
         self._sync_connection = None  # For replica mode (sync connection wrapper)
+        self._versioned_resource_store: RelationalVersionedResourceStore | None = None
+        self._memory_mutation_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         """Initialize storage connection based on configured mode."""
@@ -114,13 +147,13 @@ class TursoStorageBackend(StorageBackend):
         if self.mode == "local":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             self.logger.info("Connecting to local Turso/libSQL database at %s", Path(self.db_path).absolute())
-            self._connection = await turso.aio.connect(self.db_path, experimental_features="index_method")
+            self._connection = await turso.aio.connect(self.db_path, experimental_features="index_method,triggers")
 
         elif self.mode == "remote":
             if not self.url:
                 raise ValueError("MEMORYLAYER_TURSO_URL is required for remote mode")
             self.logger.info("Connecting to remote Turso database at %s", self.url)
-            self._connection = await turso.aio.connect(self.url, experimental_features="index_method")
+            self._connection = await turso.aio.connect(self.url, experimental_features="index_method,triggers")
 
         elif self.mode == "replica":
             if not self.url:
@@ -143,7 +176,7 @@ class TursoStorageBackend(StorageBackend):
             self._sync_connection = sync_conn
 
             # Also open an async connection to the local file for query operations
-            self._connection = await turso.aio.connect(self.db_path, experimental_features="index_method")
+            self._connection = await turso.aio.connect(self.db_path, experimental_features="index_method,triggers")
 
         else:
             raise ValueError(f"Invalid MEMORYLAYER_TURSO_MODE: {self.mode!r} (expected: local, remote, replica)")
@@ -160,6 +193,9 @@ class TursoStorageBackend(StorageBackend):
 
         # Create tables
         await self._create_tables()
+        await self._adopt_legacy_memories()
+        self._versioned_resource_store = RelationalVersionedResourceStore(self._connection)
+        await self._versioned_resource_store.create_tables()
 
         # Ensure reserved entities exist
         await self._ensure_reserved_entities()
@@ -185,6 +221,7 @@ class TursoStorageBackend(StorageBackend):
             await self._connection.close()
             self.logger.info("Disconnected from Turso/libSQL database")
             self._connection = None
+            self._versioned_resource_store = None
 
     async def health_check(self) -> bool:
         """Check if storage is healthy."""
@@ -206,10 +243,18 @@ class TursoStorageBackend(StorageBackend):
                 tenant_id TEXT NOT NULL,
                 name TEXT NOT NULL,
                 settings TEXT DEFAULT '{}',
+                tags TEXT DEFAULT '[]',
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
             )
         """)
+
+        # Add tags column (idempotent migration for existing databases)
+        try:
+            await self._connection.execute("ALTER TABLE workspaces ADD COLUMN tags TEXT DEFAULT '[]'")
+            await self._connection.commit()
+        except Exception:
+            pass  # Column already exists — expected on databases created after the schema update
 
         # Contexts
         await self._connection.execute("""
@@ -230,6 +275,7 @@ class TursoStorageBackend(StorageBackend):
         await self._connection.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
+                logical_key TEXT,
                 tenant_id TEXT NOT NULL DEFAULT '_default',
                 workspace_id TEXT NOT NULL,
                 context_id TEXT NOT NULL DEFAULT '_default',
@@ -243,6 +289,7 @@ class TursoStorageBackend(StorageBackend):
                 importance REAL DEFAULT 0.5,
                 tags TEXT DEFAULT '[]',
                 metadata TEXT DEFAULT '{}',
+                refinement_metadata TEXT NOT NULL DEFAULT '{}',
                 embedding BLOB,
                 abstract TEXT,
                 overview TEXT,
@@ -258,6 +305,8 @@ class TursoStorageBackend(StorageBackend):
                 decay_factor REAL DEFAULT 1.0,
                 status TEXT DEFAULT 'active',
                 pinned INTEGER DEFAULT 0,
+                revision INTEGER NOT NULL DEFAULT 0,
+                etag TEXT NOT NULL DEFAULT '',
                 deleted_at TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
@@ -277,6 +326,55 @@ class TursoStorageBackend(StorageBackend):
         )
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_common ON memories(workspace_id, type, created_at DESC) WHERE deleted_at IS NULL"
+        )
+        for column_sql in (
+            "ALTER TABLE memories ADD COLUMN logical_key TEXT",
+            "ALTER TABLE memories ADD COLUMN refinement_metadata TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE memories ADD COLUMN revision INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE memories ADD COLUMN etag TEXT NOT NULL DEFAULT ''",
+        ):
+            try:
+                await self._connection.execute(column_sql)
+            except Exception as exc:
+                self.logger.debug("Column migration note for '%s': %s", column_sql, exc)
+        await self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_turso_memories_workspace_key_global "
+            "ON memories(workspace_id, logical_key) "
+            "WHERE user_id IS NULL AND logical_key IS NOT NULL"
+        )
+        await self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_turso_memories_workspace_user_key "
+            "ON memories(workspace_id, user_id, logical_key) "
+            "WHERE user_id IS NOT NULL AND logical_key IS NOT NULL"
+        )
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS memory_revisions (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                memory_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                snapshot TEXT NOT NULL,
+                action TEXT NOT NULL,
+                operation_id TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                UNIQUE(tenant_id, workspace_id, memory_id, revision)
+            )
+        """)
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS memory_operations (
+                tenant_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                operation_id TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                memory_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                PRIMARY KEY(tenant_id, workspace_id, operation_id)
+            )
+        """)
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_turso_memory_revisions_resource "
+            "ON memory_revisions(tenant_id, workspace_id, memory_id, sequence DESC)"
         )
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(workspace_id, status) WHERE deleted_at IS NULL"
@@ -397,9 +495,16 @@ class TursoStorageBackend(StorageBackend):
         )
 
         # Chat threads
+        #
+        # Owner-scoped identity: ``row_id`` is an opaque storage-internal surrogate
+        # PK (the only value chat_messages.thread_id references); the client-facing
+        # ``id`` is stored verbatim and is unique PER OWNER via
+        # UNIQUE(workspace_id, COALESCE(user_id,''), id) below. This replaces the
+        # old global id-as-PK + ``::u::<hash>`` id materialization for _user_chat.
         await self._connection.execute("""
             CREATE TABLE IF NOT EXISTS chat_threads (
-                id TEXT PRIMARY KEY,
+                row_id TEXT PRIMARY KEY,
+                id TEXT NOT NULL,
                 workspace_id TEXT NOT NULL,
                 tenant_id TEXT NOT NULL DEFAULT '_default',
                 user_id TEXT,
@@ -415,6 +520,10 @@ class TursoStorageBackend(StorageBackend):
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 scope TEXT,
+                ownership TEXT NOT NULL DEFAULT 'user',
+                idle_action TEXT,
+                hidden_at TEXT,
+                parent_thread TEXT,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces (id)
             )
         """)
@@ -422,14 +531,58 @@ class TursoStorageBackend(StorageBackend):
         await self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_threads_user ON chat_threads(workspace_id, user_id) WHERE user_id IS NOT NULL"
         )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_threads_tenant_user_ownership "
+            "ON chat_threads(tenant_id, user_id, ownership) WHERE user_id IS NOT NULL"
+        )
         # Migrate: add scope column to existing Turso databases (idempotent).
         try:
             await self._connection.execute("ALTER TABLE chat_threads ADD COLUMN scope TEXT")
             await self._connection.commit()
         except Exception:
             pass  # Column already exists — expected on databases created after the schema update
+        # Migrate: add ownership column to existing Turso databases (idempotent).
+        try:
+            await self._connection.execute(
+                "ALTER TABLE chat_threads ADD COLUMN ownership TEXT NOT NULL DEFAULT 'user'"
+            )
+            await self._connection.commit()
+        except Exception:
+            pass  # Column already exists — expected on databases created after the schema update
+        # Migrate: idle policy columns (idempotent) + scan indexes.
+        for _alter in (
+            "ALTER TABLE chat_threads ADD COLUMN idle_action TEXT",
+            "ALTER TABLE chat_threads ADD COLUMN hidden_at TEXT",
+            "ALTER TABLE chat_threads ADD COLUMN parent_thread TEXT",
+        ):
+            try:
+                await self._connection.execute(_alter)
+                await self._connection.commit()
+            except Exception:
+                pass  # Column already exists
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_threads_idle ON chat_threads(updated_at) WHERE idle_action IS NOT NULL"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_threads_hidden ON chat_threads(hidden_at) WHERE hidden_at IS NOT NULL"
+        )
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_threads_parent ON chat_threads(parent_thread) WHERE parent_thread IS NOT NULL"
+        )
+        # Owner-scoped identity: the client id is unique PER OWNER, not globally.
+        # COALESCE(user_id,'') scopes user-owned threads (in the _user_chat
+        # sentinel) by their OBO subject, while workspace-owned threads (user_id
+        # NULL) are scoped by (workspace_id, id). This replaces the old global
+        # UNIQUE(workspace_id, id) + the ``::u::<hash>`` id materialization.
+        await self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_threads_ws_user_id "
+            "ON chat_threads(workspace_id, COALESCE(user_id, ''), id)"
+        )
 
         # Chat messages
+        #
+        # thread_id references the thread's surrogate ``row_id`` (NOT its client
+        # id), so a per-owner client id like "_default" is unambiguous.
         await self._connection.execute("""
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id TEXT PRIMARY KEY,
@@ -440,12 +593,72 @@ class TursoStorageBackend(StorageBackend):
                 content TEXT NOT NULL,
                 metadata TEXT DEFAULT '{}',
                 created_at TEXT NOT NULL,
-                FOREIGN KEY (thread_id) REFERENCES chat_threads (id) ON DELETE CASCADE
+                FOREIGN KEY (thread_id) REFERENCES chat_threads (row_id) ON DELETE CASCADE
             )
         """)
         await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, message_index)")
         await self._connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_workspace ON chat_messages(workspace_id, thread_id)")
 
+        await self._connection.commit()
+
+    async def _adopt_legacy_memories(self) -> None:
+        """Give pre-versioning libSQL rows a deterministic revision-one head."""
+
+        cursor = await self._connection.execute(
+            "SELECT * FROM memories WHERE revision = 0 OR etag = ''"
+        )
+        for row in await cursor.fetchall():
+            memory = self._row_to_memory(row)
+            final = memory.model_copy(update={"revision": 1})
+            final = final.model_copy(update={"etag": memory_etag(1, final)})
+            operation_id = f"legacy-adopt:{final.id}"
+            request_hash = canonical_hash(
+                {
+                    "action": "create",
+                    "state": memory_semantic_state(final),
+                    "legacy_adoption": True,
+                }
+            )
+            updated = await self._connection.execute(
+                "UPDATE memories SET revision = ?, etag = ? "
+                "WHERE id = ? AND workspace_id = ? AND revision = 0",
+                (final.revision, final.etag, final.id, final.workspace_id),
+            )
+            if updated.rowcount == 0:
+                continue
+            await self._connection.execute(
+                """
+                INSERT INTO memory_revisions (
+                    tenant_id, workspace_id, memory_id, revision, snapshot,
+                    action, operation_id, request_hash
+                ) VALUES (?, ?, ?, ?, ?, 'create', ?, ?)
+                """,
+                (
+                    final.tenant_id,
+                    final.workspace_id,
+                    final.id,
+                    final.revision,
+                    _turso_memory_snapshot_json(final),
+                    operation_id,
+                    request_hash,
+                ),
+            )
+            await self._connection.execute(
+                """
+                INSERT INTO memory_operations (
+                    tenant_id, workspace_id, operation_id, request_hash,
+                    memory_id, revision
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    final.tenant_id,
+                    final.workspace_id,
+                    operation_id,
+                    request_hash,
+                    final.id,
+                    final.revision,
+                ),
+            )
         await self._connection.commit()
 
     async def _ensure_reserved_entities(self) -> None:
@@ -496,58 +709,61 @@ class TursoStorageBackend(StorageBackend):
 
         content_hash = hashlib.sha256(input.content.encode()).hexdigest()
         memory_id = generate_id("mem")
-        now = utc_now_iso()
-
-        await self._connection.execute(
-            """
-            INSERT INTO memories (id, tenant_id, workspace_id, context_id, session_id, user_id,
-                                  content, content_hash, type, subtype, category,
-                                  importance, tags, metadata, abstract, overview,
-                                  source_memory_id, status, pinned,
-                                  observer_id, subject_id,
-                                  source_document_id, source_page_id,
-                                  source_dataset_id, source_thread_id,
-                                  created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                memory_id,
-                getattr(input, "tenant_id", None) or DEFAULT_TENANT_ID,
-                workspace_id,
-                getattr(input, "context_id", None) or "_default",
-                getattr(input, "session_id", None),
-                input.user_id,
-                input.content,
-                content_hash,
-                input.type.value if input.type else MemoryType.SEMANTIC.value,
-                input.subtype if input.subtype else None,
-                getattr(input, "category", None),
-                input.importance,
-                json.dumps(input.tags),
-                json.dumps(input.metadata),
-                getattr(input, "abstract", None),
-                getattr(input, "overview", None),
-                getattr(input, "source_memory_id", None),
-                MemoryStatus.ACTIVE.value,
-                0,
-                getattr(input, "observer_id", None),
-                getattr(input, "subject_id", None),
-                getattr(input, "source_document_id", None),
-                getattr(input, "source_page_id", None),
-                getattr(input, "source_dataset_id", None),
-                getattr(input, "source_thread_id", None),
-                now,
-                now,
-            ),
+        now = datetime.now(UTC)
+        memory = Memory(
+            id=memory_id,
+            logical_key=input.logical_key,
+            tenant_id=getattr(input, "tenant_id", None) or DEFAULT_TENANT_ID,
+            workspace_id=workspace_id,
+            context_id=getattr(input, "context_id", None) or "_default",
+            session_id=getattr(input, "session_id", None),
+            user_id=input.user_id,
+            content=input.content,
+            content_hash=content_hash,
+            type=input.type or MemoryType.SEMANTIC,
+            subtype=input.subtype,
+            importance=input.importance,
+            tags=input.tags,
+            metadata=input.metadata,
+            refinement_metadata=input.refinement_metadata,
+            abstract=getattr(input, "abstract", None),
+            overview=getattr(input, "overview", None),
+            source_memory_id=getattr(input, "source_memory_id", None),
+            pinned=input.pinned,
+            observer_id=getattr(input, "observer_id", None),
+            subject_id=getattr(input, "subject_id", None),
+            source_document_id=getattr(input, "source_document_id", None),
+            source_page_id=getattr(input, "source_page_id", None),
+            source_dataset_id=getattr(input, "source_dataset_id", None),
+            source_thread_id=getattr(input, "source_thread_id", None),
+            event_time=getattr(input, "event_time", None),
+            created_at=now,
+            updated_at=now,
         )
+        result = await self.mutate_memory(
+            MemoryMutation(
+                action="create",
+                memory=memory,
+                operation_id=generate_id("op"),
+                request_hash=canonical_hash(
+                    {"action": "create", "state": memory_semantic_state(memory)}
+                ),
+                expected_etag="*",
+            )
+        )
+        return result.memory
 
-        await self._connection.commit()
-        return await self.get_memory(workspace_id, memory_id, track_access=False)
-
-    async def get_memory(self, workspace_id: str, memory_id: str, track_access: bool = True) -> Memory | None:
+    async def get_memory(
+        self,
+        workspace_id: str,
+        memory_id: str,
+        track_access: bool = True,
+        include_deleted: bool = False,
+    ) -> Memory | None:
         """Get memory by ID within a workspace."""
+        deleted_clause = "" if include_deleted else " AND deleted_at IS NULL"
         cursor = await self._connection.execute(
-            "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            f"SELECT * FROM memories WHERE id = ? AND workspace_id = ?{deleted_clause}",
             (memory_id, workspace_id),
         )
         row = await cursor.fetchone()
@@ -557,7 +773,7 @@ class TursoStorageBackend(StorageBackend):
 
         memory = self._row_to_memory(row)
 
-        if track_access:
+        if track_access and memory.deleted_at is None:
             await self._connection.execute(
                 "UPDATE memories SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id = ?",
                 (memory_id,),
@@ -568,10 +784,16 @@ class TursoStorageBackend(StorageBackend):
 
         return memory
 
-    async def get_memory_by_id(self, memory_id: str, track_access: bool = True) -> Memory | None:
+    async def get_memory_by_id(
+        self,
+        memory_id: str,
+        track_access: bool = True,
+        include_deleted: bool = False,
+    ) -> Memory | None:
         """Get memory by ID without workspace filter."""
+        deleted_clause = "" if include_deleted else " AND deleted_at IS NULL"
         cursor = await self._connection.execute(
-            "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL",
+            f"SELECT * FROM memories WHERE id = ?{deleted_clause}",
             (memory_id,),
         )
         row = await cursor.fetchone()
@@ -581,7 +803,7 @@ class TursoStorageBackend(StorageBackend):
 
         memory = self._row_to_memory(row)
 
-        if track_access:
+        if track_access and memory.deleted_at is None:
             await self._connection.execute(
                 "UPDATE memories SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id = ?",
                 (memory_id,),
@@ -598,10 +820,43 @@ class TursoStorageBackend(StorageBackend):
         if invalid_keys:
             raise ValueError(f"Invalid update fields: {invalid_keys}")
 
+        if SEMANTIC_MEMORY_FIELDS.intersection(updates):
+            current = await self.get_memory(
+                workspace_id, memory_id, track_access=False
+            )
+            if current is None:
+                return None
+            semantic_updates = dict(updates)
+            if "content" in semantic_updates and "content_hash" not in semantic_updates:
+                semantic_updates["content_hash"] = hashlib.sha256(
+                    semantic_updates["content"].encode()
+                ).hexdigest()
+            if isinstance(semantic_updates.get("type"), str):
+                semantic_updates["type"] = MemoryType(semantic_updates["type"])
+            desired = current.model_copy(
+                update={**semantic_updates, "updated_at": datetime.now(UTC)}
+            )
+            result = await self.mutate_memory(
+                MemoryMutation(
+                    action="replace",
+                    memory=desired,
+                    operation_id=generate_id("op"),
+                    request_hash=canonical_hash(
+                        {
+                            "action": "replace",
+                            "state": memory_semantic_state(desired),
+                            "expected_etag": current.etag,
+                        }
+                    ),
+                    expected_etag=current.etag,
+                )
+            )
+            return result.memory
+
         set_parts = []
         values = []
         for key, value in updates.items():
-            if key in ("tags", "metadata"):
+            if key in ("tags", "metadata", "refinement_metadata"):
                 set_parts.append(f"{key} = ?")
                 values.append(json.dumps(value))
             elif key == "embedding":
@@ -609,7 +864,7 @@ class TursoStorageBackend(StorageBackend):
                 values.append(self._serialize_embedding(value) if value else None)
             else:
                 set_parts.append(f"{key} = ?")
-                values.append(value)
+                values.append(value.value if isinstance(value, (MemoryType, MemoryStatus)) else value)
 
         if not set_parts:
             return await self.get_memory(workspace_id, memory_id, track_access=False)
@@ -639,18 +894,315 @@ class TursoStorageBackend(StorageBackend):
                 "DELETE FROM memory_associations WHERE (source_id = ? OR target_id = ?) AND workspace_id = ?",
                 (memory_id, memory_id, workspace_id),
             )
+            await self._connection.execute(
+                "DELETE FROM memory_operations WHERE workspace_id = ? AND memory_id = ?",
+                (workspace_id, memory_id),
+            )
+            await self._connection.execute(
+                "DELETE FROM memory_revisions WHERE workspace_id = ? AND memory_id = ?",
+                (workspace_id, memory_id),
+            )
             cursor = await self._connection.execute(
                 "DELETE FROM memories WHERE id = ? AND workspace_id = ?",
                 (memory_id, workspace_id),
             )
         else:
-            cursor = await self._connection.execute(
-                "UPDATE memories SET deleted_at = datetime('now'), status = 'deleted' WHERE id = ? AND workspace_id = ?",
-                (memory_id, workspace_id),
+            current = await self.get_memory(
+                workspace_id, memory_id, track_access=False
             )
+            if current is None:
+                return False
+            now = datetime.now(UTC)
+            desired = current.model_copy(update={"deleted_at": now, "updated_at": now})
+            await self.mutate_memory(
+                MemoryMutation(
+                    action="delete",
+                    memory=desired,
+                    operation_id=generate_id("op"),
+                    request_hash=canonical_hash(
+                        {"action": "delete", "id": memory_id, "expected_etag": current.etag}
+                    ),
+                    expected_etag=current.etag,
+                )
+            )
+            return True
 
         await self._connection.commit()
         return cursor.rowcount > 0
+
+    async def mutate_memory(self, mutation: MemoryMutation) -> MemoryMutationResult:
+        """Atomically mutate the libSQL memory head and immutable sidecars."""
+
+        desired = mutation.memory.model_copy(deep=True)
+        async with self._memory_mutation_lock:
+            replay = await self.get_memory_operation(
+                desired.tenant_id,
+                desired.workspace_id,
+                mutation.operation_id,
+                mutation.request_hash,
+            )
+            if replay is not None:
+                return replay
+
+            current = await self.get_memory(
+                desired.workspace_id,
+                desired.id,
+                track_access=False,
+                include_deleted=True,
+            )
+            if mutation.action == "create":
+                if mutation.expected_etag != "*":
+                    raise VersionedResourcePreconditionFailedError(
+                        "create requires If-None-Match: *"
+                    )
+                if current is not None:
+                    raise VersionedResourceConflictError("memory id already exists")
+                final = desired.model_copy(update={"revision": 1, "deleted_at": None})
+            else:
+                if current is None or current.tenant_id != desired.tenant_id:
+                    raise VersionedResourceNotFoundError("memory not found")
+                if mutation.expected_etag != current.etag:
+                    raise VersionedResourcePreconditionFailedError(
+                        "ETag does not match current revision"
+                    )
+                if mutation.action == "restore":
+                    if current.deleted_at is None:
+                        raise VersionedResourceConflictError("memory is not deleted")
+                elif current.deleted_at is not None:
+                    raise VersionedResourceNotFoundError("memory not found")
+                if (
+                    desired.logical_key != current.logical_key
+                    or desired.user_id != current.user_id
+                    or desired.workspace_id != current.workspace_id
+                ):
+                    raise VersionedResourceConflictError(
+                        "memory logical key and ownership are immutable"
+                    )
+                final = desired.model_copy(
+                    update={
+                        "created_at": current.created_at,
+                        "revision": current.revision + 1,
+                    }
+                )
+            final = final.model_copy(update={"etag": memory_etag(final.revision, final)})
+
+            try:
+                if mutation.action == "create":
+                    await self._insert_memory_head(final)
+                else:
+                    deleted_predicate = (
+                        "deleted_at IS NOT NULL"
+                        if mutation.action == "restore"
+                        else "deleted_at IS NULL"
+                    )
+                    cursor = await self._update_memory_head(
+                        final, current.etag, deleted_predicate
+                    )
+                    if cursor.rowcount == 0:
+                        await self._connection.rollback()
+                        replay = await self.get_memory_operation(
+                            desired.tenant_id,
+                            desired.workspace_id,
+                            mutation.operation_id,
+                            mutation.request_hash,
+                        )
+                        if replay is not None:
+                            return replay
+                        raise VersionedResourcePreconditionFailedError(
+                            "ETag does not match current revision"
+                        )
+
+                await self._connection.execute(
+                    """
+                    INSERT INTO memory_revisions (
+                        tenant_id, workspace_id, memory_id, revision, snapshot,
+                        action, operation_id, request_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        final.tenant_id,
+                        final.workspace_id,
+                        final.id,
+                        final.revision,
+                        _turso_memory_snapshot_json(final),
+                        mutation.action,
+                        mutation.operation_id,
+                        mutation.request_hash,
+                    ),
+                )
+                await self._connection.execute(
+                    """
+                    INSERT INTO memory_operations (
+                        tenant_id, workspace_id, operation_id, request_hash,
+                        memory_id, revision
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        final.tenant_id,
+                        final.workspace_id,
+                        mutation.operation_id,
+                        mutation.request_hash,
+                        final.id,
+                        final.revision,
+                    ),
+                )
+                await self._connection.commit()
+            except Exception as exc:
+                await self._connection.rollback()
+                replay = await self.get_memory_operation(
+                    desired.tenant_id,
+                    desired.workspace_id,
+                    mutation.operation_id,
+                    mutation.request_hash,
+                )
+                if replay is not None:
+                    return replay
+                latest = await self.get_memory(
+                    desired.workspace_id,
+                    desired.id,
+                    track_access=False,
+                    include_deleted=True,
+                )
+                if mutation.action == "create" and (
+                    latest is not None
+                    or await self._memory_logical_key_exists(desired)
+                ):
+                    raise VersionedResourceConflictError(
+                        "memory id or scoped logical_key already exists"
+                    ) from exc
+                if (
+                    mutation.action != "create"
+                    and latest is not None
+                    and latest.etag != mutation.expected_etag
+                ):
+                    raise VersionedResourcePreconditionFailedError(
+                        "ETag does not match current revision"
+                    )
+                raise
+            return MemoryMutationResult(memory=final)
+
+    async def get_memory_operation(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        operation_id: str,
+        request_hash: str,
+    ) -> MemoryMutationResult | None:
+        cursor = await self._connection.execute(
+            """
+            SELECT r.* FROM memory_operations o
+            JOIN memory_revisions r
+              ON r.tenant_id = o.tenant_id AND r.workspace_id = o.workspace_id
+             AND r.memory_id = o.memory_id AND r.revision = o.revision
+            WHERE o.tenant_id = ? AND o.workspace_id = ? AND o.operation_id = ?
+            """,
+            (tenant_id, workspace_id, operation_id),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        if row["request_hash"] != request_hash:
+            raise VersionedResourceConflictError(
+                "idempotency key was already used for a different request"
+            )
+        return MemoryMutationResult(
+            memory=_turso_memory_snapshot(row["snapshot"]), replayed=True
+        )
+
+    async def list_memory_revisions(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        memory_id: str,
+        *,
+        limit: int,
+        before_sequence: int | None = None,
+    ) -> list[MemoryRevision]:
+        clauses = ["tenant_id = ?", "workspace_id = ?", "memory_id = ?"]
+        params: list[Any] = [tenant_id, workspace_id, memory_id]
+        if before_sequence is not None:
+            clauses.append("sequence < ?")
+            params.append(before_sequence)
+        params.append(limit)
+        cursor = await self._connection.execute(
+            f"SELECT * FROM memory_revisions WHERE {' AND '.join(clauses)} "
+            "ORDER BY sequence DESC LIMIT ?",
+            tuple(params),
+        )
+        return [
+            _turso_memory_revision_from_row(row) for row in await cursor.fetchall()
+        ]
+
+    async def _memory_logical_key_exists(self, memory: Memory) -> bool:
+        if not memory.logical_key:
+            return False
+        if memory.user_id is None:
+            owner_clause = "user_id IS NULL"
+            params = (memory.workspace_id, memory.logical_key)
+        else:
+            owner_clause = "user_id = ?"
+            params = (memory.workspace_id, memory.logical_key, memory.user_id)
+        cursor = await self._connection.execute(
+            "SELECT 1 FROM memories WHERE workspace_id = ? AND logical_key = ? "
+            f"AND {owner_clause} LIMIT 1",
+            params,
+        )
+        return await cursor.fetchone() is not None
+
+    async def _insert_memory_head(self, memory: Memory) -> None:
+        await self._connection.execute(
+            """
+            INSERT INTO memories (
+                id, logical_key, tenant_id, workspace_id, context_id, session_id,
+                user_id, content, content_hash, type, subtype, category,
+                importance, tags, metadata, refinement_metadata, embedding,
+                abstract, overview, source_memory_id, status, pinned,
+                observer_id, subject_id, source_document_id, source_page_id,
+                source_dataset_id, source_thread_id, access_count,
+                last_accessed_at, decay_factor, revision, etag, deleted_at,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            _turso_memory_row_values(self, memory),
+        )
+
+    async def _update_memory_head(
+        self, memory: Memory, current_etag: str, deleted_predicate: str
+    ):
+        return await self._connection.execute(
+            f"""
+            UPDATE memories SET
+                content = ?, content_hash = ?, type = ?, subtype = ?, tags = ?,
+                refinement_metadata = ?, pinned = ?, embedding = ?, revision = ?,
+                etag = ?, updated_at = ?, deleted_at = ?
+            WHERE id = ? AND tenant_id = ? AND workspace_id = ? AND etag = ?
+              AND {deleted_predicate}
+            """,
+            (
+                memory.content,
+                memory.content_hash,
+                memory.type.value,
+                memory.subtype,
+                json.dumps(memory.tags, sort_keys=True, separators=(",", ":")),
+                json.dumps(
+                    memory.refinement_metadata,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ),
+                1 if memory.pinned else 0,
+                self._serialize_embedding(memory.embedding) if memory.embedding else None,
+                memory.revision,
+                memory.etag,
+                to_utc_iso(memory.updated_at),
+                to_utc_iso(memory.deleted_at),
+                memory.id,
+                memory.tenant_id,
+                memory.workspace_id,
+                current_etag,
+            ),
+        )
 
     async def get_memories_for_decay(
         self,
@@ -719,6 +1271,7 @@ class TursoStorageBackend(StorageBackend):
         metadata_filter: dict[str, str] | None = None,
         status: str = "active",
         context_id: str | None = None,
+        user_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Memory]:
@@ -729,6 +1282,11 @@ class TursoStorageBackend(StorageBackend):
         if context_id is not None:
             where_parts.append("context_id = ?")
             params.append(context_id)
+
+        # Forced user-scope partition filter (the user-global read boundary).
+        if user_id is not None:
+            where_parts.append("user_id = ?")
+            params.append(user_id)
 
         if status:
             where_parts.append("(status IS NULL OR status = ?)")
@@ -1071,6 +1629,67 @@ class TursoStorageBackend(StorageBackend):
         await self._connection.commit()
         return cursor.rowcount > 0
 
+    async def update_association(
+        self,
+        workspace_id: str,
+        association_id: str,
+        metadata: dict | None = None,
+        strength: float | None = None,
+    ) -> bool:
+        """Update an existing association's strength and/or metadata.
+
+        Watermark-visibility contract: after updating the edge row we bump
+        ``updated_at`` on both the source and target memories.  This advances
+        ``max_memory_updated_at`` in ``get_workspace_change_watermark``, making
+        the edge change visible to the KB skip-generate gate (Gate A) and the
+        AGE watermark-gated materialize gate (Gate B).  Phase 1 fix 1.6 already
+        decoupled the recency boost from ``updated_at``, so the bump does NOT
+        produce a recall feedback loop.
+        """
+        set_parts = []
+        values: list = []
+
+        if metadata is not None:
+            set_parts.append("metadata = ?")
+            values.append(json.dumps(metadata))
+
+        if strength is not None:
+            set_parts.append("strength = ?")
+            values.append(strength)
+
+        if not set_parts:
+            return False
+
+        values.extend([association_id, workspace_id])
+        query = f"UPDATE memory_associations SET {', '.join(set_parts)} WHERE id = ? AND workspace_id = ?"
+        cursor = await self._connection.execute(query, values)
+        if cursor.rowcount == 0:
+            await self._connection.commit()
+            return False
+
+        # Fetch the association endpoints so we can bump the memory timestamps.
+        endpoint_cursor = await self._connection.execute(
+            "SELECT source_id, target_id FROM memory_associations WHERE id = ? AND workspace_id = ?",
+            (association_id, workspace_id),
+        )
+        row = await endpoint_cursor.fetchone()
+        if row:
+            now = utc_now_iso()
+            source_id = row["source_id"]
+            target_id = row["target_id"]
+            await self._connection.execute(
+                "UPDATE memories SET updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+                (now, source_id, workspace_id),
+            )
+            if target_id != source_id:
+                await self._connection.execute(
+                    "UPDATE memories SET updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+                    (now, target_id, workspace_id),
+                )
+
+        await self._connection.commit()
+        return True
+
     async def traverse_graph(
         self,
         workspace_id: str,
@@ -1180,12 +1799,13 @@ class TursoStorageBackend(StorageBackend):
     async def create_workspace(self, workspace: Workspace) -> Workspace:
         """Create workspace."""
         await self._connection.execute(
-            "INSERT INTO workspaces (id, tenant_id, name, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO workspaces (id, tenant_id, name, settings, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 workspace.id,
                 workspace.tenant_id,
                 workspace.name,
                 json.dumps(workspace.settings),
+                json.dumps(normalize_tags(workspace.tags)),
                 workspace.created_at.isoformat(),
                 workspace.updated_at.isoformat(),
             ),
@@ -1201,11 +1821,43 @@ class TursoStorageBackend(StorageBackend):
             return None
         return self._row_to_workspace(row)
 
-    async def list_workspaces(self) -> list[Workspace]:
-        """List all workspaces."""
+    async def list_workspaces(
+        self,
+        *,
+        tags: list[str] | None = None,
+        match: str = "all",
+    ) -> list[Workspace]:
+        """List workspaces, optionally filtered by tag.
+
+        Workspace counts are small, so tag filtering is applied in Python after load.
+        """
         cursor = await self._connection.execute("SELECT * FROM workspaces ORDER BY name")
         rows = await cursor.fetchall()
-        return [self._row_to_workspace(row) for row in rows]
+        workspaces = [self._row_to_workspace(row) for row in rows]
+
+        query_tags = normalize_tags(tags)
+        if not query_tags:
+            return workspaces
+
+        wanted = set(query_tags)
+        if match == "any":
+            return [w for w in workspaces if wanted & set(w.tags)]
+        # default: 'all' — workspace must carry every requested tag
+        return [w for w in workspaces if wanted <= set(w.tags)]
+
+    async def delete_workspace(self, workspace_id: str) -> bool:
+        """Atomically delete a workspace and all of its persisted resources."""
+        # pyturso does not expose SQLite's ``foreign_key_list`` pragma.  The
+        # shared purge still orders the known relational dependencies and
+        # deletes every table discovered with a workspace_id column.
+        deleted = await purge_workspace(
+            self._connection,
+            workspace_id,
+            discover_foreign_keys=False,
+        )
+        if deleted:
+            self.logger.info("Deleted workspace and associated data: %s", workspace_id)
+        return deleted
 
     async def update_workspace(self, workspace_id: str, **updates) -> Workspace | None:
         """Update workspace fields."""
@@ -1218,6 +1870,9 @@ class TursoStorageBackend(StorageBackend):
             if key == "settings":
                 set_parts.append(f"{key} = ?")
                 values.append(json.dumps(value))
+            elif key == "tags":
+                set_parts.append(f"{key} = ?")
+                values.append(json.dumps(normalize_tags(value)))
             else:
                 set_parts.append(f"{key} = ?")
                 values.append(value)
@@ -1274,6 +1929,24 @@ class TursoStorageBackend(StorageBackend):
         )
         rows = await cursor.fetchall()
         return [self._row_to_context(row) for row in rows]
+
+    async def delete_context(self, workspace_id: str, context_id: str) -> bool:
+        """Hard-delete a context within a workspace.
+
+        Contexts are hard-deleted (no soft-delete column). Memories keep their
+        context_id; deleting a context does not remove its memories. Returns
+        True if a row was deleted, False if the context did not exist in this
+        workspace.
+        """
+        cursor = await self._connection.execute(
+            "DELETE FROM contexts WHERE id = ? AND workspace_id = ?",
+            (context_id, workspace_id),
+        )
+        await self._connection.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            self.logger.debug("Deleted context: %s", context_id)
+        return deleted
 
     # ============================================
     # Statistics
@@ -1568,15 +2241,36 @@ class TursoStorageBackend(StorageBackend):
     # Chat History Operations
     # ============================================
 
+    async def _resolve_thread_row_id(
+        self, workspace_id: str, client_id: str, user_id: str | None
+    ) -> str | None:
+        """Resolve the opaque surrogate ``row_id`` for an owner-scoped thread.
+
+        SECURITY: threads are identified by (workspace_id, COALESCE(user_id,''),
+        id), so a shared client id like "_default" in the _user_chat sentinel
+        resolves to the correct owner's thread. Returns None when no such thread
+        exists. row_id is INTERNAL — the only value chat_messages.thread_id references.
+        """
+        cursor = await self._connection.execute(
+            "SELECT row_id FROM chat_threads "
+            "WHERE workspace_id = ? AND id = ? AND COALESCE(user_id, '') = ?",
+            (workspace_id, client_id, user_id or ""),
+        )
+        row = await cursor.fetchone()
+        return row["row_id"] if row else None
+
     async def create_thread(self, thread: "ChatThread") -> "ChatThread":
+        row_id = generate_id("cthr")
         await self._connection.execute(
             """INSERT INTO chat_threads
-               (id, workspace_id, tenant_id, user_id, context_id,
+               (row_id, id, workspace_id, tenant_id, user_id, context_id,
                 observer_id, subject_id, title, metadata,
                 message_count, last_decomposed_at, last_decomposed_index,
-                expires_at, created_at, updated_at, scope)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                expires_at, created_at, updated_at, scope, ownership,
+                idle_action, hidden_at, parent_thread)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
+                row_id,
                 thread.id,
                 thread.workspace_id,
                 thread.tenant_id,
@@ -1593,15 +2287,22 @@ class TursoStorageBackend(StorageBackend):
                 thread.created_at.isoformat(),
                 thread.updated_at.isoformat(),
                 thread.scope,
+                thread.ownership,
+                thread.idle_action,
+                thread.hidden_at.isoformat() if thread.hidden_at else None,
+                thread.parent_thread,
             ),
         )
         await self._connection.commit()
         return thread
 
-    async def get_thread(self, workspace_id: str, thread_id: str) -> "ChatThread | None":
+    async def get_thread(
+        self, workspace_id: str, thread_id: str, user_id: str | None = None
+    ) -> "ChatThread | None":
         cursor = await self._connection.execute(
-            "SELECT * FROM chat_threads WHERE id = ? AND workspace_id = ?",
-            (thread_id, workspace_id),
+            "SELECT * FROM chat_threads "
+            "WHERE id = ? AND workspace_id = ? AND COALESCE(user_id, '') = ?",
+            (thread_id, workspace_id, user_id or ""),
         )
         row = await cursor.fetchone()
         if not row:
@@ -1615,10 +2316,23 @@ class TursoStorageBackend(StorageBackend):
         limit: int = 50,
         offset: int = 0,
         scope_filter: str | None = None,
+        ownership_filter: str | None = None,
+        include_hidden: bool = False,
+        parent_thread: str | None = None,
     ) -> list:
         now = utc_now_iso()
         conditions = ["workspace_id = ?", "(expires_at IS NULL OR expires_at > ?)"]
         params: list = [workspace_id, now]
+
+        if not include_hidden:
+            conditions.append("hidden_at IS NULL")
+
+        # Default: top-level only (parent_thread IS NULL). A value lists children.
+        if parent_thread is None:
+            conditions.append("parent_thread IS NULL")
+        else:
+            conditions.append("parent_thread = ?")
+            params.append(parent_thread)
 
         if user_id:
             conditions.append("user_id = ?")
@@ -1627,6 +2341,56 @@ class TursoStorageBackend(StorageBackend):
         # scope_filter="web"  → rows where scope='web' OR scope IS NULL (NULL ≡ web)
         # scope_filter="office" → rows where scope='office'
         # scope_filter=None   → no scope restriction (return all)
+        if scope_filter == "web":
+            conditions.append("(scope = ? OR scope IS NULL)")
+            params.append("web")
+        elif scope_filter is not None:
+            conditions.append("scope = ?")
+            params.append(scope_filter)
+
+        if ownership_filter is not None:
+            conditions.append("ownership = ?")
+            params.append(ownership_filter)
+
+        where = " AND ".join(conditions)
+        params.extend([limit, offset])
+        cursor = await self._connection.execute(
+            f"SELECT * FROM chat_threads WHERE {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_chat_thread(row) for row in rows]
+
+    async def list_user_threads(
+        self,
+        tenant_id: str,
+        user_id: str,
+        ownership: str = 'user',
+        scope_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        include_hidden: bool = False,
+        parent_thread: str | None = None,
+    ) -> list:
+        """List threads owned by a user across all workspaces."""
+        now = utc_now_iso()
+        conditions = [
+            "tenant_id = ?",
+            "user_id = ?",
+            "ownership = ?",
+            "(expires_at IS NULL OR expires_at > ?)",
+        ]
+        params: list = [tenant_id, user_id, ownership, now]
+
+        if not include_hidden:
+            conditions.append("hidden_at IS NULL")
+
+        if parent_thread is None:
+            conditions.append("parent_thread IS NULL")
+        else:
+            conditions.append("parent_thread = ?")
+            params.append(parent_thread)
+
         if scope_filter == "web":
             conditions.append("(scope = ? OR scope IS NULL)")
             params.append("web")
@@ -1643,9 +2407,11 @@ class TursoStorageBackend(StorageBackend):
         rows = await cursor.fetchall()
         return [self._row_to_chat_thread(row) for row in rows]
 
-    async def update_thread(self, workspace_id: str, thread_id: str, **updates) -> "ChatThread | None":
+    async def update_thread(
+        self, workspace_id: str, thread_id: str, user_id: str | None = None, **updates
+    ) -> "ChatThread | None":
         if not updates:
-            return await self.get_thread(workspace_id, thread_id)
+            return await self.get_thread(workspace_id, thread_id, user_id=user_id)
 
         invalid_keys = set(updates.keys()) - _UPDATABLE_THREAD_COLUMNS
         if invalid_keys:
@@ -1664,20 +2430,40 @@ class TursoStorageBackend(StorageBackend):
         set_clauses.append("updated_at = ?")
         values.append(utc_now_iso())
 
-        values.extend([thread_id, workspace_id])
-        sql = f"UPDATE chat_threads SET {', '.join(set_clauses)} WHERE id = ? AND workspace_id = ?"
+        values.extend([thread_id, workspace_id, user_id or ""])
+        sql = (
+            f"UPDATE chat_threads SET {', '.join(set_clauses)} "
+            "WHERE id = ? AND workspace_id = ? AND COALESCE(user_id, '') = ?"
+        )
         await self._connection.execute(sql, values)
         await self._connection.commit()
-        return await self.get_thread(workspace_id, thread_id)
+        return await self.get_thread(workspace_id, thread_id, user_id=user_id)
 
-    async def delete_thread(self, workspace_id: str, thread_id: str) -> bool:
+    async def delete_thread(self, workspace_id: str, thread_id: str, user_id: str | None = None) -> bool:
+        # Resolve the owner-scoped thread to its surrogate row_id; messages key on
+        # row_id, and children share the same owner.
+        row_id = await self._resolve_thread_row_id(workspace_id, thread_id, user_id)
+        if row_id is None:
+            return False
+
+        # Cascade: delete sub-threads (children of the same owner) first so a
+        # parent delete never leaves orphaned children. Recurses for depth.
+        child_cursor = await self._connection.execute(
+            "SELECT id FROM chat_threads "
+            "WHERE parent_thread = ? AND workspace_id = ? AND COALESCE(user_id, '') = ?",
+            (thread_id, workspace_id, user_id or ""),
+        )
+        for row in await child_cursor.fetchall():
+            await self.delete_thread(workspace_id, row["id"], user_id=user_id)
+
+        # Messages reference the surrogate row_id.
         await self._connection.execute(
             "DELETE FROM chat_messages WHERE thread_id = ? AND workspace_id = ?",
-            (thread_id, workspace_id),
+            (row_id, workspace_id),
         )
         cursor = await self._connection.execute(
-            "DELETE FROM chat_threads WHERE id = ? AND workspace_id = ?",
-            (thread_id, workspace_id),
+            "DELETE FROM chat_threads WHERE row_id = ?",
+            (row_id,),
         )
         await self._connection.commit()
         return cursor.rowcount > 0
@@ -1692,22 +2478,81 @@ class TursoStorageBackend(StorageBackend):
         rows = await cursor.fetchall()
         return [self._row_to_chat_thread(row) for row in rows]
 
+    async def list_idle_threads(
+        self,
+        updated_before: datetime,
+        *,
+        idle_action: str,
+        only_hidden: bool | None = None,
+        limit: int = 100,
+    ) -> list["ChatThread"]:
+        conditions = ["idle_action = ?", "updated_at < ?"]
+        params: list = [idle_action, updated_before.isoformat()]
+        if only_hidden is True:
+            conditions.append("hidden_at IS NOT NULL")
+        elif only_hidden is False:
+            conditions.append("hidden_at IS NULL")
+        where = " AND ".join(conditions)
+        params.append(limit)
+        cursor = await self._connection.execute(
+            f"SELECT * FROM chat_threads WHERE {where} ORDER BY updated_at ASC LIMIT ?",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_chat_thread(row) for row in rows]
+
+    async def list_hidden_threads(self, hidden_before: datetime, limit: int = 100) -> list["ChatThread"]:
+        cursor = await self._connection.execute(
+            "SELECT * FROM chat_threads WHERE hidden_at IS NOT NULL AND hidden_at < ? ORDER BY hidden_at ASC LIMIT ?",
+            (hidden_before.isoformat(), limit),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_chat_thread(row) for row in rows]
+
+    async def hide_thread(
+        self, workspace_id: str, thread_id: str, user_id: str | None = None
+    ) -> "ChatThread | None":
+        # Set hidden_at WITHOUT bumping updated_at (hiding is not activity).
+        await self._connection.execute(
+            "UPDATE chat_threads SET hidden_at = ? "
+            "WHERE id = ? AND workspace_id = ? AND COALESCE(user_id, '') = ?",
+            (utc_now_iso(), thread_id, workspace_id, user_id or ""),
+        )
+        await self._connection.commit()
+        return await self.get_thread(workspace_id, thread_id, user_id=user_id)
+
+    async def unhide_thread(
+        self, workspace_id: str, thread_id: str, user_id: str | None = None
+    ) -> "ChatThread | None":
+        await self._connection.execute(
+            "UPDATE chat_threads SET hidden_at = NULL "
+            "WHERE id = ? AND workspace_id = ? AND COALESCE(user_id, '') = ?",
+            (thread_id, workspace_id, user_id or ""),
+        )
+        await self._connection.commit()
+        return await self.get_thread(workspace_id, thread_id, user_id=user_id)
+
     async def append_messages(
         self,
         workspace_id: str,
         thread_id: str,
         messages: list,
+        user_id: str | None = None,
     ) -> list:
         from ...models.chat import ChatMessage
 
+        # Resolve the owner-scoped thread to its surrogate row_id + current count.
+        # Messages reference row_id; the response thread_id echoes the client id.
         cursor = await self._connection.execute(
-            "SELECT message_count FROM chat_threads WHERE id = ? AND workspace_id = ?",
-            (thread_id, workspace_id),
+            "SELECT row_id, message_count FROM chat_threads "
+            "WHERE id = ? AND workspace_id = ? AND COALESCE(user_id, '') = ?",
+            (thread_id, workspace_id, user_id or ""),
         )
         row = await cursor.fetchone()
         if not row:
             raise ValueError(f"Thread {thread_id} not found in workspace {workspace_id}")
 
+        row_id = row["row_id"]
         current_count = row["message_count"]
         created_messages = []
         now = utc_now_iso()
@@ -1723,7 +2568,7 @@ class TursoStorageBackend(StorageBackend):
                 """INSERT INTO chat_messages
                    (id, thread_id, workspace_id, message_index, role, content, metadata, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (msg_id, thread_id, workspace_id, msg_index, msg_input.role, content, json.dumps(msg_input.metadata or {}), now),
+                (msg_id, row_id, workspace_id, msg_index, msg_input.role, content, json.dumps(msg_input.metadata or {}), now),
             )
             created_messages.append(
                 ChatMessage(
@@ -1738,9 +2583,10 @@ class TursoStorageBackend(StorageBackend):
             )
 
         new_count = current_count + len(messages)
+        # Clear hidden_at so a new message revives (un-archives) a hidden thread.
         await self._connection.execute(
-            "UPDATE chat_threads SET message_count = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
-            (new_count, now, thread_id, workspace_id),
+            "UPDATE chat_threads SET message_count = ?, updated_at = ?, hidden_at = NULL WHERE row_id = ?",
+            (new_count, now, row_id),
         )
         await self._connection.commit()
         return created_messages
@@ -1753,39 +2599,53 @@ class TursoStorageBackend(StorageBackend):
         offset: int = 0,
         after_index: int | None = None,
         order: str = "asc",
+        user_id: str | None = None,
     ) -> list:
         order_clause = "ASC" if order.lower() == "asc" else "DESC"
+
+        # Resolve the owner-scoped thread to its surrogate row_id (messages key on it).
+        row_id = await self._resolve_thread_row_id(workspace_id, thread_id, user_id)
+        if row_id is None:
+            return []
 
         if after_index is not None:
             cursor = await self._connection.execute(
                 f"""SELECT * FROM chat_messages
                     WHERE thread_id = ? AND workspace_id = ? AND message_index > ?
                     ORDER BY message_index {order_clause} LIMIT ? OFFSET ?""",
-                (thread_id, workspace_id, after_index, limit, offset),
+                (row_id, workspace_id, after_index, limit, offset),
             )
         else:
             cursor = await self._connection.execute(
                 f"""SELECT * FROM chat_messages
                     WHERE thread_id = ? AND workspace_id = ?
                     ORDER BY message_index {order_clause} LIMIT ? OFFSET ?""",
-                (thread_id, workspace_id, limit, offset),
+                (row_id, workspace_id, limit, offset),
             )
 
         rows = await cursor.fetchall()
-        return [self._row_to_chat_message(row) for row in rows]
+        return [self._row_to_chat_message(row, thread_id) for row in rows]
 
-    async def get_message_count(self, workspace_id: str, thread_id: str) -> int:
+    async def get_message_count(
+        self, workspace_id: str, thread_id: str, user_id: str | None = None
+    ) -> int:
         cursor = await self._connection.execute(
-            "SELECT message_count FROM chat_threads WHERE id = ? AND workspace_id = ?",
-            (thread_id, workspace_id),
+            "SELECT message_count FROM chat_threads "
+            "WHERE id = ? AND workspace_id = ? AND COALESCE(user_id, '') = ?",
+            (thread_id, workspace_id, user_id or ""),
         )
         row = await cursor.fetchone()
         return row["message_count"] if row else 0
 
-    async def delete_message(self, workspace_id: str, thread_id: str, message_id: str) -> bool:
+    async def delete_message(
+        self, workspace_id: str, thread_id: str, message_id: str, user_id: str | None = None
+    ) -> bool:
+        row_id = await self._resolve_thread_row_id(workspace_id, thread_id, user_id)
+        if row_id is None:
+            return False
         cursor = await self._connection.execute(
             "DELETE FROM chat_messages WHERE id = ? AND thread_id = ? AND workspace_id = ?",
-            (message_id, thread_id, workspace_id),
+            (message_id, row_id, workspace_id),
         )
         await self._connection.commit()
         return cursor.rowcount > 0
@@ -1798,6 +2658,7 @@ class TursoStorageBackend(StorageBackend):
         """Convert database row to Memory domain model."""
         return Memory(
             id=row["id"],
+            logical_key=row["logical_key"] if "logical_key" in row.keys() else None,
             tenant_id=row["tenant_id"] if "tenant_id" in row.keys() else DEFAULT_TENANT_ID,
             workspace_id=row["workspace_id"],
             context_id=row["context_id"] if "context_id" in row.keys() else DEFAULT_CONTEXT_ID,
@@ -1818,6 +2679,11 @@ class TursoStorageBackend(StorageBackend):
             importance=row["importance"],
             tags=json.loads(row["tags"]) if row["tags"] else [],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            refinement_metadata=(
+                json.loads(row["refinement_metadata"])
+                if "refinement_metadata" in row.keys() and row["refinement_metadata"]
+                else {}
+            ),
             embedding=self._deserialize_embedding(row["embedding"]) if row["embedding"] else None,
             abstract=row["abstract"] if "abstract" in row.keys() and row["abstract"] else None,
             overview=row["overview"] if "overview" in row.keys() and row["overview"] else None,
@@ -1826,8 +2692,15 @@ class TursoStorageBackend(StorageBackend):
             decay_factor=row["decay_factor"],
             status=MemoryStatus(row["status"]) if "status" in row.keys() and row["status"] else MemoryStatus.ACTIVE,
             pinned=bool(row["pinned"]) if "pinned" in row.keys() and row["pinned"] is not None else False,
+            revision=row["revision"] if "revision" in row.keys() else 0,
+            etag=row["etag"] if "etag" in row.keys() else "",
             created_at=parse_datetime_utc(row["created_at"]),
             updated_at=parse_datetime_utc(row["updated_at"]),
+            deleted_at=(
+                parse_datetime_utc(row["deleted_at"])
+                if "deleted_at" in row.keys()
+                else None
+            ),
         )
 
     def _row_to_association(self, row) -> Association:
@@ -1850,6 +2723,7 @@ class TursoStorageBackend(StorageBackend):
             tenant_id=row["tenant_id"],
             name=row["name"],
             settings=json.loads(row["settings"]) if row["settings"] else {},
+            tags=json.loads(row["tags"]) if ("tags" in row.keys() and row["tags"]) else [],
             created_at=parse_datetime_utc(row["created_at"]),
             updated_at=parse_datetime_utc(row["updated_at"]),
         )
@@ -1916,6 +2790,26 @@ class TursoStorageBackend(StorageBackend):
         except (IndexError, KeyError):
             scope = None
 
+        # ownership: column may not exist in very old databases (pre-migration); default to 'user'.
+        try:
+            ownership = row["ownership"] or 'user'
+        except (IndexError, KeyError):
+            ownership = 'user'
+
+        # idle_action / hidden_at: columns may not exist in very old databases.
+        try:
+            idle_action = row["idle_action"]
+        except (IndexError, KeyError):
+            idle_action = None
+        try:
+            hidden_raw = row["hidden_at"]
+        except (IndexError, KeyError):
+            hidden_raw = None
+        try:
+            parent_thread = row["parent_thread"]
+        except (IndexError, KeyError):
+            parent_thread = None
+
         return ChatThread(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -1930,12 +2824,16 @@ class TursoStorageBackend(StorageBackend):
             last_decomposed_at=parse_datetime_utc(row["last_decomposed_at"]) if row["last_decomposed_at"] else None,
             last_decomposed_index=row["last_decomposed_index"],
             expires_at=parse_datetime_utc(row["expires_at"]) if row["expires_at"] else None,
+            idle_action=idle_action,
+            hidden_at=parse_datetime_utc(hidden_raw) if hidden_raw else None,
             created_at=parse_datetime_utc(row["created_at"]),
             updated_at=parse_datetime_utc(row["updated_at"]),
             scope=scope,
+            ownership=ownership,
+            parent_thread=parent_thread,
         )
 
-    def _row_to_chat_message(self, row) -> "ChatMessage":
+    def _row_to_chat_message(self, row, client_thread_id: str | None = None) -> "ChatMessage":
         from ...models.chat import ChatMessage, ChatMessageContent
 
         raw_content = row["content"]
@@ -1948,14 +2846,107 @@ class TursoStorageBackend(StorageBackend):
         except (json.JSONDecodeError, TypeError):
             content = raw_content
 
+        # The stored thread_id is the surrogate row_id (internal); present the
+        # client id when known so the surrogate never leaves storage.
         return ChatMessage(
             id=row["id"],
-            thread_id=row["thread_id"],
+            thread_id=client_thread_id if client_thread_id is not None else row["thread_id"],
             message_index=row["message_index"],
             role=row["role"],
             content=content,
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=parse_datetime_utc(row["created_at"]),
+        )
+
+    # ============================================
+    # Internal Versioned Resource Operations
+    # ============================================
+
+    def _versioned_store(self) -> RelationalVersionedResourceStore:
+        if self._versioned_resource_store is None:
+            raise RuntimeError("Turso storage is not connected")
+        return self._versioned_resource_store
+
+    async def mutate_versioned_resource(
+        self,
+        mutation: VersionedResourceMutation,
+    ) -> VersionedResourceMutationResult:
+        return await self._versioned_store().mutate(mutation)
+
+    async def get_versioned_resource_operation(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        namespace: str,
+        operation_id: str,
+        request_hash: str,
+    ) -> VersionedResourceMutationResult | None:
+        return await self._versioned_store().get_operation_result(
+            tenant_id, workspace_id, namespace, operation_id, request_hash
+        )
+
+    async def get_versioned_resource(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        namespace: str,
+        resource_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> VersionedResource | None:
+        return await self._versioned_store().get(
+            tenant_id, workspace_id, namespace, resource_id, include_deleted=include_deleted
+        )
+
+    async def get_versioned_resource_by_key(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        namespace: str,
+        resource_key: str,
+        *,
+        include_deleted: bool = False,
+    ) -> VersionedResource | None:
+        return await self._versioned_store().get_by_key(
+            tenant_id, workspace_id, namespace, resource_key, include_deleted=include_deleted
+        )
+
+    async def list_versioned_resources(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        namespace: str,
+        *,
+        limit: int,
+        before_sequence: int | None = None,
+        include_deleted: bool = False,
+    ) -> list[VersionedResource]:
+        return await self._versioned_store().list(
+            tenant_id,
+            workspace_id,
+            namespace,
+            limit=limit,
+            before_sequence=before_sequence,
+            include_deleted=include_deleted,
+        )
+
+    async def list_versioned_resource_revisions(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        namespace: str,
+        resource_id: str,
+        *,
+        limit: int,
+        before_sequence: int | None = None,
+    ) -> list[VersionedResourceRevision]:
+        return await self._versioned_store().list_revisions(
+            tenant_id,
+            workspace_id,
+            namespace,
+            resource_id,
+            limit=limit,
+            before_sequence=before_sequence,
         )
 
     # ============================================
@@ -1972,6 +2963,82 @@ class TursoStorageBackend(StorageBackend):
         """Deserialize embedding from binary format."""
         num_floats = len(blob) // 4
         return list(struct.unpack(f"{num_floats}f", blob))
+
+
+def _turso_memory_snapshot_json(memory: Memory) -> str:
+    return json.dumps(
+        memory_revision_snapshot(memory).model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def _turso_memory_snapshot(payload: str) -> Memory:
+    return Memory.model_validate(json.loads(payload))
+
+
+def _turso_memory_revision_from_row(row) -> MemoryRevision:
+    return MemoryRevision(
+        memory=_turso_memory_snapshot(row["snapshot"]),
+        sequence=row["sequence"],
+        action=row["action"],
+        operation_id=row["operation_id"],
+        request_hash=row["request_hash"],
+    )
+
+
+def _turso_memory_row_values(
+    backend: TursoStorageBackend, memory: Memory
+) -> tuple:
+    return (
+        memory.id,
+        memory.logical_key,
+        memory.tenant_id,
+        memory.workspace_id,
+        memory.context_id,
+        memory.session_id,
+        memory.user_id,
+        memory.content,
+        memory.content_hash,
+        memory.type.value,
+        memory.subtype,
+        memory.category,
+        memory.importance,
+        json.dumps(memory.tags, sort_keys=True, separators=(",", ":")),
+        json.dumps(
+            memory.metadata,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+        json.dumps(
+            memory.refinement_metadata,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+        backend._serialize_embedding(memory.embedding) if memory.embedding else None,
+        memory.abstract,
+        memory.overview,
+        memory.source_memory_id,
+        memory.status.value,
+        1 if memory.pinned else 0,
+        memory.observer_id,
+        memory.subject_id,
+        memory.source_document_id,
+        memory.source_page_id,
+        memory.source_dataset_id,
+        memory.source_thread_id,
+        memory.access_count,
+        to_utc_iso(memory.last_accessed_at),
+        memory.decay_factor,
+        memory.revision,
+        memory.etag,
+        to_utc_iso(memory.deleted_at),
+        to_utc_iso(memory.created_at),
+        to_utc_iso(memory.updated_at),
+    )
 
 
 # ============================================

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -25,12 +26,17 @@ from .models import (
     ChatMessage,
     ChatThread,
     ChatThreadWithMessages,
+    ContextDelta,
+    ContextPack,
     DatasetInfo,
     DatasetJobInfo,
     DatasetSliceResult,
     DecompositionResult,
     DocumentInfo,
     DocumentPage,
+    Entity,
+    EntityRelationInput,
+    EntityResolution,
     JobInfo,
     Memory,
     PageSearchResult,
@@ -38,8 +44,12 @@ from .models import (
     ReflectResult,
     Session,
     SessionBriefing,
+    SessionCheckpoint,
+    TokenCreateResult,
+    TokenInfo,
     Workspace,
 )
+from .rpg import SyncRpgAPI
 from .skills import SyncSkillsAPI
 from .types import (
     MemoryType,
@@ -49,6 +59,12 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Methods safe to retry automatically (POST excluded — not idempotent).
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE", "PATCH"})
+
+# HTTP status codes considered transient and worth retrying.
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 def _to_value(v: Any) -> Any:
@@ -87,6 +103,8 @@ class SyncMemoryLayerClient:
         workspace_id: str | None = None,
         session_id: str | None = None,
         timeout: float = 30.0,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
     ):
         """
         Initialize MemoryLayer client.
@@ -97,16 +115,25 @@ class SyncMemoryLayerClient:
             workspace_id: Default workspace ID for operations
             session_id: Session ID for session-based workspace resolution
             timeout: Request timeout in seconds (default: 30.0)
+            max_retries: Max retry attempts for idempotent requests (GET/PUT/
+                DELETE/PATCH/HEAD/OPTIONS) on transient failures (5xx/429/
+                connection errors), honoring ``Retry-After`` (default: 3; 0
+                disables). POST is never auto-retried.
+            backoff_factor: Base seconds for exponential backoff between retries
+                (delay = backoff_factor * 2**attempt; default: 0.5).
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.workspace_id = workspace_id
         self.session_id = session_id
         self.timeout = timeout
+        self.max_retries = max(0, max_retries)
+        self.backoff_factor = backoff_factor
         self._client: httpx.Client | None = None
         self.skills = SyncSkillsAPI(self)
         self.mcp_servers = SyncMcpServersAPI(self)
         self.kb = SyncKnowledgebaseAPI(self)
+        self.rpg = SyncRpgAPI(self)
 
     def __enter__(self) -> "SyncMemoryLayerClient":
         """Context manager entry."""
@@ -208,7 +235,7 @@ class SyncMemoryLayerClient:
         client = self._ensure_client()
 
         try:
-            response = client.request(method, path, json=json, params=params)
+            response = self._request_with_retries(client, method, path, json=json, params=params)
 
             # Handle errors
             if response.status_code == 401:
@@ -247,6 +274,64 @@ class SyncMemoryLayerClient:
         except httpx.HTTPError as e:
             raise MemoryLayerError(f"HTTP error: {e}") from e
 
+    def _request_with_retries(
+        self,
+        client: httpx.Client,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        """Issue the request, retrying idempotent methods on transient failures.
+
+        Only idempotent methods (GET/PUT/DELETE/PATCH/HEAD/OPTIONS) are retried,
+        on connection/timeout errors and retryable 5xx/429 responses, honoring
+        ``Retry-After``. POST is sent once (never auto-retried).
+        """
+        retryable = method.upper() in _IDEMPOTENT_METHODS and self.max_retries > 0
+        if not retryable:
+            return client.request(method, path, json=json, params=params)
+
+        last_exc: Exception | None = None
+        response: httpx.Response | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = client.request(method, path, json=json, params=params)
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError, httpx.WriteError) as exc:
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    raise
+                self._sleep_before_retry(attempt, None)
+                logger.debug("Retrying %s %s after transport error (attempt %d): %s", method, path, attempt + 1, exc)
+                continue
+
+            if response.status_code in _RETRYABLE_STATUS and attempt < self.max_retries:
+                self._sleep_before_retry(attempt, response)
+                logger.debug(
+                    "Retrying %s %s after HTTP %d (attempt %d)", method, path, response.status_code, attempt + 1
+                )
+                continue
+
+            return response
+
+        if last_exc is not None:
+            raise last_exc
+        assert response is not None  # loop guarantees a response or raise
+        return response
+
+    def _sleep_before_retry(self, attempt: int, response: httpx.Response | None) -> None:
+        """Sleep before the next retry, honoring Retry-After when present."""
+        delay = self.backoff_factor * (2**attempt)
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    delay = max(delay, float(retry_after))
+                except ValueError:
+                    logger.debug("Non-numeric Retry-After header %r; using backoff", retry_after)
+        time.sleep(delay)
+
     # Core memory operations
 
     def remember(
@@ -259,6 +344,7 @@ class SyncMemoryLayerClient:
         metadata: dict[str, Any] | None = None,
         context_id: str | None = None,
         user_id: str | None = None,
+        relations: list[EntityRelationInput | dict[str, Any]] | None = None,
     ) -> Memory:
         """
         Store a new memory.
@@ -302,6 +388,11 @@ class SyncMemoryLayerClient:
             payload["context_id"] = context_id
         if user_id is not None:
             payload["user_id"] = user_id
+        if relations:
+            payload["relations"] = [
+                relation.model_dump(exclude_none=True) if isinstance(relation, EntityRelationInput) else relation
+                for relation in relations
+            ]
 
         data = self._request("POST", "/memories", json=payload)
         return Memory(**data["memory"])
@@ -322,7 +413,16 @@ class SyncMemoryLayerClient:
         max_expansion: int | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
+        offset: int | None = None,
+        event_after: str | None = None,
+        event_before: str | None = None,
+        time_order: str | None = None,
+        include_global: bool | None = None,
+        include_global_user: bool | None = None,
         user_id: str | None = None,
+        budget_tokens: int | None = None,
+        include_confidence: bool = True,
+        include_relations: bool = True,
     ) -> RecallResult:
         """
         Search memories by semantic query.
@@ -339,6 +439,13 @@ class SyncMemoryLayerClient:
             include_associations: Include linked memories (None = server default)
             traverse_depth: Multi-hop graph traversal depth (None = server default)
             max_expansion: Max memories discovered via graph expansion (None = server default)
+            offset: Number of results to skip for pagination (None = server default)
+            event_after: Keep memories whose effective event time is >= this (ISO 8601)
+            event_before: Keep memories whose effective event time is <= this (ISO 8601)
+            time_order: Order by effective event time: "asc" or "desc" (None = by relevance)
+            include_global: Include the _global workspace in search (None = server default)
+            include_global_user: Include the user-scoped global workspace (_global_user),
+                filtered by user_id (None = server default; only effective when user_id is set)
 
         Returns:
             Recall results with memories
@@ -379,21 +486,28 @@ class SyncMemoryLayerClient:
             payload["created_after"] = created_after
         if created_before is not None:
             payload["created_before"] = created_before
+        if offset is not None:
+            payload["offset"] = offset
+        if event_after is not None:
+            payload["event_after"] = event_after
+        if event_before is not None:
+            payload["event_before"] = event_before
+        if time_order is not None:
+            payload["time_order"] = time_order
+        if include_global is not None:
+            payload["include_global"] = include_global
+        if include_global_user is not None:
+            payload["include_global_user"] = include_global_user
         if user_id is not None:
             payload["user_id"] = user_id
+        if budget_tokens is not None:
+            payload["budget_tokens"] = budget_tokens
+        payload["include_confidence"] = include_confidence
+        payload["include_relations"] = include_relations
 
         data = self._request("POST", "/memories/recall", json=payload)
 
-        # Parse memories
-        memories_adapter = TypeAdapter(list[Memory])
-        memories = memories_adapter.validate_python(data.get("memories", []))
-
-        return RecallResult(
-            memories=memories,
-            total_count=data.get("total_count", len(memories)),
-            query_tokens=data.get("query_tokens"),
-            search_latency_ms=data.get("search_latency_ms"),
-        )
+        return RecallResult.model_validate(data)
 
     def reflect(
         self,
@@ -573,6 +687,438 @@ class SyncMemoryLayerClient:
         associations_adapter = TypeAdapter(list[Association])
         return associations_adapter.validate_python(data.get("associations", []))
 
+    def update_association(
+        self,
+        memory_id: str,
+        association_id: str,
+        *,
+        strength: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Update an association's strength and/or metadata.
+
+        Re-typing an edge (changing its relationship) is not supported — delete
+        and recreate instead. ``memory_id`` must be one of the association's
+        endpoints (source or target) or the server returns 404.
+
+        Args:
+            memory_id: A memory that is an endpoint of the association
+            association_id: Association (edge) ID
+            strength: New relationship strength 0.0-1.0 (None = unchanged)
+            metadata: New metadata dict, replaces existing (None = unchanged)
+
+        Returns:
+            True on success, False if the association was not found.
+
+        Example:
+            client.update_association("mem_123", "assoc_1", strength=0.9)
+        """
+        payload: dict[str, Any] = {}
+        if strength is not None:
+            payload["strength"] = strength
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        try:
+            self._request("PATCH", f"/memories/{memory_id}/associations/{association_id}", json=payload)
+            return True
+        except NotFoundError:
+            return False
+
+    def delete_association(self, memory_id: str, association_id: str) -> bool:
+        """
+        Delete an association (graph edge) by ID.
+
+        ``memory_id`` must be one of the association's endpoints (source or
+        target) or the server returns 404.
+
+        Args:
+            memory_id: A memory that is an endpoint of the association
+            association_id: Association (edge) ID
+
+        Returns:
+            True on success, False if the association was not found.
+
+        Example:
+            client.delete_association("mem_123", "assoc_1")
+        """
+        try:
+            self._request("DELETE", f"/memories/{memory_id}/associations/{association_id}")
+            return True
+        except NotFoundError:
+            return False
+
+    def traverse_graph(
+        self,
+        memory_id: str,
+        *,
+        max_depth: int = 2,
+        relationship_types: list[str] | None = None,
+        direction: str = "both",
+        min_strength: float = 0.0,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Traverse the memory graph starting from a specific memory.
+
+        Args:
+            memory_id: Starting memory for traversal
+            max_depth: Maximum traversal depth (1-5, default 2)
+            relationship_types: Filter by relationship types (None/empty = all)
+            direction: "outgoing", "incoming", or "both" (default: "both")
+            min_strength: Minimum edge strength (default: 0.0)
+            workspace_id: Workspace override (defaults to client workspace)
+
+        Returns:
+            Graph query result dict with keys: paths, total_paths, unique_nodes,
+            query_latency_ms.
+
+        Example:
+            result = client.traverse_graph("mem_123", max_depth=3)
+            print(result["unique_nodes"])
+        """
+        payload: dict[str, Any] = {
+            "max_depth": max_depth,
+            "direction": direction,
+            "min_strength": min_strength,
+        }
+        if relationship_types is not None:
+            payload["relationship_types"] = relationship_types
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            payload["workspace_id"] = ws_id
+
+        return self._request("POST", f"/memories/{memory_id}/traverse", json=payload)
+
+    def list_memories(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        type: str | MemoryType | None = None,
+        subtype: str | None = None,
+        tag: str | None = None,
+        context_id: str | None = None,
+    ) -> RecallResult:
+        """
+        List/browse memories ordered by recency (no vector search).
+
+        Unlike :meth:`recall` this is a plain filtered enumeration for browsing,
+        with pagination and optional type/subtype/tag/context filters.
+
+        Args:
+            limit: Maximum memories to return (default: 50)
+            offset: Number of memories to skip for pagination (default: 0)
+            type: Filter by cognitive type
+            subtype: Filter by domain subtype
+            tag: Filter by a single tag
+            context_id: Filter by memory context
+
+        Returns:
+            RecallResult with ``memories`` and ``total_count``.  Note that
+            ``total_count`` reflects the number of memories in the returned
+            page, not a grand total across all pages — do not use it for
+            pagination math.  Use :meth:`iterate_memories` to walk all pages
+            automatically.
+
+        Example:
+            page = client.list_memories(limit=20, offset=0)
+            for mem in page.memories:
+                print(mem.content)
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if type is not None:
+            params["type"] = _to_value(type)
+        if subtype is not None:
+            params["subtype"] = subtype
+        if tag is not None:
+            params["tag"] = tag
+        if context_id is not None:
+            params["context_id"] = context_id
+
+        data = self._request("GET", "/memories", params=params)
+        memories_adapter = TypeAdapter(list[Memory])
+        memories = memories_adapter.validate_python(data.get("memories", []))
+        return RecallResult(
+            memories=memories,
+            total_count=data.get("total_count", len(memories)),
+        )
+
+    def iterate_memories(
+        self,
+        *,
+        page_size: int = 50,
+        type: str | MemoryType | None = None,
+        subtype: str | None = None,
+        tag: str | None = None,
+        context_id: str | None = None,
+    ) -> Generator[Memory, None, None]:
+        """
+        Auto-paginate :meth:`list_memories`, yielding every memory.
+
+        Transparently walks the limit/offset pages so callers don't have to
+        hand-roll an offset loop. Iteration stops when a page returns fewer
+        than ``page_size`` items.
+
+        Args:
+            page_size: Memories to fetch per request (default: 50, max 200).
+                Values above 200 are silently clamped to 200 to stay within
+                the server's ``limit`` cap and avoid 422 errors.
+            type: Filter by cognitive type
+            subtype: Filter by domain subtype
+            tag: Filter by a single tag
+            context_id: Filter by memory context
+
+        Yields:
+            Each :class:`Memory` across all pages.
+
+        Example:
+            for mem in client.iterate_memories(tag="preferences"):
+                print(mem.content)
+        """
+        page_size = min(page_size, 200)
+        offset = 0
+        while True:
+            page = self.list_memories(
+                limit=page_size,
+                offset=offset,
+                type=type,
+                subtype=subtype,
+                tag=tag,
+                context_id=context_id,
+            )
+            yield from page.memories
+            if len(page.memories) < page_size:
+                return
+            offset += page_size
+
+    # Entity registry methods (gated by MEMORYLAYER_ENTITY_REGISTRY_ENABLED)
+
+    def list_entities(
+        self,
+        *,
+        status: str = "active",
+        limit: int = 100,
+        workspace_id: str | None = None,
+    ) -> list[Entity]:
+        """
+        List canonical entities in a workspace (deterministic order by id).
+
+        Requires the server-side entity registry to be enabled; on servers
+        where it is disabled this raises ``EnterpriseRequiredError``.
+
+        Args:
+            status: Entity status filter: "active" or "merged" (default: "active")
+            limit: Maximum entities to return (default: 100)
+            workspace_id: Workspace override (defaults to client workspace)
+
+        Returns:
+            List of canonical entities.
+        """
+        params: dict[str, Any] = {"status": status, "limit": limit}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = self._request("GET", "/entities", params=params, enterprise_feature="Entity registry")
+        entities_adapter = TypeAdapter(list[Entity])
+        return entities_adapter.validate_python(data.get("entities", []))
+
+    def get_entity(self, entity_id: str, *, workspace_id: str | None = None) -> Entity:
+        """
+        Get a single canonical entity by id.
+
+        Requires the server-side entity registry to be enabled.
+
+        Args:
+            entity_id: Entity ID
+            workspace_id: Workspace override (defaults to client workspace)
+
+        Returns:
+            The canonical entity.
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = self._request(
+            "GET",
+            f"/entities/{entity_id}",
+            params=params or None,
+            enterprise_feature="Entity registry",
+        )
+        return Entity(**data["entity"])
+
+    def resolve_entity(
+        self,
+        name: str,
+        *,
+        entity_type: str = "person",
+        workspace_id: str | None = None,
+    ) -> EntityResolution | None:
+        """
+        Resolve a surface name/alias to an existing canonical entity.
+
+        Never creates an entity. Returns None if no entity matched the name.
+        Requires the server-side entity registry to be enabled.
+
+        Args:
+            name: Surface name to resolve
+            entity_type: Entity type to resolve against (default: "person")
+            workspace_id: Workspace override (defaults to client workspace)
+
+        Returns:
+            EntityResolution, or None if no entity matched.
+        """
+        params: dict[str, Any] = {"name": name, "entity_type": entity_type}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        try:
+            data = self._request(
+                "GET",
+                "/entities/resolve",
+                params=params,
+                enterprise_feature="Entity registry",
+            )
+        except NotFoundError:
+            return None
+        return EntityResolution(**data["resolution"])
+
+    def merge_entities(
+        self,
+        source_id: str,
+        target_id: str,
+        *,
+        reason: str,
+        workspace_id: str | None = None,
+    ) -> Entity:
+        """
+        Merge ``source_id`` into ``target_id``; returns the surviving entity.
+
+        Requires the server-side entity registry to be enabled (and may be
+        flag-gated); on servers where it is disabled this raises
+        ``EnterpriseRequiredError``.
+
+        Args:
+            source_id: Entity to merge FROM (tombstoned on success)
+            target_id: Entity to merge INTO (survives)
+            reason: Audit reason recorded in the merged entity's provenance
+            workspace_id: Workspace override (defaults to client workspace)
+
+        Returns:
+            The surviving (target) entity.
+        """
+        payload: dict[str, Any] = {
+            "source_id": source_id,
+            "target_id": target_id,
+            "reason": reason,
+        }
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = self._request(
+            "POST",
+            "/entities/merge",
+            json=payload,
+            params=params or None,
+            enterprise_feature="Entity registry",
+        )
+        return Entity(**data["entity"])
+
+    # API token methods (/v1/tokens)
+
+    def create_token(
+        self,
+        name: str,
+        *,
+        principal_type: str = "User",
+        workspace_patterns: list[str] | None = None,
+        scopes: list[str] | None = None,
+        expires_in_days: int | None = None,
+    ) -> TokenCreateResult:
+        """
+        Create a new API token.
+
+        The returned object includes the one-time plaintext ``token`` secret —
+        store it securely; it cannot be retrieved again.
+
+        Args:
+            name: Human-readable token name
+            principal_type: Principal type (default: "User")
+            workspace_patterns: Workspace glob patterns (default: ["*"])
+            scopes: Permission scopes (default: ["*"])
+            expires_in_days: Optional expiry in days (None = no expiry)
+
+        Returns:
+            TokenCreateResult including the plaintext ``token``.
+        """
+        payload: dict[str, Any] = {
+            "name": name,
+            "principal_type": principal_type,
+            "workspace_patterns": workspace_patterns if workspace_patterns is not None else ["*"],
+            "scopes": scopes if scopes is not None else ["*"],
+        }
+        if expires_in_days is not None:
+            payload["expires_in_days"] = expires_in_days
+
+        data = self._request("POST", "/tokens", json=payload)
+        return TokenCreateResult(**data)
+
+    def list_tokens(self, *, include_revoked: bool = False) -> list[TokenInfo]:
+        """
+        List API tokens.
+
+        Args:
+            include_revoked: Include revoked tokens in the result (default: False)
+
+        Returns:
+            List of token records (without plaintext secrets).
+        """
+        params = {"include_revoked": str(include_revoked).lower()}
+        data = self._request("GET", "/tokens", params=params)
+        tokens_adapter = TypeAdapter(list[TokenInfo])
+        return tokens_adapter.validate_python(data.get("tokens", []))
+
+    def get_token(self, token_id: str) -> TokenInfo:
+        """
+        Get details for a single API token.
+
+        Args:
+            token_id: Token ID
+
+        Returns:
+            Token record (without plaintext secret).
+        """
+        data = self._request("GET", f"/tokens/{token_id}")
+        return TokenInfo(**data)
+
+    def delete_token(self, token_id: str) -> None:
+        """
+        Delete an API token.
+
+        Args:
+            token_id: Token ID
+        """
+        self._request("DELETE", f"/tokens/{token_id}")
+
+    def revoke_token(self, token_id: str) -> None:
+        """
+        Revoke an API token.
+
+        Revoked tokens are invalidated immediately but remain visible in token
+        listings with ``revoked=True``.
+
+        Args:
+            token_id: Token ID
+        """
+        self._request("POST", f"/tokens/{token_id}/revoke")
+
     # Memory extension operations
 
     def decay(
@@ -596,26 +1142,6 @@ class SyncMemoryLayerClient:
         payload = {"decay_rate": decay_rate}
         data = self._request("POST", f"/memories/{memory_id}/decay", json=payload)
         return Memory(**data.get("memory", data))
-
-    def trace_memory(self, memory_id: str) -> dict[str, Any]:
-        """
-        Trace memory provenance back to source.
-
-        Returns information about the memory's origin including
-        source resource, category membership, and association chain.
-
-        Args:
-            memory_id: Memory ID
-
-        Returns:
-            Trace result with provenance information
-
-        Example:
-            trace = client.trace_memory("mem_123")
-            print(trace["chain"])
-        """
-        data = self._request("GET", f"/memories/{memory_id}/trace")
-        return data.get("trace", data)
 
     def batch_memories(
         self,
@@ -707,6 +1233,73 @@ class SyncMemoryLayerClient:
         """
         data = self._request("GET", f"/sessions/{session_id}")
         return Session(**data)
+
+    def create_checkpoint(
+        self,
+        session_id: str,
+        transcript_segment: str,
+        *,
+        content_hash: str,
+        idempotency_key: str,
+        source_kind: str = "transcript",
+        source_sequence: int | None = None,
+        source_boundary: int | None = None,
+    ) -> SessionCheckpoint:
+        payload = {
+            "transcript_segment": transcript_segment,
+            "content_hash": content_hash,
+            "idempotency_key": idempotency_key,
+            "source_kind": source_kind,
+            "source_sequence": source_sequence,
+            "source_boundary": source_boundary,
+        }
+        data = self._request(
+            "POST",
+            f"/sessions/{session_id}/checkpoints",
+            json={key: value for key, value in payload.items() if value is not None},
+        )
+        return SessionCheckpoint.model_validate(data)
+
+    def get_checkpoint(self, session_id: str, checkpoint_id: str) -> SessionCheckpoint:
+        data = self._request("GET", f"/sessions/{session_id}/checkpoints/{checkpoint_id}")
+        return SessionCheckpoint.model_validate(data)
+
+    def get_context_pack(
+        self,
+        session_id: str,
+        *,
+        topic: str | None = None,
+        entity_ids: list[str] | None = None,
+        entity_names: list[str] | None = None,
+        budget_tokens: int = 2048,
+        section_limits: dict[str, int] | None = None,
+        **inclusion_controls: bool,
+    ) -> ContextPack:
+        payload: dict[str, Any] = {
+            "topic": topic,
+            "entity_ids": entity_ids or [],
+            "entity_names": entity_names or [],
+            "budget_tokens": budget_tokens,
+        }
+        if section_limits is not None:
+            payload["section_limits"] = section_limits
+        payload.update(inclusion_controls)
+        data = self._request("POST", f"/sessions/{session_id}/context-pack", json=payload)
+        return ContextPack.model_validate(data)
+
+    def get_context_delta(
+        self,
+        session_id: str,
+        cursor: str,
+        *,
+        budget_tokens: int = 2048,
+    ) -> ContextDelta:
+        data = self._request(
+            "POST",
+            f"/sessions/{session_id}/context-delta",
+            json={"cursor": cursor, "budget_tokens": budget_tokens},
+        )
+        return ContextDelta.model_validate(data)
 
     def set_context(
         self,
@@ -873,22 +1466,51 @@ class SyncMemoryLayerClient:
 
     # Workspace methods
 
-    def create_workspace(self, name: str) -> Workspace:
+    def create_workspace(self, name: str, tags: list[str] | None = None) -> Workspace:
         """
         Create a new workspace.
 
         Args:
             name: Workspace name
+            tags: Optional discovery tags (e.g. ["knowledge", "topic:finance"])
 
         Returns:
             Created workspace
 
         Example:
-            workspace = client.create_workspace("my-project")
+            workspace = client.create_workspace("my-project", tags=["knowledge"])
         """
-        payload = {"name": name}
+        payload: dict[str, Any] = {"name": name}
+        if tags is not None:
+            payload["tags"] = tags
         data = self._request("POST", "/workspaces", json=payload)
         return Workspace(**data)
+
+    def list_workspaces(
+        self,
+        tags: list[str] | None = None,
+        match: str = "all",
+    ) -> list[Workspace]:
+        """
+        List workspaces, optionally filtered by tag.
+
+        Args:
+            tags: Optional tag filter. When provided, only workspaces carrying the
+                tag(s) are returned.
+            match: 'all' requires every tag; 'any' requires at least one.
+
+        Returns:
+            List of matching workspaces
+
+        Example:
+            knowledge = client.list_workspaces(tags=["knowledge"])
+        """
+        params: dict[str, Any] = {}
+        if tags:
+            params["tags"] = tags
+            params["match"] = match
+        data = self._request("GET", "/workspaces", params=params)
+        return [Workspace(**w) for w in data.get("workspaces", [])]
 
     def get_workspace(self, workspace_id: str | None = None) -> Workspace:
         """
@@ -915,6 +1537,7 @@ class SyncMemoryLayerClient:
         workspace_id: str,
         name: str | None = None,
         settings: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
     ) -> Workspace:
         """
         Update an existing workspace.
@@ -923,6 +1546,7 @@ class SyncMemoryLayerClient:
             workspace_id: Workspace ID
             name: New workspace name (optional)
             settings: New workspace settings (optional)
+            tags: New discovery tags (optional)
 
         Returns:
             Updated workspace
@@ -931,14 +1555,17 @@ class SyncMemoryLayerClient:
             workspace = client.update_workspace(
                 "ws_123",
                 name="New Name",
-                settings={"key": "value"}
+                settings={"key": "value"},
+                tags=["knowledge"],
             )
         """
-        payload = {}
+        payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
         if settings is not None:
             payload["settings"] = settings
+        if tags is not None:
+            payload["tags"] = tags
 
         data = self._request("PUT", f"/workspaces/{workspace_id}", json=payload)
         return Workspace(**data.get("workspace", data))
@@ -995,6 +1622,26 @@ class SyncMemoryLayerClient:
         """
         data = self._request("GET", f"/workspaces/{workspace_id}/contexts")
         return data.get("contexts", [])
+
+    def delete_context(self, context_id: str, workspace_id: str | None = None) -> None:
+        """
+        Delete a context from a workspace.
+
+        Args:
+            context_id: Context ID to delete
+            workspace_id: Parent workspace ID (defaults to client ``workspace_id``)
+
+        Raises:
+            ValueError: If no workspace_id is available.
+
+        Example:
+            client.delete_context("project-alpha")
+            client.delete_context("project-alpha", workspace_id="ws_123")
+        """
+        ws_id = workspace_id or self.workspace_id
+        if not ws_id:
+            raise ValueError("workspace_id must be provided or set on the client")
+        self._request("DELETE", f"/workspaces/{ws_id}/contexts/{context_id}")
 
     def get_workspace_schema(self, workspace_id: str) -> dict[str, Any]:
         """
@@ -1153,6 +1800,7 @@ class SyncMemoryLayerClient:
         metadata: dict[str, Any] | None = None,
         expires_at: str | None = None,
         scope: str | None = None,
+        ownership: str = "user",
     ) -> ChatThread:
         """
         Create a new chat thread.
@@ -1197,6 +1845,9 @@ class SyncMemoryLayerClient:
             payload["expires_at"] = expires_at
         if scope is not None:
             payload["scope"] = scope
+        # Always forward ownership so the server uses the SDK-side default
+        # ('user') rather than relying on a request-schema default that may drift.
+        payload["ownership"] = ownership
 
         data = self._request("POST", "/threads", json=payload)
         return ChatThread(**data)
@@ -1209,6 +1860,7 @@ class SyncMemoryLayerClient:
         limit: int = 50,
         offset: int = 0,
         scope_filter: str | None = None,
+        ownership_filter: str | None = None,
     ) -> list[ChatThread]:
         """
         List chat threads.
@@ -1233,8 +1885,50 @@ class SyncMemoryLayerClient:
             params["user_id"] = user_id
         if scope_filter is not None:
             params["scope_filter"] = scope_filter
+        if ownership_filter is not None:
+            params["ownership_filter"] = ownership_filter
 
         data = self._request("GET", "/threads", params=params)
+        threads_adapter = TypeAdapter(list[ChatThread])
+        return threads_adapter.validate_python(data.get("threads", data if isinstance(data, list) else []))
+
+    def list_user_threads(
+        self,
+        user_id: str,
+        *,
+        ownership: str = "user",
+        scope_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ChatThread]:
+        """
+        List chat threads owned by a user across all workspaces.
+
+        Unlike ``list_threads``, this method is keyed on
+        (tenant, user, ownership) — no ``workspace_id`` required.
+
+        Args:
+            user_id: User ID to list threads for
+            ownership: Ownership filter (default: 'user')
+            scope_filter: Optional surface scope filter ('web' | 'office')
+            limit: Maximum threads to return (default: 50)
+            offset: Pagination offset (default: 0)
+
+        Returns:
+            List of ChatThread objects across all workspaces
+
+        Example:
+            threads = client.list_user_threads("user_123")
+        """
+        params: dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "ownership": ownership,
+        }
+        if scope_filter is not None:
+            params["scope_filter"] = scope_filter
+
+        data = self._request("GET", f"/threads/user/{user_id}", params=params)
         threads_adapter = TypeAdapter(list[ChatThread])
         return threads_adapter.validate_python(data.get("threads", data if isinstance(data, list) else []))
 

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from logging import Logger
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from scitrera_app_framework import Plugin, Variables
 from scitrera_app_framework import get_extension as _saf_get_extension
 from scitrera_app_framework import get_logger as _saf_get_logger
@@ -10,6 +11,7 @@ from scitrera_app_framework import get_variables as _saf_get_variables
 from scitrera_app_framework.core.plugins import init_all_plugins as _saf_init_all_plugins
 
 from .. import __version__
+from ..services.authentication.base import AuthenticationError
 
 EXT_FASTAPI_SERVER = "memorylayer-server-fastapi-server"
 
@@ -43,13 +45,23 @@ class FastApiPlugin(Plugin):
             from ..dependencies import initialize_services, shutdown_services
 
             nonlocal v
-            await initialize_services(v)
 
-            # store app in variables for access in services/plugins
+            # Publish the app and its Variables BEFORE services initialise.
+            #
+            # initialize_services runs every plugin's async_ready, and one of
+            # them attaches this app to the Aether connection -- which unblocks
+            # the in-process ProxyHttpTerminator and starts serving REST over
+            # Aether. Setting app.state.v afterwards left a window where a
+            # proxied request could reach a route whose get_variables_dep then
+            # raised "'State' object has no attribute 'v'". Observed on
+            # GET /v1/applications/_bid_preview during worker startup.
+            #
+            # Nothing here needs services to exist: `v` is already constructed,
+            # so publishing it first only makes it available sooner.
             v.set("app", app)
-
-            # store variables in app state
             app.state.v = v
+
+            await initialize_services(v)
 
             # Attach the fully-built FastAPI app to the Aether service
             # connection. This unblocks the in-process ProxyHttpTerminator,
@@ -81,6 +93,20 @@ class FastApiPlugin(Plugin):
             version=__version__,
             lifespan=lifespan_context,
         )
+
+        # Global handler: AuthenticationError always maps to its status code
+        # (default 401). Without this, routes that lack a per-endpoint
+        # try/except AuthenticationError would let the exception propagate into
+        # FastAPI's generic Exception handler and return HTTP 500 instead of the
+        # correct 4xx. Per-route handlers are left in place (harmless duplication).
+        @app.exception_handler(AuthenticationError)
+        async def _authentication_error_handler(
+            request: Request, exc: AuthenticationError
+        ) -> JSONResponse:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.message},
+            )
 
         @app.get("/")
         async def root() -> dict:

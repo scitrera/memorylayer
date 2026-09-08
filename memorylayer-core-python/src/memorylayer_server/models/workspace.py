@@ -12,6 +12,24 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
+def normalize_tags(tags: list[str] | None) -> list[str]:
+    """Normalize a tag list: strip, lowercase, drop empties, de-dupe (order-preserving).
+
+    Shared by the Workspace model (write path) and storage backends (query path) so that
+    stored tags and lookup tags are normalized identically (case-insensitive matching).
+    """
+    if not tags:
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for tag in tags:
+        normalized = tag.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result
+
+
 class ScopeBoosts(BaseModel):
     """Locality ranking boosts for memory retrieval."""
 
@@ -66,6 +84,9 @@ class Workspace(BaseModel):
     # Configuration
     settings: dict[str, Any] = Field(default_factory=dict, description="Workspace-level settings (retention, auto-remember, etc.)")
 
+    # Discovery
+    tags: list[str] = Field(default_factory=list, description="Workspace tags for discovery/lookup (e.g. 'knowledge', 'topic:finance')")
+
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Last update timestamp")
@@ -77,6 +98,12 @@ class Workspace(BaseModel):
         if not v or not v.strip():
             raise ValueError("Workspace name cannot be empty")
         return v.strip()
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, v: list[str]) -> list[str]:
+        """Normalize tags: strip, lowercase, drop empties, de-dupe (order-preserving)."""
+        return normalize_tags(v)
 
 
 class ContextSettings(BaseModel):

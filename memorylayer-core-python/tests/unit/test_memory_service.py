@@ -525,9 +525,28 @@ class TestRecallModes:
     async def test_recall_hybrid_mode_uses_rag_when_sufficient(
         self,
         memory_service: MemoryService,
-        workspace_id: str,
     ):
         """Test HYBRID mode uses RAG when results are sufficient."""
+        # Isolated workspace: this test asserts on the top result's importance,
+        # so it must not see memories/associations from other tests in the
+        # shared "default" workspace (graph in-degree could otherwise reorder
+        # the top result under backlink-salience boosting).
+        import uuid
+        from datetime import datetime
+
+        from memorylayer_server.models.workspace import Workspace
+
+        workspace_id = f"hybrid_rag_{uuid.uuid4().hex[:8]}"
+        await memory_service.storage.create_workspace(
+            Workspace(
+                id=workspace_id,
+                tenant_id="hybrid_rag_tenant",
+                name="Hybrid RAG Test",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
         # Use identical text for perfect match
         content = "High quality machine learning content"
         await memory_service.remember(workspace_id, RememberInput(content=content, importance=0.95))
@@ -569,6 +588,121 @@ class TestRecallModes:
         # Should fall back to LLM mode due to low quality RAG results
         # (in current implementation, this may still show as RAG since LLM is not fully implemented)
         assert result.mode_used in [RecallMode.RAG, RecallMode.LLM]
+
+    @pytest.mark.asyncio
+    async def test_recall_hybrid_uses_relevance_not_importance(
+        self,
+        memory_service: MemoryService,
+    ):
+        """HYBRID sufficiency must gate on retrieval relevance, not importance.
+
+        Regression for the bug where HYBRID compared the top result's
+        `importance` (a stored authoring weight, default 0.5) against
+        `rag_threshold` (a RAG confidence gate, default 0.8). A high-relevance
+        result with LOW importance must keep HYBRID on the RAG path and NOT
+        invoke the expensive LLM fallback.
+        """
+        import uuid
+        from datetime import datetime
+
+        from memorylayer_server.models.workspace import Workspace
+
+        workspace_id = f"hybrid_rel_{uuid.uuid4().hex[:8]}"
+        await memory_service.storage.create_workspace(
+            Workspace(
+                id=workspace_id,
+                tenant_id="hybrid_rel_tenant",
+                name="Hybrid Relevance Test",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+        # Exact-match content but deliberately LOW importance.
+        content = "Highly relevant low importance content"
+        await memory_service.remember(workspace_id, RememberInput(content=content, importance=0.1))
+
+        # Spy on _recall_llm to detect whether the LLM fallback was taken.
+        llm_called = False
+        original_recall_llm = memory_service._recall_llm
+
+        async def spy_recall_llm(*args, **kwargs):
+            nonlocal llm_called
+            llm_called = True
+            return await original_recall_llm(*args, **kwargs)
+
+        memory_service._recall_llm = spy_recall_llm
+        try:
+            result = await memory_service.recall(
+                workspace_id,
+                RecallInput(
+                    query=content,  # Exact match -> high relevance / boosted_score
+                    mode=RecallMode.HYBRID,
+                    rag_threshold=0.8,
+                    tolerance=SearchTolerance.LOOSE,
+                    min_relevance=0.0,
+                ),
+            )
+        finally:
+            memory_service._recall_llm = original_recall_llm
+
+        # High relevance despite low importance -> stay on RAG, no LLM fallback.
+        assert result.mode_used == RecallMode.RAG
+        assert llm_called is False
+
+    @pytest.mark.asyncio
+    async def test_recall_llm_mode_honors_observer_filter(
+        self,
+        memory_service: MemoryService,
+    ):
+        """LLM-mode recall must forward filters (observer_id) to the search.
+
+        Regression for the bug where _recall_llm rebuilt its RecallInput and
+        dropped observer_id (and other filters), so LLM mode returned memories
+        that did not match the caller's filter.
+        """
+        import uuid
+        from datetime import datetime
+
+        from memorylayer_server.models.workspace import Workspace
+
+        workspace_id = f"llm_obs_{uuid.uuid4().hex[:8]}"
+        await memory_service.storage.create_workspace(
+            Workspace(
+                id=workspace_id,
+                tenant_id="llm_obs_tenant",
+                name="LLM Observer Filter Test",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+        # Two memories with the same topic but different observers.
+        await memory_service.remember(
+            workspace_id, RememberInput(content="Project alpha status update", observer_id="alice")
+        )
+        await memory_service.remember(
+            workspace_id, RememberInput(content="Project alpha status update", observer_id="bob")
+        )
+
+        result = await memory_service.recall(
+            workspace_id,
+            RecallInput(
+                query="project alpha status",
+                mode=RecallMode.LLM,
+                observer_id="alice",
+                tolerance=SearchTolerance.LOOSE,
+                min_relevance=0.0,
+                include_associations=False,
+                traverse_depth=0,
+            ),
+        )
+
+        # Every returned memory must belong to the filtered observer.
+        assert result.mode_used == RecallMode.LLM
+        assert len(result.memories) >= 1
+        for memory in result.memories:
+            assert memory.observer_id == "alice"
 
 
 class TestToleranceLevels:

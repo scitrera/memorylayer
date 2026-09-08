@@ -15,18 +15,34 @@ Endpoints:
 import logging
 import time as _time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel
 from scitrera_app_framework import Plugin, Variables, get_extension
 
 from ...lifecycle.fastapi import get_logger, get_variables_dep
-from ...models.memory import DetailLevel, RecallInput, ReflectInput, RememberInput
+from ...models.generation import GenerationBudgetExceededError, GenerationNotAllowedError
+from ...models.memory import (
+    DetailLevel,
+    Memory,
+    MemoryReplaceInput,
+    MemoryRevision,
+    MemoryType,
+    RecallInput,
+    ReflectInput,
+    RememberInput,
+)
+from ...models.versioned_resource import VersionedResourcePreconditionFailedError
 from ...services.audit import AuditEvent, AuditService
 from ...services.authentication import AuthenticationError, AuthenticationService
 from ...services.authorization import AuthorizationService
+from ...services.ingest import normalize_connector_metadata
 from ...services.memory import MemoryService
 from ...services.metrics import MetricsService
 from ...services.reflect import EXT_REFLECT_SERVICE, ReflectService
+from ...services.storage import StorageCapabilityError
 from .. import EXT_MULTI_API_ROUTERS
+from ._versioned_resource import raise_api_error as _shared_raise_api_error
+from ._versioned_resource import required_header as _required_header
 from .deps import get_active_session, get_audit_service, get_auth_service, get_authz_service, get_memory_service, get_metrics_service
 from .schemas import (
     BatchCreateOp,
@@ -38,6 +54,7 @@ from .schemas import (
     MemoryBatchRequest,
     MemoryCreateRequest,
     MemoryDecayRequest,
+    MemoryListResponse,
     MemoryRecallRequest,
     MemoryReflectRequest,
     MemoryResponse,
@@ -49,6 +66,66 @@ from .schemas import (
 router = APIRouter(prefix="/v1/memories", tags=["memories"])
 
 
+class MemoryMutationResponse(BaseModel):
+    memory: Memory
+    replayed: bool = False
+
+
+class MemoryRevisionResponse(BaseModel):
+    memory: Memory
+    action: str
+    operation_id: str
+
+
+class MemoryRevisionListResponse(BaseModel):
+    revisions: list[MemoryRevisionResponse]
+    next_page_token: str | None = None
+
+
+def _memory_revision_response(revision: MemoryRevision) -> MemoryRevisionResponse:
+    return MemoryRevisionResponse(
+        memory=revision.memory,
+        action=revision.action,
+        operation_id=revision.operation_id,
+    )
+
+
+# Aether machine-principal namespaces. A service/agent connection principal must
+# never OWN a memory: a memory user-scoped to a machine id is unrecallable by any
+# real user, so machine-committed workspace knowledge belongs to the workspace
+# (user_id NULL), not to the connection principal.
+_MACHINE_PRINCIPAL_PREFIXES = ("sv::", "ag::")
+
+
+def _owner_user_id(request_user_id: str | None, ctx_user_id: str | None) -> str | None:
+    """Resolve the ``user_id`` to stamp as a new memory's owner.
+
+    An explicit request ``user_id`` wins; otherwise fall back to the context
+    user — EXCEPT a machine (service/agent) connection principal, which is
+    dropped to None so the memory is workspace-shared rather than orphaned to a
+    principal no user recall will ever match. Note: under OBO the context user is
+    the real subject (a plain user id), so genuine user commits are unaffected.
+    """
+    uid = request_user_id if request_user_id is not None else ctx_user_id
+    if uid and uid.startswith(_MACHINE_PRINCIPAL_PREFIXES):
+        return None
+    return uid
+
+
+def _drop_embeddings(memories: list) -> None:
+    """Blank each memory's embedding vector in place, for response serialization.
+
+    The vectors dominate the payload — at 1024 dimensions they are ~8 KB per
+    memory, so a default recall of 10 is ~80 KB of data callers almost never
+    read. Endpoints omit them unless the caller opts in.
+
+    In place is safe here: these are per-request Pydantic models built from
+    storage rows, not shared cache entries.
+    """
+    for memory in memories:
+        memory.embedding = None
+
+
 # Dependencies for services
 async def get_reflect_service(v: Variables = Depends(get_variables_dep)) -> ReflectService:
     """Get reflect service instance for FastAPI dependency injection."""
@@ -57,7 +134,7 @@ async def get_reflect_service(v: Variables = Depends(get_variables_dep)) -> Refl
 
 @router.post(
     "",
-    response_model=MemoryResponse,
+    response_model=MemoryMutationResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid request"},
@@ -68,6 +145,7 @@ async def get_reflect_service(v: Variables = Depends(get_variables_dep)) -> Refl
 )
 async def create_memory(
     http_request: Request,
+    response: Response,
     request: MemoryCreateRequest,
     session_id: str = Depends(get_active_session),
     auth_service: AuthenticationService = Depends(get_auth_service),
@@ -76,7 +154,7 @@ async def create_memory(
     audit_service: AuditService = Depends(get_audit_service),
     metrics_service: MetricsService = Depends(get_metrics_service),
     logger: logging.Logger = Depends(get_logger),
-) -> MemoryResponse:
+) -> MemoryMutationResponse:
     """
     Store a new memory with automatic embedding and classification.
 
@@ -108,27 +186,57 @@ async def create_memory(
 
         logger.info("Creating memory in workspace: %s, content length: %d", ctx.workspace_id, len(request.content))
 
+        # Connector-shaped metadata is an explicit opt-in to deterministic
+        # knowledge-work normalization. Ordinary arbitrary metadata is untouched.
+        normalized_metadata = normalize_connector_metadata(request.metadata).metadata
+
         # Convert request to domain input
         remember_input = RememberInput(
             content=request.content,
+            tenant_id=ctx.tenant_id,
+            logical_key=request.logical_key,
             type=request.type,
             subtype=request.subtype,
             importance=request.importance,
             tags=request.tags,
-            metadata=request.metadata,
+            metadata=normalized_metadata,
+            refinement_metadata=request.refinement_metadata,
             associations=request.associations,
+            relations=request.relations,
             context_id=request.context_id or ctx.context_id,
             observer_id=request.observer_id,
             subject_id=request.subject_id,
-            user_id=request.user_id if request.user_id is not None else ctx.user_id,
+            user_id=_owner_user_id(request.user_id, ctx.user_id),
+            pinned=request.pinned,
+            scope=request.scope,
         )
 
-        # Store memory
+        operation_id = http_request.headers.get("Idempotency-Key", "").strip()
+        expected = http_request.headers.get("If-None-Match", "").strip()
+        replayed = False
         _t0 = _time.monotonic()
-        memory = await memory_service.remember(
-            workspace_id=ctx.workspace_id,
-            input=remember_input,
-        )
+        if operation_id or expected:
+            operation_id = _required_header(http_request, "Idempotency-Key")
+            expected = _required_header(http_request, "If-None-Match")
+            if expected != "*":
+                raise VersionedResourcePreconditionFailedError("conditional memory create requires If-None-Match: *")
+            result = await memory_service.remember_versioned(
+                workspace_id=ctx.workspace_id,
+                input=remember_input,
+                tenant_id=ctx.tenant_id,
+                user_id=remember_input.user_id,
+                operation_id=operation_id,
+                expected_etag=expected,
+            )
+            memory = result.memory
+            replayed = result.replayed
+        else:
+            if request.logical_key is not None:
+                raise ValueError("logical_key requires Idempotency-Key and If-None-Match headers")
+            memory = await memory_service.remember(
+                workspace_id=ctx.workspace_id,
+                input=remember_input,
+            )
 
         logger.info("Created memory: %s", memory.id)
         try:
@@ -152,17 +260,114 @@ async def create_memory(
             )
         except Exception:
             logger.debug("Audit record failed for memory create")
-        return MemoryResponse(memory=memory)
+        response.headers["ETag"] = memory.etag
+        return MemoryMutationResponse(memory=memory, replayed=replayed)
 
+    except StorageCapabilityError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"code": "storage_capability_missing", "capability": e.capability},
+        ) from e
     except AuthenticationError as e:
         logger.warning("Authentication failed: %s", e)
         raise HTTPException(status_code=e.status_code, detail=e.message)
+    except GenerationNotAllowedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": e.code, "activity": e.activity.value, "policy": e.policy.value},
+        ) from e
+    except GenerationBudgetExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": e.code, "activity": e.activity.value, "message": e.reason},
+        ) from e
     except ValueError as e:
         logger.warning("Invalid memory creation request: %s", e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error("Failed to create memory: %s", e, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create memory")
+        _shared_raise_api_error(e, "create memory", __name__)
+
+
+@router.get(
+    "",
+    response_model=MemoryListResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def list_memories(
+    http_request: Request,
+    limit: int = Query(50, ge=1, le=200, description="Maximum memories to return"),
+    offset: int = Query(0, ge=0, description="Number of memories to skip for pagination"),
+    type: MemoryType | None = Query(None, description="Filter by cognitive type"),
+    subtype: str | None = Query(None, description="Filter by domain subtype"),
+    tag: str | None = Query(None, description="Filter by a single tag"),
+    context_id: str | None = Query(None, description="Filter by memory context"),
+    include_embeddings: bool = Query(
+        False,
+        description=(
+            "Include each memory's raw embedding vector. Off by default: the vectors dominate the payload and are rarely used by callers."
+        ),
+    ),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> MemoryListResponse:
+    """
+    List/browse memories in a workspace ordered by recency (created_at desc).
+
+    Unlike POST /recall this performs no vector search — it is a plain filtered
+    enumeration for browsing. Supports pagination and optional type/subtype/tag/
+    context filters.
+
+    Workspace Resolution:
+        1. X-Workspace-ID header (explicit override)
+        2. session.workspace_id (from X-Session-ID header)
+        3. "_default" (fallback)
+    """
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(ctx, "memories", "read", workspace_id=ctx.workspace_id)
+
+        logger.debug("(API) Listing memories in workspace: %s (limit=%d, offset=%d)", ctx.workspace_id, limit, offset)
+
+        memories = await memory_service.list_memories(
+            ctx.workspace_id,
+            types=[type] if type is not None else None,
+            subtypes=[subtype] if subtype else None,
+            tags=[tag] if tag else None,
+            context_id=context_id,
+            limit=limit,
+            offset=offset,
+        )
+
+        try:
+            await audit_service.record(
+                AuditEvent(
+                    event_type="memory",
+                    action="list",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="memory",
+                    metadata={"count": len(memories)},
+                )
+            )
+        except Exception:
+            logger.debug("Audit record failed for memory list")
+        if not include_embeddings:
+            _drop_embeddings(memories)
+        return MemoryListResponse(memories=memories, total_count=len(memories))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to list memories: %s", e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list memories")
 
 
 @router.get(
@@ -177,7 +382,10 @@ async def create_memory(
 )
 async def get_memory(
     http_request: Request,
+    response: Response,
     memory_id: str,
+    include_deleted: bool = Query(False),
+    workspace_id: str | None = Query(None),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     memory_service: MemoryService = Depends(get_memory_service),
@@ -206,9 +414,13 @@ async def get_memory(
         logger.debug("Getting memory: %s", memory_id)
 
         # Memory IDs are globally unique; look up without workspace filter
-        memory = await memory_service.get_by_id(memory_id=memory_id)
+        memory = await memory_service.get_by_id(
+            memory_id=memory_id,
+            track_access=not include_deleted,
+            include_deleted=include_deleted,
+        )
 
-        if not memory:
+        if not memory or (workspace_id is not None and memory.workspace_id != workspace_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
 
         await authz_service.require_authorization(ctx, "memories", "read", resource_id=memory_id, workspace_id=memory.workspace_id)
@@ -227,6 +439,7 @@ async def get_memory(
             )
         except Exception:
             logger.debug("Audit record failed for memory read")
+        response.headers["ETag"] = memory.etag
         return MemoryResponse(memory=memory)
 
     except HTTPException:
@@ -249,6 +462,7 @@ async def get_memory(
 )
 async def update_memory(
     http_request: Request,
+    response: Response,
     memory_id: str,
     request: MemoryUpdateRequest,
     auth_service: AuthenticationService = Depends(get_auth_service),
@@ -302,6 +516,8 @@ async def update_memory(
             update_kwargs["tags"] = request.tags
         if request.metadata is not None:
             update_kwargs["metadata"] = request.metadata
+        if request.refinement_metadata is not None:
+            update_kwargs["refinement_metadata"] = request.refinement_metadata
         if request.pinned is not None:
             update_kwargs["pinned"] = 1 if request.pinned else 0
 
@@ -326,16 +542,231 @@ async def update_memory(
             )
         except Exception:
             logger.debug("Audit record failed for memory update")
+        response.headers["ETag"] = updated_memory.etag
         return MemoryResponse(memory=updated_memory)
 
     except HTTPException:
         raise
+    except GenerationNotAllowedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": e.code, "activity": e.activity.value, "policy": e.policy.value},
+        ) from e
+    except GenerationBudgetExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": e.code, "activity": e.activity.value, "message": e.reason},
+        ) from e
     except ValueError as e:
         logger.warning("Invalid memory update request: %s", e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to update memory %s: %s", memory_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update memory")
+
+
+@router.get(
+    "/{memory_id}/revisions",
+    response_model=MemoryRevisionListResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def list_memory_revisions(
+    http_request: Request,
+    memory_id: str,
+    workspace_id: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    page_token: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> MemoryRevisionListResponse:
+    """List immutable semantic memory revisions newest first."""
+
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        current = await memory_service.get_by_id(
+            memory_id,
+            track_access=False,
+            include_deleted=True,
+        )
+        if current is None or current.tenant_id != ctx.tenant_id or (workspace_id is not None and current.workspace_id != workspace_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Memory not found: {memory_id}",
+            )
+        await authz_service.require_authorization(
+            ctx,
+            "memories",
+            "read",
+            resource_id=memory_id,
+            workspace_id=current.workspace_id,
+        )
+        revisions, next_token = await memory_service.list_revision_page(
+            ctx.tenant_id,
+            current.workspace_id,
+            memory_id,
+            limit=limit,
+            page_token=page_token,
+        )
+        return MemoryRevisionListResponse(
+            revisions=[_memory_revision_response(item) for item in revisions],
+            next_page_token=next_token,
+        )
+    except Exception as exc:
+        _shared_raise_api_error(exc, "list memory revisions", __name__)
+
+
+@router.put(
+    "/{memory_id}/semantic",
+    response_model=MemoryMutationResponse,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 412: {"model": ErrorResponse}},
+)
+async def replace_memory_semantic(
+    http_request: Request,
+    response: Response,
+    memory_id: str,
+    request: MemoryReplaceInput,
+    workspace_id: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> MemoryMutationResponse:
+    """Conditionally replace the complete refinement-owned memory document."""
+
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        current = await memory_service.get_by_id(memory_id, track_access=False)
+        if current is None or current.tenant_id != ctx.tenant_id or (workspace_id is not None and current.workspace_id != workspace_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Memory not found: {memory_id}",
+            )
+        await authz_service.require_authorization(
+            ctx,
+            "memories",
+            "write",
+            resource_id=memory_id,
+            workspace_id=current.workspace_id,
+        )
+        result = await memory_service.replace_versioned(
+            current.workspace_id,
+            memory_id,
+            request,
+            tenant_id=ctx.tenant_id,
+            operation_id=_required_header(http_request, "Idempotency-Key"),
+            expected_etag=_required_header(http_request, "If-Match"),
+        )
+        response.headers["ETag"] = result.memory.etag
+        return MemoryMutationResponse(memory=result.memory, replayed=result.replayed)
+    except Exception as exc:
+        _shared_raise_api_error(exc, "replace semantic memory", __name__)
+
+
+async def _change_memory_deleted_state(
+    *,
+    action: str,
+    http_request: Request,
+    response: Response,
+    memory_id: str,
+    workspace_id: str | None,
+    auth_service: AuthenticationService,
+    authz_service: AuthorizationService,
+    memory_service: MemoryService,
+) -> MemoryMutationResponse:
+    ctx = await auth_service.build_context(http_request, None)
+    current = await memory_service.get_by_id(
+        memory_id,
+        track_access=False,
+        include_deleted=True,
+    )
+    if current is None or current.tenant_id != ctx.tenant_id or (workspace_id is not None and current.workspace_id != workspace_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory not found: {memory_id}",
+        )
+    await authz_service.require_authorization(
+        ctx,
+        "memories",
+        "delete" if action == "delete" else "write",
+        resource_id=memory_id,
+        workspace_id=current.workspace_id,
+    )
+    operation_id = _required_header(http_request, "Idempotency-Key")
+    expected_etag = _required_header(http_request, "If-Match")
+    if action == "delete":
+        result = await memory_service.delete_versioned(
+            current.workspace_id,
+            memory_id,
+            tenant_id=ctx.tenant_id,
+            operation_id=operation_id,
+            expected_etag=expected_etag,
+        )
+    else:
+        result = await memory_service.restore_versioned(
+            current.workspace_id,
+            memory_id,
+            tenant_id=ctx.tenant_id,
+            operation_id=operation_id,
+            expected_etag=expected_etag,
+        )
+    response.headers["ETag"] = result.memory.etag
+    return MemoryMutationResponse(memory=result.memory, replayed=result.replayed)
+
+
+@router.post(
+    "/{memory_id}/delete",
+    response_model=MemoryMutationResponse,
+)
+async def delete_memory_versioned(
+    http_request: Request,
+    response: Response,
+    memory_id: str,
+    workspace_id: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> MemoryMutationResponse:
+    try:
+        return await _change_memory_deleted_state(
+            action="delete",
+            http_request=http_request,
+            response=response,
+            memory_id=memory_id,
+            workspace_id=workspace_id,
+            auth_service=auth_service,
+            authz_service=authz_service,
+            memory_service=memory_service,
+        )
+    except Exception as exc:
+        _shared_raise_api_error(exc, "delete semantic memory", __name__)
+
+
+@router.post(
+    "/{memory_id}/restore",
+    response_model=MemoryMutationResponse,
+)
+async def restore_memory_versioned(
+    http_request: Request,
+    response: Response,
+    memory_id: str,
+    workspace_id: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> MemoryMutationResponse:
+    try:
+        return await _change_memory_deleted_state(
+            action="restore",
+            http_request=http_request,
+            response=response,
+            memory_id=memory_id,
+            workspace_id=workspace_id,
+            auth_service=auth_service,
+            authz_service=authz_service,
+            memory_service=memory_service,
+        )
+    except Exception as exc:
+        _shared_raise_api_error(exc, "restore semantic memory", __name__)
 
 
 @router.delete(
@@ -373,14 +804,25 @@ async def delete_memory(
         HTTPException: If memory not found or deletion fails
     """
     try:
-        # Build request context and check authorization
+        # Build request context. Fetch the memory first (IDs are globally
+        # unique), then authorize and delete against the memory's ACTUAL
+        # workspace — not ctx.workspace_id. Memories can live in non-default
+        # workspaces (e.g. USER scope / _global_user); deleting against
+        # ctx.workspace_id silently failed (404) for those. Mirrors update_memory.
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(ctx, "memories", "delete", resource_id=memory_id, workspace_id=ctx.workspace_id)
+
+        existing_memory = await memory_service.get_by_id(memory_id=memory_id)
+        if not existing_memory:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory not found: {memory_id}")
+
+        await authz_service.require_authorization(
+            ctx, "memories", "delete", resource_id=memory_id, workspace_id=existing_memory.workspace_id
+        )
 
         logger.info("Deleting memory: %s (hard=%s)", memory_id, hard)
 
         success = await memory_service.forget(
-            workspace_id=ctx.workspace_id,
+            workspace_id=existing_memory.workspace_id,
             memory_id=memory_id,
             hard=hard,
         )
@@ -390,7 +832,7 @@ async def delete_memory(
 
         logger.info("Deleted memory: %s", memory_id)
         try:
-            metrics_service.counter("memorylayer_delete_total", labels={"workspace": ctx.workspace_id})
+            metrics_service.counter("memorylayer_delete_total", labels={"workspace": existing_memory.workspace_id})
         except Exception:
             logger.debug("Metrics recording failed for memory delete")
         try:
@@ -399,7 +841,7 @@ async def delete_memory(
                     event_type="memory",
                     action="delete",
                     tenant_id=ctx.tenant_id,
-                    workspace_id=ctx.workspace_id,
+                    workspace_id=existing_memory.workspace_id,
                     user_id=ctx.user_id,
                     resource_type="memory",
                     resource_id=memory_id,
@@ -473,9 +915,12 @@ async def recall_memories(
             observer_id=request.observer_id,
             subject_id=request.subject_id,
             user_id=request.user_id if request.user_id is not None else ctx.user_id,
+            include_global=request.include_global,
+            include_global_user=request.include_global_user,
             mode=request.mode,
             tolerance=request.tolerance,
             limit=request.limit,
+            offset=request.offset,
             min_relevance=request.min_relevance,
             recency_weight=request.recency_weight,
             include_associations=request.include_associations,
@@ -483,10 +928,16 @@ async def recall_memories(
             max_expansion=request.max_expansion,
             created_after=request.created_after,
             created_before=request.created_before,
+            event_after=request.event_after,
+            event_before=request.event_before,
+            time_order=request.time_order,
             context=request.context,
             rag_threshold=request.rag_threshold,
             include_archived=request.include_archived,
             exclude_ids=request.exclude_ids,
+            budget_tokens=request.budget_tokens,
+            include_confidence=request.include_confidence,
+            include_relations=request.include_relations,
         )
 
         # Perform recall
@@ -497,6 +948,9 @@ async def recall_memories(
         )
 
         logger.debug("Recalled %d memories in %d ms using %s mode", len(result.memories), result.search_latency_ms, result.mode_used)
+
+        if not request.include_embeddings:
+            _drop_embeddings(result.memories)
 
         try:
             metrics_service.counter("memorylayer_recall_total", labels={"workspace": ctx.workspace_id, "mode": request.mode or "default"})
@@ -526,6 +980,16 @@ async def recall_memories(
             logger.debug("Audit record failed for memory recall")
         return result
 
+    except GenerationNotAllowedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": e.code, "activity": e.activity.value, "policy": e.policy.value},
+        ) from e
+    except GenerationBudgetExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": e.code, "activity": e.activity.value, "message": e.reason},
+        ) from e
     except ValueError as e:
         logger.warning("Invalid recall request: %s", e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -622,6 +1086,16 @@ async def reflect_memories(
             logger.debug("Audit record failed for memory reflect")
         return result
 
+    except GenerationNotAllowedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": e.code, "activity": e.activity.value, "policy": e.policy.value},
+        ) from e
+    except GenerationBudgetExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": e.code, "activity": e.activity.value, "message": e.reason},
+        ) from e
     except ValueError as e:
         logger.warning("Invalid reflect request: %s", e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -753,13 +1227,14 @@ async def batch_operations(
             try:
                 # CREATE operation
                 if isinstance(operation, BatchCreateOp):
+                    normalized_metadata = normalize_connector_metadata(operation.metadata).metadata
                     remember_input = RememberInput(
                         content=operation.content,
                         type=operation.type,
                         subtype=operation.subtype,
                         importance=operation.importance,
                         tags=operation.tags,
-                        metadata=operation.metadata,
+                        metadata=normalized_metadata,
                         observer_id=operation.observer_id,
                         subject_id=operation.subject_id,
                     )
@@ -784,10 +1259,18 @@ async def batch_operations(
                 elif isinstance(operation, BatchUpdateOp):
                     memory_id = operation.memory_id
 
-                    # Check if memory exists
-                    existing = await memory_service.get(ctx.workspace_id, memory_id)
+                    # Resolve the memory's ACTUAL workspace (IDs are globally
+                    # unique). Using ctx.workspace_id silently 404'd memories in
+                    # non-default workspaces (e.g. USER scope). Mirrors
+                    # single-endpoint update_memory / delete_memory.
+                    existing = await memory_service.get_by_id(memory_id=memory_id)
                     if not existing:
                         raise ValueError(f"Memory not found: {memory_id}")
+
+                    # Authorize against the memory's real workspace (not ctx).
+                    await authz_service.require_authorization(
+                        ctx, "memories", "write", resource_id=memory_id, workspace_id=existing.workspace_id
+                    )
 
                     # Build update kwargs from non-None fields
                     update_kwargs = {}
@@ -806,8 +1289,8 @@ async def batch_operations(
                     if operation.pinned is not None:
                         update_kwargs["pinned"] = 1 if operation.pinned else 0
 
-                    # Update memory via service layer
-                    updated = await memory_service.update(workspace_id=ctx.workspace_id, memory_id=memory_id, **update_kwargs)
+                    # Update memory via service layer (memory's own workspace)
+                    updated = await memory_service.update(workspace_id=existing.workspace_id, memory_id=memory_id, **update_kwargs)
 
                     results.append(
                         BatchOperationResult(
@@ -823,9 +1306,21 @@ async def batch_operations(
                 elif isinstance(operation, BatchDeleteOp):
                     memory_id = operation.memory_id
 
-                    # Delete memory
+                    # Resolve the memory's ACTUAL workspace (IDs are globally
+                    # unique) before deleting; ctx.workspace_id silently 404'd
+                    # memories in non-default workspaces (e.g. USER scope).
+                    existing = await memory_service.get_by_id(memory_id=memory_id)
+                    if not existing:
+                        raise ValueError(f"Memory not found: {memory_id}")
+
+                    # Authorize against the memory's real workspace (not ctx).
+                    await authz_service.require_authorization(
+                        ctx, "memories", "delete", resource_id=memory_id, workspace_id=existing.workspace_id
+                    )
+
+                    # Delete memory (memory's own workspace)
                     success = await memory_service.forget(
-                        workspace_id=ctx.workspace_id,
+                        workspace_id=existing.workspace_id,
                         memory_id=memory_id,
                         hard=operation.hard,
                     )

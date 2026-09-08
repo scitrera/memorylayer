@@ -12,6 +12,8 @@ from typing import Any
 
 from scitrera_app_framework import Variables, get_logger
 
+from ...models.generation import GenerationActivity
+
 from ...config import (
     DEFAULT_MEMORYLAYER_CONTEXT_EXEC_HARD_CAP,
     DEFAULT_MEMORYLAYER_CONTEXT_EXEC_SOFT_CAP,
@@ -452,6 +454,7 @@ class DefaultContextEnvironmentService(ContextEnvironmentService):
                 prompt=prompt,
                 context=context,
                 max_tokens=self._query_max_tokens,
+                activity=GenerationActivity.SYNTHESIS,
             )
 
             # Store result if requested

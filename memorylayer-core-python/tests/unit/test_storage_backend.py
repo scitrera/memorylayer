@@ -693,6 +693,137 @@ class TestWorkspaceStorage:
         result = await storage_backend.get_workspace("nonexistent_workspace")
         assert result is None
 
+    async def test_workspace_tags_round_trip_and_normalized(self, storage_backend):
+        """Tags persist and are normalized (strip/lowercase/dedupe) on write."""
+        workspace = Workspace(
+            id="ws_tags_rt",
+            tenant_id="t1",
+            name="Tagged",
+            tags=["  Knowledge ", "knowledge", "Topic:Finance"],
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        await storage_backend.create_workspace(workspace)
+
+        retrieved = await storage_backend.get_workspace("ws_tags_rt")
+        assert retrieved is not None
+        assert retrieved.tags == ["knowledge", "topic:finance"]
+
+    async def test_list_workspaces_filters_by_tag(self, storage_backend):
+        """list_workspaces(tags=...) supports 'all' (default) and 'any' match modes."""
+        async def _mk(ws_id, tags):
+            await storage_backend.create_workspace(
+                Workspace(
+                    id=ws_id,
+                    tenant_id="t1",
+                    name=ws_id,
+                    tags=tags,
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+
+        await _mk("ws_kb_fin", ["knowledge", "topic:finance"])
+        await _mk("ws_kb_legal", ["knowledge", "topic:legal"])
+        await _mk("ws_plain", ["project"])
+
+        def ids(workspaces):
+            return {w.id for w in workspaces}
+
+        # single tag -> all knowledge workspaces
+        knowledge = await storage_backend.list_workspaces(tags=["knowledge"])
+        assert {"ws_kb_fin", "ws_kb_legal"} <= ids(knowledge)
+        assert "ws_plain" not in ids(knowledge)
+
+        # match=all -> must carry every tag (case-insensitive)
+        kb_fin = await storage_backend.list_workspaces(tags=["Knowledge", "topic:finance"], match="all")
+        assert ids(kb_fin) & {"ws_kb_fin", "ws_kb_legal", "ws_plain"} == {"ws_kb_fin"}
+
+        # match=any -> at least one tag
+        any_match = await storage_backend.list_workspaces(tags=["topic:finance", "project"], match="any")
+        assert {"ws_kb_fin", "ws_plain"} <= ids(any_match)
+        assert "ws_kb_legal" not in ids(any_match)
+
+        # no tags -> no filtering (returns all, including the others)
+        unfiltered = await storage_backend.list_workspaces()
+        assert {"ws_kb_fin", "ws_kb_legal", "ws_plain"} <= ids(unfiltered)
+
+    async def test_update_workspace_replaces_tags(self, storage_backend):
+        """update_workspace persists (normalized) replacement tags."""
+        await storage_backend.create_workspace(
+            Workspace(
+                id="ws_tag_update",
+                tenant_id="t1",
+                name="ToUpdate",
+                tags=["knowledge"],
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        updated = await storage_backend.update_workspace("ws_tag_update", tags=["Archive", "archive"])
+        assert updated is not None
+        assert updated.tags == ["archive"]
+
+
+@pytest.mark.asyncio
+class TestContextStorage:
+    """Test context create/list/delete operations."""
+
+    async def test_create_list_delete_round_trip(self, storage_backend, unique_workspace_id):
+        from memorylayer_server.models.workspace import Context
+
+        workspace_id = unique_workspace_id
+        await storage_backend.create_workspace(
+            Workspace(id=workspace_id, tenant_id="t1", name="ctx-ws", created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+        )
+
+        ctx = Context(id="ctx_alpha", workspace_id=workspace_id, name="alpha", description="Alpha")
+        created = await storage_backend.create_context(workspace_id, ctx)
+        assert created.id == "ctx_alpha"
+
+        listed = await storage_backend.list_contexts(workspace_id)
+        assert "ctx_alpha" in {c.id for c in listed}
+
+        # Delete returns True and removes the context
+        assert await storage_backend.delete_context(workspace_id, "ctx_alpha") is True
+        listed = await storage_backend.list_contexts(workspace_id)
+        assert "ctx_alpha" not in {c.id for c in listed}
+
+    async def test_delete_missing_returns_false(self, storage_backend, unique_workspace_id):
+        workspace_id = unique_workspace_id
+        await storage_backend.create_workspace(
+            Workspace(id=workspace_id, tenant_id="t1", name="ctx-ws2", created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+        )
+        assert await storage_backend.delete_context(workspace_id, "ctx_nope") is False
+
+    async def test_second_delete_returns_false(self, storage_backend, unique_workspace_id):
+        from memorylayer_server.models.workspace import Context
+
+        workspace_id = unique_workspace_id
+        await storage_backend.create_workspace(
+            Workspace(id=workspace_id, tenant_id="t1", name="ctx-ws3", created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+        )
+        await storage_backend.create_context(workspace_id, Context(id="ctx_once", workspace_id=workspace_id, name="once"))
+        assert await storage_backend.delete_context(workspace_id, "ctx_once") is True
+        assert await storage_backend.delete_context(workspace_id, "ctx_once") is False
+
+    async def test_delete_scoped_by_workspace(self, storage_backend, unique_workspace_id):
+        """Deleting a context in the wrong workspace returns False (workspace-scoped)."""
+        from memorylayer_server.models.workspace import Context
+
+        workspace_id = unique_workspace_id
+        other_workspace_id = f"{unique_workspace_id}_other"
+        for ws in (workspace_id, other_workspace_id):
+            await storage_backend.create_workspace(
+                Workspace(id=ws, tenant_id="t1", name=ws, created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+            )
+        await storage_backend.create_context(workspace_id, Context(id="ctx_scoped", workspace_id=workspace_id, name="scoped"))
+
+        # Wrong workspace -> not found
+        assert await storage_backend.delete_context(other_workspace_id, "ctx_scoped") is False
+        # Still present in its own workspace
+        assert "ctx_scoped" in {c.id for c in await storage_backend.list_contexts(workspace_id)}
+
 
 @pytest.mark.asyncio
 class TestWorkspaceStats:
@@ -1164,3 +1295,293 @@ class TestSessionCleanup:
         # Context should be gone (CASCADE)
         ctx_after = await storage_backend.get_all_working_memory(workspace_id, "sess_cascade_delete")
         assert len(ctx_after) == 0
+
+
+# ============================================================================
+# get_associations_batch chunking tests
+#
+# SQLite's default host-parameter limit is 999.  get_associations_batch() used
+# to build a single IN clause with one placeholder per memory id (two copies
+# for direction="both"), causing "too many SQL variables" for large workspaces.
+# The fix chunks memory_ids into batches of <=450, runs one query per chunk,
+# and deduplicates by association id.  The tests below verify:
+#   1. >999 node ids with a known edge are returned correctly (not silently empty)
+#   2. Exactly-at-chunk-boundary (900 ids) still works
+#   3. One-over-chunk-boundary (901 ids) crosses into a second chunk and works
+#   4. direction="both" deduplication works correctly
+# ============================================================================
+
+
+@pytest.mark.asyncio
+class TestGetAssociationsBatchChunking:
+    """Regression tests for the SQLite variable-limit chunking fix in get_associations_batch."""
+
+    async def _make_workspace(self, storage_backend, suffix: str) -> str:
+        """Create and return an isolated workspace for chunking tests."""
+        from datetime import datetime
+
+        from memorylayer_server.models.workspace import Workspace
+
+        ws_id = f"chunk_test_{suffix}"
+        workspace = Workspace(
+            id=ws_id,
+            tenant_id="default_tenant",
+            name=f"Chunk Test Workspace {suffix}",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        await storage_backend.create_workspace(workspace)
+        return ws_id
+
+    async def _bulk_create_memories(self, storage_backend, workspace_id: str, count: int) -> list:
+        """Create `count` distinct memories and return their ids."""
+        memories = []
+        for i in range(count):
+            mem = await storage_backend.create_memory(
+                workspace_id,
+                RememberInput(content=f"Chunk test memory {i}", importance=0.5),
+            )
+            memories.append(mem)
+        return memories
+
+    async def test_batch_over_999_nodes_returns_known_edges(self, storage_backend):
+        """Verify get_associations_batch returns edges when >999 node ids are supplied.
+
+        Previously a single IN clause with >999 placeholders caused SQLite to
+        raise 'too many SQL variables'; _build_graph silently caught the error
+        and produced a graph with zero edges.
+        """
+        ws_id = await self._make_workspace(storage_backend, "over999")
+
+        # Create 1002 memories so the node list clearly exceeds SQLite's 999 limit
+        memories = await self._bulk_create_memories(storage_backend, ws_id, 1002)
+
+        # Add one known association: first memory -> last memory
+        src = memories[0]
+        tgt = memories[-1]
+        await storage_backend.create_association(
+            ws_id,
+            AssociateInput(source_id=src.id, target_id=tgt.id, relationship="related_to", strength=0.8),
+        )
+
+        node_ids = [m.id for m in memories]
+
+        # outgoing: should find the edge from memories[0]
+        result_out = await storage_backend.get_associations_batch(ws_id, node_ids, direction="outgoing")
+        assert len(result_out) == 1, f"Expected 1 outgoing association, got {len(result_out)}"
+        assert result_out[0].source_id == src.id
+        assert result_out[0].target_id == tgt.id
+
+        # incoming: should find the edge at memories[-1]
+        result_in = await storage_backend.get_associations_batch(ws_id, node_ids, direction="incoming")
+        assert len(result_in) == 1, f"Expected 1 incoming association, got {len(result_in)}"
+
+        # both: same single edge, deduplication must yield exactly 1
+        result_both = await storage_backend.get_associations_batch(ws_id, node_ids, direction="both")
+        assert len(result_both) == 1, f"Expected 1 association for direction='both', got {len(result_both)}"
+
+    async def test_batch_exactly_at_chunk_boundary_900(self, storage_backend):
+        """Verify get_associations_batch works correctly with exactly 900 node ids.
+
+        900 ids * 2 placeholders per id (direction='both') = 1800 total placeholders,
+        which is handled by a single chunk of 450 ids.  This confirms the boundary
+        arithmetic is correct and a single chunk is sufficient.
+        """
+        ws_id = await self._make_workspace(storage_backend, "boundary900")
+        memories = await self._bulk_create_memories(storage_backend, ws_id, 900)
+
+        src, tgt = memories[0], memories[1]
+        await storage_backend.create_association(
+            ws_id,
+            AssociateInput(source_id=src.id, target_id=tgt.id, relationship="causes", strength=0.9),
+        )
+
+        node_ids = [m.id for m in memories]
+        result = await storage_backend.get_associations_batch(ws_id, node_ids, direction="both")
+        assert len(result) == 1, f"Expected 1 association at 900-node boundary, got {len(result)}"
+
+    async def test_batch_one_over_chunk_boundary_901(self, storage_backend):
+        """Verify get_associations_batch spans two chunks correctly at 901 node ids.
+
+        With chunk size 450, 901 ids split into chunks [0:450] and [450:901].
+        An association between nodes in different chunks must still be returned
+        and must not be duplicated.
+        """
+        ws_id = await self._make_workspace(storage_backend, "boundary901")
+        memories = await self._bulk_create_memories(storage_backend, ws_id, 901)
+
+        # Place the edge so source is in chunk 0 and target is in chunk 1
+        # (index 0 in chunk [0:450], index 450 in chunk [450:901])
+        src = memories[0]
+        tgt = memories[450]
+        await storage_backend.create_association(
+            ws_id,
+            AssociateInput(source_id=src.id, target_id=tgt.id, relationship="leads_to", strength=0.7),
+        )
+
+        node_ids = [m.id for m in memories]
+
+        # outgoing: edge found in chunk 0 (src.id is there)
+        result_out = await storage_backend.get_associations_batch(ws_id, node_ids, direction="outgoing")
+        assert len(result_out) == 1, f"Expected 1 outgoing edge across chunk boundary, got {len(result_out)}"
+
+        # direction="both": edge appears in both chunks (src in chunk 0, tgt in chunk 1)
+        # deduplication must return exactly 1
+        result_both = await storage_backend.get_associations_batch(ws_id, node_ids, direction="both")
+        assert len(result_both) == 1, f"Expected 1 deduplicated edge for direction='both', got {len(result_both)}"
+
+
+# ============================================================================
+# InMemory Backend: list_workspaces tag filtering
+# ============================================================================
+
+
+@pytest.mark.asyncio
+class TestInMemoryWorkspaceTags:
+    """Verify in_memory.list_workspaces(tags=..., match=...) mirrors sqlite behaviour.
+
+    This test class was added to cover the gap that hid CORRECTION 1: the
+    in_memory backend had a no-arg list_workspaces() signature that raised
+    TypeError whenever the workspace service called list_workspaces(tags=...,
+    match=...).  These tests exercise the fixed implementation directly.
+    """
+
+    async def _make_backend(self):
+        from memorylayer_server.services.storage.in_memory import MemoryStorageBackend
+
+        b = MemoryStorageBackend()
+        await b.connect()
+        return b
+
+    async def _mk(self, backend, ws_id: str, tags: list[str]) -> None:
+        await backend.create_workspace(
+            Workspace(
+                id=ws_id,
+                tenant_id="t1",
+                name=ws_id,
+                tags=tags,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+    async def test_list_workspaces_no_filter_returns_all(self):
+        backend = await self._make_backend()
+        await self._mk(backend, "im_ws_a", ["alpha"])
+        await self._mk(backend, "im_ws_b", ["beta"])
+
+        result = await backend.list_workspaces()
+        ids = {w.id for w in result}
+        assert {"im_ws_a", "im_ws_b"} <= ids
+
+    async def test_list_workspaces_single_tag_match_all(self):
+        backend = await self._make_backend()
+        await self._mk(backend, "im_kb_fin", ["knowledge", "topic:finance"])
+        await self._mk(backend, "im_kb_legal", ["knowledge", "topic:legal"])
+        await self._mk(backend, "im_plain", ["project"])
+
+        result = await backend.list_workspaces(tags=["knowledge"])
+        ids = {w.id for w in result}
+        assert {"im_kb_fin", "im_kb_legal"} <= ids
+        assert "im_plain" not in ids
+
+    async def test_list_workspaces_match_all_requires_every_tag(self):
+        backend = await self._make_backend()
+        await self._mk(backend, "im_ab", ["alpha", "beta"])
+        await self._mk(backend, "im_a_only", ["alpha"])
+
+        result = await backend.list_workspaces(tags=["alpha", "beta"], match="all")
+        ids = {w.id for w in result}
+        assert "im_ab" in ids
+        assert "im_a_only" not in ids
+
+    async def test_list_workspaces_match_any(self):
+        backend = await self._make_backend()
+        await self._mk(backend, "im_fin", ["topic:finance"])
+        await self._mk(backend, "im_proj", ["project"])
+        await self._mk(backend, "im_legal", ["topic:legal"])
+
+        result = await backend.list_workspaces(tags=["topic:finance", "project"], match="any")
+        ids = {w.id for w in result}
+        assert {"im_fin", "im_proj"} <= ids
+        assert "im_legal" not in ids
+
+    async def test_list_workspaces_tag_filter_case_insensitive(self):
+        """Tag filtering normalises case so 'Knowledge' matches 'knowledge'."""
+        backend = await self._make_backend()
+        await self._mk(backend, "im_case_ws", ["knowledge"])
+
+        result = await backend.list_workspaces(tags=["Knowledge"])
+        ids = {w.id for w in result}
+        assert "im_case_ws" in ids
+
+
+# ============================================================================
+# Embedding hydration gating on bulk read paths
+# ============================================================================
+
+
+@pytest.mark.asyncio
+class TestEmbeddingHydrationGating:
+    """Bulk reads must not decode stored vectors.
+
+    A stored embedding is ~4 bytes per dimension as a blob but ~32 once
+    decoded into a Python ``list[float]``, so decoding it for every row of a
+    large result set was the dominant per-request allocation — for a field the
+    API strips before serializing. Paths whose callers actually read
+    ``Memory.embedding`` must keep hydrating.
+    """
+
+    @staticmethod
+    async def _memory_with_embedding(storage_backend, workspace_id, content="Vectorized"):
+        created = await storage_backend.create_memory(
+            workspace_id, RememberInput(content=content, importance=0.5, tags=["vec"]),
+        )
+        embedding = ([0.1, 0.2, 0.3, 0.4, 0.5] * 77)[:EMBEDDING_DIM]
+        await storage_backend.update_memory(workspace_id, created.id, embedding=embedding)
+        return created.id
+
+    async def test_get_memory_still_hydrates(self, storage_backend, workspace_id):
+        """Single-row reads keep the vector: callers rank on it in Python."""
+        mem_id = await self._memory_with_embedding(storage_backend, workspace_id)
+
+        memory = await storage_backend.get_memory(workspace_id, mem_id)
+
+        assert memory.embedding is not None
+        assert len(memory.embedding) == EMBEDDING_DIM
+
+    async def test_search_by_filter_does_not_hydrate(self, storage_backend, workspace_id):
+        """A bulk filter search returns rows without decoding their vectors."""
+        await self._memory_with_embedding(storage_backend, workspace_id)
+
+        results = await storage_backend.search_memories_by_filter(workspace_id, tags=["vec"])
+
+        assert results, "expected the tagged memory back"
+        assert all(m.embedding is None for m in results)
+
+    async def test_full_text_search_does_not_hydrate(self, storage_backend, workspace_id):
+        """Same for the keyword arm of retrieval."""
+        await self._memory_with_embedding(
+            storage_backend, workspace_id, content="Distinctive plateau phrasing",
+        )
+
+        results = await storage_backend.full_text_search(workspace_id, "plateau", limit=10)
+
+        assert results, "expected a full-text hit"
+        assert all(m.embedding is None for m in results)
+
+    async def test_row_conversion_gate_is_explicit(self, storage_backend, workspace_id):
+        """``_row_to_memory`` decodes only when asked.
+
+        Pinned directly because the flag is what every bulk path relies on;
+        a default flip here would silently restore the allocation everywhere.
+        """
+        mem_id = await self._memory_with_embedding(storage_backend, workspace_id)
+
+        cursor = await storage_backend._connection.execute(
+            "SELECT * FROM memories WHERE id = ?", (mem_id,),
+        )
+        row = await cursor.fetchone()
+
+        assert storage_backend._row_to_memory(row).embedding is not None
+        assert storage_backend._row_to_memory(row, with_embedding=False).embedding is None

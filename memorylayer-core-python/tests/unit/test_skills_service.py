@@ -2,9 +2,17 @@
 
 import pytest
 
-from memorylayer_server.models.skill import Skill, SkillCreateInput, SkillFile, SkillUpdateInput
+from memorylayer_server.models.skill import (
+    Skill,
+    SkillCreateInput,
+    SkillFile,
+    SkillReplaceInput,
+    SkillUpdateInput,
+)
+from memorylayer_server.models.versioned_resource import VersionedResourceNotFoundError
 from memorylayer_server.services.skills import SkillsService
 from memorylayer_server.services.skills.frontmatter import parse_skill_md, render_skill_md
+from memorylayer_server.services.storage.in_memory import MemoryStorageBackend
 
 # ---------------------------------------------------------------------------
 # Minimal in-memory storage stub for SkillsService tests
@@ -122,8 +130,11 @@ class _SkillStore:
                     return s
         return None
 
-    async def list_skills(self, workspace_id, user_id=None, name=None, tags=None, enabled=None, limit=100, offset=0):
-        results = [s for s in self._skills.values() if s.workspace_id == workspace_id]
+    async def list_skills(self, workspace_id, user_id=None, name=None, tags=None, enabled=None, limit=100, offset=0, include_global=False):
+        source_ids = [workspace_id]
+        if include_global and user_id is None and workspace_id != "_global":
+            source_ids.append("_global")
+        results = [s for s in self._skills.values() if s.workspace_id in source_ids]
         if user_id is not None:
             results = [s for s in results if s.user_id == user_id]
         if name is not None:
@@ -182,7 +193,7 @@ class _SkillStore:
 
 
 def make_service():
-    storage = _SkillStore()
+    storage = MemoryStorageBackend()
     return SkillsService(storage=storage), storage
 
 
@@ -250,6 +261,26 @@ async def test_delete_skill():
 async def test_delete_skill_not_found():
     svc, _ = make_service()
     assert await svc.delete_skill("ws1", "skl_nonexistent") is False
+
+
+@pytest.mark.asyncio
+async def test_versioned_mutation_rejects_tenant_mismatch():
+    svc, _ = make_service()
+    skill = await svc.create_skill(
+        SkillCreateInput(name="tenant-bound", description="Tenant A"),
+        workspace_id="ws1",
+        tenant_id="tenant-a",
+    )
+
+    with pytest.raises(VersionedResourceNotFoundError):
+        await svc.replace_skill_versioned(
+            "ws1",
+            skill.id,
+            SkillReplaceInput(description="Cross-tenant write"),
+            tenant_id="tenant-b",
+            operation_id="tenant-b-replace",
+            expected_etag=skill.etag,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +355,7 @@ async def test_memory_indexer_called_on_create():
     async def indexer(skill: Skill):
         indexed.append(skill.id)
 
-    storage = _SkillStore()
+    storage = MemoryStorageBackend()
     svc = SkillsService(storage=storage, memory_indexer=indexer)
     skill = await svc.create_skill(SkillCreateInput(name="indexed-skill", description="Will be indexed"), workspace_id="ws1")
     assert skill.id in indexed

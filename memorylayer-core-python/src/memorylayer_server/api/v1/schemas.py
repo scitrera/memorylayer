@@ -15,16 +15,36 @@ from memorylayer_server.models.association import (
     GraphQueryResult,  # noqa: F401 — re-exported for associations.py
     RelationshipCategory,
 )
+from memorylayer_server.models.context_pack import (
+    ContextDelta,  # noqa: F401 — re-exported for sessions.py
+    ContextDeltaInput,  # noqa: F401 — re-exported for sessions.py
+    ContextPack,  # noqa: F401 — re-exported for sessions.py
+    ContextPackInput,  # noqa: F401 — re-exported for sessions.py
+    SessionCheckpoint,  # noqa: F401 — re-exported for sessions.py
+    SessionCheckpointInput,  # noqa: F401 — re-exported for sessions.py
+)
+from memorylayer_server.models.entity_registry import (
+    Entity,  # noqa: F401 — re-exported for entities.py
+    EntityResolution,  # noqa: F401 — re-exported for entities.py
+    EntityType,
+    RelatedEntity,
+    SeedEntity,
+)
+from memorylayer_server.models.entity_relation import EntityRelationInput
 from memorylayer_server.models.memory import (
     Memory,
+    MemoryScope,
     MemoryType,
     RecallMode,
     RecallResult,  # noqa: F401 — re-exported for memories.py
     ReflectResult,  # noqa: F401 — re-exported for memories.py
     SearchTolerance,
 )
+from memorylayer_server.models.representation import (
+    Representation,  # noqa: F401 — re-exported for representation.py
+)
 from memorylayer_server.models.session import Session, SessionBriefing
-from memorylayer_server.models.workspace import Workspace
+from memorylayer_server.models.workspace import Context, Workspace
 
 
 # Memory API Schemas
@@ -38,11 +58,28 @@ class MemoryCreateRequest(BaseModel):
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
+    logical_key: str | None = Field(
+        None,
+        description="Stable workspace/owner-scoped key for conditional refinement",
+    )
+    refinement_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Semantic metadata protected by the memory resource ETag",
+    )
+    pinned: bool = Field(False, description="Pin the memory against retention decay")
     associations: list[str] = Field(default_factory=list, description="Memory IDs to associate with")
+    relations: list[EntityRelationInput] = Field(
+        default_factory=list,
+        description="Typed structural entity relations evidenced by this memory",
+    )
     context_id: str | None = Field(None, description="Target memory context")
     observer_id: str | None = Field(None, description="Entity doing the observing/remembering (agent ID, user ID, etc.)")
     subject_id: str | None = Field(None, description="Entity this memory is about")
     user_id: str | None = Field(None, description="User scope for this memory")
+    scope: MemoryScope = Field(
+        MemoryScope.WORKSPACE,
+        description="Storage scope: 'workspace' (default, local) or 'user' (cross-workspace user-global; requires a user_id)",
+    )
 
 
 class MemoryUpdateRequest(BaseModel):
@@ -54,6 +91,10 @@ class MemoryUpdateRequest(BaseModel):
     importance: float | None = Field(None, ge=0.0, le=1.0, description="Updated importance")
     tags: list[str] | None = Field(None, description="Updated tags")
     metadata: dict[str, Any] | None = Field(None, description="Updated metadata")
+    refinement_metadata: dict[str, Any] | None = Field(
+        None,
+        description="Updated semantic refinement metadata",
+    )
     pinned: bool | None = Field(None, description="Pin/unpin memory (pinned memories are exempt from decay)")
 
 
@@ -69,9 +110,26 @@ class MemoryRecallRequest(BaseModel):
     observer_id: str | None = Field(None, description="Filter by observer entity")
     subject_id: str | None = Field(None, description="Filter by subject entity")
     user_id: str | None = Field(None, description="Filter by user")
+    include_global: bool = Field(True, description="Include the _global workspace in search")
+    include_global_user: bool = Field(
+        True,
+        description=(
+            "Include the user-scoped global workspace (_global_user) in search, filtered by the same "
+            "user_id (per-user preferences follow the user across workspaces). Only effective when user_id is set."
+        ),
+    )
     mode: RecallMode | None = Field(None, description="Retrieval strategy (None = server default)")
     tolerance: SearchTolerance | None = Field(None, description="Search precision (None = server default)")
     limit: int = Field(10, ge=1, le=100, description="Maximum memories to return")
+    offset: int = Field(0, ge=0, description="Number of results to skip for pagination")
+    include_embeddings: bool = Field(
+        False,
+        description=(
+            "Include each memory's raw embedding vector in the response. Off by default: the vectors "
+            "dominate the payload (at 1024 dimensions they are roughly 8 KB per memory) and callers "
+            "almost never use them. Enable for debugging or offline vector analysis."
+        ),
+    )
     min_relevance: float | None = Field(None, ge=0.0, le=1.0, description="Minimum relevance score (None = server default)")
     recency_weight: float | None = Field(
         None, ge=0.0, le=1.0, description="Weight for recency boosting (0.0=disabled, 1.0=full). None = server default."
@@ -81,11 +139,17 @@ class MemoryRecallRequest(BaseModel):
     max_expansion: int | None = Field(None, ge=1, le=500, description="Max memories discovered via graph expansion (None = server default)")
     created_after: datetime | None = Field(None, description="Filter memories created after this time")
     created_before: datetime | None = Field(None, description="Filter memories created before this time")
+    event_after: datetime | None = Field(None, description="Keep memories whose effective event time is >= this")
+    event_before: datetime | None = Field(None, description="Keep memories whose effective event time is <= this")
+    time_order: str | None = Field(None, description="Order results by effective event time: 'asc' or 'desc' (None = by relevance)")
     context: list[dict[str, str]] = Field(default_factory=list, description="Recent conversation context")
     rag_threshold: float = Field(0.8, ge=0.0, le=1.0, description="Use LLM if RAG confidence < threshold")
     detail_level: str | None = Field(None, description="Detail level: abstract, overview, or full (None = server default)")
     include_archived: bool = Field(False, description="Include archived memories in recall results")
     exclude_ids: list[str] = Field(default_factory=list, description="Memory IDs to exclude from results (already shown to user)")
+    budget_tokens: int | None = Field(None, ge=1, description="Hard estimated-token budget for returned content")
+    include_confidence: bool = Field(True, description="Include deterministic retrieval confidence")
+    include_relations: bool = Field(True, description="Allow bounded typed-relation retrieval when enabled")
 
 
 class MemoryReflectRequest(BaseModel):
@@ -209,6 +273,17 @@ class AssociationCreateFullRequest(BaseModel):
     relationship: str = Field(..., description="Relationship type (e.g., SIMILAR_TO, CAUSES, SOLVES)")
     strength: float = Field(0.5, ge=0.0, le=1.0, description="Relationship strength")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
+
+
+class AssociationUpdateRequest(BaseModel):
+    """Request schema for updating an association's strength and/or metadata.
+
+    Only ``strength`` and ``metadata`` are mutable — the storage seam
+    (``update_association``) does not support changing the relationship type
+    (re-typing an edge is a delete + create)."""
+
+    strength: float | None = Field(None, ge=0.0, le=1.0, description="New relationship strength (None = unchanged)")
+    metadata: dict[str, Any] | None = Field(None, description="New metadata dict, replaces existing (None = unchanged)")
 
 
 class AssociationListRequest(BaseModel):
@@ -345,6 +420,7 @@ class WorkspaceCreateRequest(BaseModel):
     id: str | None = Field(None, description="Optional workspace ID. If omitted, a unique ID is generated.")
     name: str = Field(..., description="Workspace name", min_length=1)
     settings: dict[str, Any] = Field(default_factory=dict, description="Workspace-level settings")
+    tags: list[str] = Field(default_factory=list, description="Workspace tags for discovery/lookup")
 
 
 class WorkspaceUpdateRequest(BaseModel):
@@ -352,6 +428,7 @@ class WorkspaceUpdateRequest(BaseModel):
 
     name: str | None = Field(None, description="Updated workspace name", min_length=1)
     settings: dict[str, Any] | None = Field(None, description="Updated settings")
+    tags: list[str] | None = Field(None, description="Updated tags")
 
 
 class WorkspaceResponse(BaseModel):
@@ -364,6 +441,28 @@ class WorkspaceListResponse(BaseModel):
     """Response schema for listing workspaces."""
 
     workspaces: list[Workspace]
+
+
+# Context API Schemas
+class ContextCreateRequest(BaseModel):
+    """Request schema for creating a context within a workspace."""
+
+    id: str | None = Field(None, description="Optional context ID. If omitted, a unique ID is generated.")
+    name: str = Field(..., description="Context name (unique within workspace)", min_length=1)
+    description: str | None = Field(None, description="Context description")
+    settings: dict[str, Any] = Field(default_factory=dict, description="Context-level settings")
+
+
+class ContextResponse(BaseModel):
+    """Response schema for a single context."""
+
+    context: Context
+
+
+class ContextListResponse(BaseModel):
+    """Response schema for listing contexts in a workspace."""
+
+    contexts: list[Context]
 
 
 class TokenSummary(BaseModel):
@@ -425,6 +524,74 @@ class ContradictionScanResponse(BaseModel):
     workspace_id: str = Field(..., description="Workspace that was scanned")
     contradictions_found: int = Field(..., description="Number of new contradictions detected")
     contradictions: list[ContradictionResponse] = Field(..., description="Newly detected contradictions")
+
+
+# Representation API Schemas (dark-gated read surface; see api/v1/representation.py)
+class RepresentationRequest(BaseModel):
+    """Request schema for the perspective read surface.
+
+    A thin pass-through to ``RepresentationService.get_representation`` — every
+    field maps 1:1 onto the service signature. No scoping logic lives here (the
+    leakage-0 contract is the service's; the endpoint must not add scoping)."""
+
+    observer: str = Field(..., description="The observing entity (surface name; resolved via the registry, never created)", min_length=1)
+    subject: str = Field(..., description="The entity the representation is about (surface name; resolved, never created)", min_length=1)
+    workspace_id: str | None = Field(None, description="Workspace override (defaults to session workspace or _default)")
+    observer_type: EntityType | None = Field(None, description="Optional entity type hint for resolving the observer")
+    subject_type: EntityType | None = Field(None, description="Optional entity type hint for resolving the subject")
+    limit: int = Field(20, ge=1, le=200, description="Max observations to return")
+    include_profile: bool = Field(True, description="Attach a deterministic profile assembled from the scoped observations")
+
+
+class UserRepresentationRequest(BaseModel):
+    """Request schema for the USER-SCOPE self-representation surface.
+
+    A thin pass-through to ``RepresentationService.get_user_representation`` — a
+    user's cross-workspace preferences/traits assembled from their ``_global_user``
+    memories ("personality follows the user"). No scoping logic lives here: the
+    FORCED ``user_id`` filter (the cross-user leakage guard) is the service's.
+
+    ``user_id`` is OPTIONAL in the request: when omitted the endpoint resolves it
+    from the authenticated context (the caller reads their OWN representation). An
+    explicit ``user_id`` that differs from the caller's identity is a cross-user
+    read and must be separately authorized."""
+
+    user_id: str | None = Field(
+        None, description="User to assemble the representation for; defaults to the authenticated user_id", min_length=1
+    )
+    workspace_id: str | None = Field(
+        None, description="Workspace override for the request context (the assembly itself reads only _global_user)"
+    )
+    limit: int = Field(20, ge=1, le=200, description="Max observations to return")
+    include_profile: bool = Field(True, description="Attach a deterministic profile assembled from the scoped user-global observations")
+
+
+# Email ingest API Schema (cross-source ingestion; see api/v1/ingest.py)
+class EmailIngestRequest(BaseModel):
+    """Request schema for ingesting an email as a memory.
+
+    Maps onto ``services.ingest.email.email_to_remember_input``; the resulting
+    memory rides the SAME ``remember()`` pipeline chat/doc use. ``sender`` becomes
+    the ``observer_id`` perspective anchor (emails are prefix-less, like docs)."""
+
+    sender: str = Field(..., description="Email from/sender — becomes the observer_id perspective anchor", min_length=1)
+    body: str = Field(..., description="Email body text", min_length=1)
+    to: list[str] = Field(default_factory=list, description="Recipients stored in metadata and mapped to exact-name sent_to relations")
+    subject: str | None = Field(None, description="Email subject line (folded into grounded content + metadata)")
+    timestamp: datetime | None = Field(None, description="When the email was sent — becomes the memory's event_time")
+    thread_id: str | None = Field(None, description="Conversation/thread id — preferred source_thread_id linkage")
+    message_id: str | None = Field(None, description="Message id — fallback source_thread_id; stamped in metadata")
+    importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0)")
+    workspace_id: str | None = Field(None, description="Workspace override (defaults to session workspace or _default)")
+    context_id: str | None = Field(None, description="Target memory context")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional source metadata; knowledge-work fields are normalized deterministically",
+    )
+    relations: list[EntityRelationInput] = Field(
+        default_factory=list,
+        description="Additional typed relations evidenced by this email",
+    )
 
 
 # ============================================
@@ -663,6 +830,88 @@ class EntityInsightsResponse(BaseModel):
     total_count: int = Field(0, description="Total insights found")
 
 
+# --- Entity Registry CRUD (gated by MEMORYLAYER_ENTITY_REGISTRY_ENABLED) ---
+
+
+class EntityResponse(BaseModel):
+    """Response schema for a single canonical entity."""
+
+    entity: Entity
+
+
+class EntityListResponse(BaseModel):
+    """Response schema for listing canonical entities."""
+
+    entities: list[Entity] = Field(default_factory=list, description="Canonical entities")
+    total_count: int = Field(0, description="Number of entities returned")
+
+
+class EntityResolveResponse(BaseModel):
+    """Response schema for resolving a surface name to a canonical entity."""
+
+    resolution: EntityResolution
+
+
+class EntityMergeRequest(BaseModel):
+    """Request schema for merging one canonical entity into another."""
+
+    source_id: str = Field(..., description="Entity to merge FROM (tombstoned on success)")
+    target_id: str = Field(..., description="Entity to merge INTO (survives)")
+    reason: str = Field(..., description="Audit reason recorded in the merged entity's provenance", min_length=1)
+
+
+class EntityBackfillResponse(BaseModel):
+    """Response schema for the entity-registry backfill of existing memories."""
+
+    workspace_id: str = Field(..., description="Workspace that was backfilled")
+    cleared: int = Field(0, description="Existing entities wiped first (when reset=true)")
+    scanned: int = Field(0, description="Existing memories enumerated")
+    accreted: int = Field(0, description="Memories fed through entity extraction + accretion")
+
+
+class SeedEntitiesRequest(BaseModel):
+    """Request schema for seeding a curated catalog of canonical entities."""
+
+    entities: list[SeedEntity] = Field(..., description="Canonical entities to seed (create-or-update)")
+    workspace_id: str | None = Field(None, description="Workspace override (defaults to auth ctx)")
+
+
+class SeedEntitiesResponse(BaseModel):
+    """Response schema for seeding canonical entities."""
+
+    workspace_id: str = Field(..., description="Workspace seeded")
+    seeded: int = Field(0, description="Entities created or updated")
+    failed: list[str] = Field(default_factory=list, description="Names whose upsert raised")
+    skipped_invalid_type: list[str] = Field(
+        default_factory=list, description="Names skipped because their entity_type is not in the ontology vocabulary"
+    )
+
+
+class EntityEnrichResponse(BaseModel):
+    """Response schema for external-KB entity enrichment (e.g. Wikidata linking)."""
+
+    workspace_id: str = Field(..., description="Workspace enriched")
+    source: str = Field(..., description="External KB source, e.g. 'wikidata'")
+    checked: int = Field(0, description="Eligible entities considered")
+    enriched: int = Field(0, description="Entities linked + provenance updated")
+    skipped: int = Field(0, description="No confident link / already linked / store failure")
+
+
+class EntityDedupeResponse(BaseModel):
+    """Response schema for a batch entity dedup pass."""
+
+    workspace_id: str = Field(..., description="Workspace deduped")
+    clusters: int = Field(0, description="Duplicate clusters found (size > 1)")
+    merged: int = Field(0, description="Entities merged into a cluster representative")
+
+
+class RelatedEntitiesResponse(BaseModel):
+    """Response schema for an entity's co-occurrence neighborhood."""
+
+    entity_id: str = Field(..., description="The source entity")
+    related: list[RelatedEntity] = Field(default_factory=list, description="Related entities, most-shared first")
+
+
 # ============================================
 # Chat History API Schemas
 # ============================================
@@ -692,7 +941,10 @@ class ThreadCreateRequest(BaseModel):
     title: str | None = Field(None, description="Optional display title")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
     expires_at: datetime | None = Field(None, description="Optional expiration (None = permanent)")
+    idle_action: str | None = Field(None, description="Idle policy: null (never idles out) | 'hide' | 'delete'")
     scope: str | None = Field(None, description="Surface scope: 'web' | 'office' | None (≡ 'web')")
+    ownership: str = Field("user", description="Thread ownership: 'user' | 'workspace'")
+    parent_thread: str | None = Field(None, description="Parent thread id to create a sub-thread (inherits parent workspace + ownership)")
 
 
 class ThreadUpdateRequest(BaseModel):
@@ -700,6 +952,7 @@ class ThreadUpdateRequest(BaseModel):
 
     title: str | None = Field(None, description="Updated display title")
     metadata: dict[str, Any] | None = Field(None, description="Updated metadata")
+    idle_action: str | None = Field(None, description="Idle policy: null (never idles out) | 'hide' | 'delete'")
 
 
 class ThreadResponse(BaseModel):

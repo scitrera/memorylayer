@@ -21,6 +21,7 @@ access is a follow-up; today every embedding call is service→service.
 
 from __future__ import annotations
 
+import asyncio
 import json as _json
 from logging import Logger
 from typing import Any
@@ -44,6 +45,24 @@ from .._constants import EXT_AETHER_SERVICE_CONNECTION
 from . import EmbedServerClientPluginBase
 
 # Transport identifiers
+#: Transport faults worth another attempt: "the connection broke", not "the
+#: server took too long". ``NetworkError`` is httpx's family for a dead socket
+#: (ConnectError/ReadError/WriteError/CloseError) and excludes the timeout
+#: family, so a genuinely slow embed still fails fast instead of being retried
+#: into a multiple of its own budget.
+_RETRYABLE_TRANSPORT = (
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+    httpx.ConnectTimeout,
+)
+_TRANSPORT_RETRY_ATTEMPTS = 3
+_TRANSPORT_RETRY_BACKOFF_SEC = 0.5
+
+#: Idle lifetime for pooled connections, set BELOW the shortest keep-alive on
+#: the path (uvicorn defaults to 5s) so this client always retires a connection
+#: before the server can close it underneath us.
+KEEPALIVE_EXPIRY_SEC = 4.0
+
 TRANSPORT_HTTP = "http"
 TRANSPORT_AETHER = "aether"
 
@@ -111,9 +130,17 @@ class EmbedServerClient:
         by ``AetherServiceConnection`` and already connected).
         """
         if self._transport == TRANSPORT_HTTP:
+            if self._client is not None:
+                return  # idempotent: already connected (shared client reuse)
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=self._timeout,
+                # Retire pooled connections before the far end does. Embedding
+                # traffic is bursty -- a batch per document phase, then a gap --
+                # so sockets sit idle long enough for the server (uvicorn
+                # defaults to a 5s keep-alive) to close them. Reusing one that
+                # is already gone fails before any response byte arrives.
+                limits=httpx.Limits(keepalive_expiry=KEEPALIVE_EXPIRY_SEC),
             )
             self.logger.info("Connected to embed server (http) at %s", self._base_url)
         else:
@@ -133,26 +160,71 @@ class EmbedServerClient:
             self.logger.info("Disconnected from embed server")
 
     # ------------------------------------------------------------------
-    # Internal: shared request shape across transports.
+    # Public request seam: shared request shape across transports.
     # ------------------------------------------------------------------
 
-    async def _request_json(
+    async def _send_with_transport_retry(self, send, method: str, path: str):
+        """Re-issue a request whose CONNECTION failed, not whose content did.
+
+        Only transport faults are retried, never statuses: an embed rejection
+        (e.g. "input length exceeds max_model_len") is deterministic, and
+        retrying it would triple the load and still fail.
+
+        The case this exists for is a pooled keep-alive connection the far end
+        has already closed. The failure surfaces on the NEXT request, before a
+        single response byte arrives, so it never reached the server -- which is
+        why the server logs show clean 200s while the caller sees an error.
+        Re-sending picks up a fresh connection.
+        """
+        last: Exception | None = None
+        for attempt_number in range(1, _TRANSPORT_RETRY_ATTEMPTS + 1):
+            try:
+                return await send()
+            except _RETRYABLE_TRANSPORT as exc:
+                last = exc
+                if attempt_number == _TRANSPORT_RETRY_ATTEMPTS:
+                    break
+                delay = _TRANSPORT_RETRY_BACKOFF_SEC * (2 ** (attempt_number - 1))
+                self.logger.info(
+                    "embed server %s %s: connection dropped (%s: %s); retry %d/%d in %.1fs",
+                    method.upper(), path, type(exc).__name__, exc or "no detail",
+                    attempt_number, _TRANSPORT_RETRY_ATTEMPTS - 1, delay,
+                )
+                await asyncio.sleep(delay)
+        raise last
+
+    async def request_json(
         self,
         method: str,
         path: str,
         payload: dict | None = None,
     ) -> dict:
-        """Issue a JSON request via the configured transport and return the
+        """Public seam for calling arbitrary embed-server endpoints (e.g.
+        enterprise/custom endpoints not hard-coded on this client).
+
+        Issue a JSON request via the configured transport and return the
         decoded JSON body. Raises an HTTP-status-style error on non-2xx.
         """
         if self._transport == TRANSPORT_HTTP:
             assert self._client is not None, "EmbedServerClient.connect() not called"
-            if method.upper() == "POST":
-                resp = await self._client.post(path, json=payload)
-            elif method.upper() == "GET":
-                resp = await self._client.get(path)
-            else:  # pragma: no cover - defensive; only POST/GET used today
-                resp = await self._client.request(method, path, json=payload)
+
+            async def _send() -> httpx.Response:
+                if method.upper() == "POST":
+                    return await self._client.post(path, json=payload)
+                if method.upper() == "GET":
+                    return await self._client.get(path)
+                # pragma: no cover - defensive; only POST/GET used today
+                return await self._client.request(method, path, json=payload)
+
+            resp = await self._send_with_transport_retry(_send, method, path)
+            if resp.is_error:
+                # Surface the concrete reason (e.g. "Embedding input length ...
+                # exceeds max_model_len") in ML logs; ``raise_for_status`` only
+                # reports the status code, which previously hid the cause.
+                self.logger.error(
+                    "embed server %s %s -> %s: %s",
+                    method.upper(), path, resp.status_code, resp.text[:500],
+                )
             resp.raise_for_status()
             return resp.json()
 
@@ -190,13 +262,16 @@ class EmbedServerClient:
             return {}
         return _json.loads(response.body)
 
-    async def _request_stream(
+    async def request_stream(
         self,
         method: str,
         path: str,
         payload: dict | None = None,
     ):
-        """Issue a streaming request and return an ``AsyncIterator[bytes]``.
+        """Public seam for streaming arbitrary embed-server endpoints (e.g.
+        enterprise/custom endpoints not hard-coded on this client).
+
+        Issue a streaming request and return an ``AsyncIterator[bytes]``.
 
         The caller iterates raw SSE-formatted chunks. Both transports
         yield bytes verbatim from the upstream:
@@ -280,8 +355,8 @@ class EmbedServerClient:
         """
         if stream:
             request_payload = {**payload, "stream": True}
-            return await self._request_stream("POST", "/v1/chat/completions", request_payload)
-        return await self._request_json("POST", "/v1/chat/completions", payload)
+            return await self.request_stream("POST", "/v1/chat/completions", request_payload)
+        return await self.request_json("POST", "/v1/chat/completions", payload)
 
     async def completions(
         self,
@@ -292,8 +367,8 @@ class EmbedServerClient:
         """Legacy text completions. Same contract as :meth:`chat_completions`."""
         if stream:
             request_payload = {**payload, "stream": True}
-            return await self._request_stream("POST", "/v1/completions", request_payload)
-        return await self._request_json("POST", "/v1/completions", payload)
+            return await self.request_stream("POST", "/v1/completions", request_payload)
+        return await self.request_json("POST", "/v1/completions", payload)
 
     async def transcribe_pages(
         self,
@@ -309,14 +384,22 @@ class EmbedServerClient:
             payload["max_tokens"] = max_tokens
 
         self.logger.debug("Transcribing %d page images", len(images_b64))
-        return await self._request_json("POST", "/v1/transcribe", payload)
+        return await self.request_json("POST", "/v1/transcribe", payload)
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Get single-vector embeddings for texts."""
-        payload = {"input": texts}
+    async def embed_texts(self, texts: list[str], *, dimensions: int | None = None) -> list[list[float]]:
+        """Get single-vector embeddings for texts.
 
-        self.logger.debug("Embedding %d texts (single-vector)", len(texts))
-        data = await self._request_json("POST", "/v1/embeddings", payload)
+        ``dimensions`` (optional) forwards the OpenAI ``dimensions`` field so a
+        Matryoshka-capable server truncates each vector to the requested size
+        (mirrors the enterprise tokenary client). Omitted by default so servers
+        that do not support the field are unaffected.
+        """
+        payload: dict = {"input": texts}
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+
+        self.logger.debug("Embedding %d texts (single-vector, dimensions=%s)", len(texts), dimensions)
+        data = await self.request_json("POST", "/v1/embeddings", payload)
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
         return [item["embedding"] for item in sorted_data]
 
@@ -329,7 +412,7 @@ class EmbedServerClient:
         payload = {"input": texts, "input_type": input_type}
 
         self.logger.debug("Embedding %d texts (multi-vector, type=%s)", len(texts), input_type)
-        data = await self._request_json("POST", "/v1/embeddings/multi", payload)
+        data = await self.request_json("POST", "/v1/embeddings/multi", payload)
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
         return [{"vectors": item["vectors"], "num_vectors": item["num_vectors"]} for item in sorted_data]
 
@@ -338,7 +421,7 @@ class EmbedServerClient:
         payload = {"images": images_b64, "mode": "multi"}
 
         self.logger.debug("Embedding %d images (multi-vector)", len(images_b64))
-        data = await self._request_json("POST", "/v1/embeddings/images", payload)
+        data = await self.request_json("POST", "/v1/embeddings/images", payload)
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
         return [{"vectors": item["vectors"], "num_vectors": item["num_vectors"]} for item in sorted_data]
 
@@ -358,7 +441,7 @@ class EmbedServerClient:
             len(query_vectors),
             len(document_vectors),
         )
-        data = await self._request_json("POST", "/v1/score", payload)
+        data = await self.request_json("POST", "/v1/score", payload)
         return data["scores"]
 
 

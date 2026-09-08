@@ -16,6 +16,7 @@ from logging import Logger
 from scitrera_app_framework import Variables, get_extension
 
 from ....config import RerankerProviderType
+from ....models.generation import GenerationActivity
 from ....utils import cosine_similarity
 from ...embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
 from ...llm import EXT_LLM_SERVICE, LLMService
@@ -51,6 +52,8 @@ class HyDERerankerProvider(RerankerProvider):
     Requires both LLM and embedding services to be configured.
     """
 
+    generative = True
+
     def __init__(
         self,
         v: Variables,
@@ -78,6 +81,7 @@ class HyDERerankerProvider(RerankerProvider):
             max_tokens=self.max_tokens,
             temperature=self.temperature,
             profile="reranker",
+            activity=GenerationActivity.QUERY_REWRITING,
         )
 
         return hypothetical_answer

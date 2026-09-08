@@ -16,7 +16,11 @@ import type {
   Memory,
   RecallResult,
   Association,
-  Session
+  Session,
+  ContextPack,
+  ContextDelta,
+  ContextPackOptions,
+  SessionCheckpoint,
 } from "@scitrera/memorylayer-sdk";
 import type {
   RememberInput,
@@ -74,6 +78,7 @@ export class MemoryLayerClient {
       tags: input.tags,
       metadata: input.metadata,
       associations: input.associations,
+      relations: input.relations,
       contextId: input.context_id
     });
   }
@@ -95,7 +100,10 @@ export class MemoryLayerClient {
       createdBefore: input.created_before ? new Date(input.created_before) : undefined,
       conversationContext: input.context,
       ragThreshold: input.rag_threshold,
-      detailLevel: input.detail_level
+      detailLevel: input.detail_level,
+      budgetTokens: input.budget_tokens,
+      includeConfidence: input.include_confidence,
+      includeRelations: input.include_relations,
     });
   }
 
@@ -347,6 +355,32 @@ export class MemoryLayerClient {
     return { expires_at: result.expires_at };
   }
 
+  async createCheckpoint(sessionId: string, input: {
+    transcript_segment: string;
+    content_hash: string;
+    idempotency_key: string;
+    source_kind?: string;
+    source_sequence?: number;
+    source_boundary?: number;
+  }): Promise<SessionCheckpoint> {
+    return this.sdk.createCheckpoint(sessionId, {
+      transcriptSegment: input.transcript_segment,
+      contentHash: input.content_hash,
+      idempotencyKey: input.idempotency_key,
+      sourceKind: input.source_kind,
+      sourceSequence: input.source_sequence,
+      sourceBoundary: input.source_boundary,
+    });
+  }
+
+  async getContextPack(sessionId: string, options: ContextPackOptions = {}): Promise<ContextPack> {
+    return this.sdk.getContextPack(sessionId, options);
+  }
+
+  async getContextDelta(sessionId: string, cursor: string, budgetTokens?: number): Promise<ContextDelta> {
+    return this.sdk.getContextDelta(sessionId, cursor, budgetTokens);
+  }
+
   // ============================================================================
   // Context Environment (delegated to SDK)
   // ============================================================================
@@ -503,7 +537,7 @@ export class MemoryLayerClient {
     title?: string;
     metadata?: Record<string, unknown>;
   }): Promise<Record<string, unknown>> {
-    return this.rawRequest<Record<string, unknown>>("POST", "/v1/chat/threads", options);
+    return this.rawRequest<Record<string, unknown>>("POST", "/v1/threads", options);
   }
 
   /**
@@ -516,7 +550,7 @@ export class MemoryLayerClient {
   }>): Promise<Record<string, unknown>> {
     return this.rawRequest<Record<string, unknown>>(
       "POST",
-      `/v1/chat/threads/${threadId}/messages`,
+      `/v1/threads/${threadId}/messages`,
       { messages }
     );
   }
@@ -536,7 +570,7 @@ export class MemoryLayerClient {
     const query = params.toString();
     return this.rawRequest<Record<string, unknown>>(
       "GET",
-      `/v1/chat/threads/${threadId}${query ? `?${query}` : ""}`
+      `/v1/threads/${threadId}${query ? `?${query}` : ""}`
     );
   }
 
@@ -555,7 +589,7 @@ export class MemoryLayerClient {
     const query = params.toString();
     return this.rawRequest<Record<string, unknown>>(
       "GET",
-      `/v1/chat/threads${query ? `?${query}` : ""}`
+      `/v1/threads${query ? `?${query}` : ""}`
     );
   }
 
@@ -565,7 +599,7 @@ export class MemoryLayerClient {
   async chatThreadDecompose(threadId: string): Promise<Record<string, unknown>> {
     return this.rawRequest<Record<string, unknown>>(
       "POST",
-      `/v1/chat/threads/${threadId}/decompose`
+      `/v1/threads/${threadId}/decompose`
     );
   }
 
@@ -573,7 +607,7 @@ export class MemoryLayerClient {
    * Delete a chat thread and all its messages.
    */
   async chatThreadDelete(threadId: string): Promise<Record<string, unknown>> {
-    await this.rawRequest<void>("DELETE", `/v1/chat/threads/${threadId}`);
+    await this.rawRequest<void>("DELETE", `/v1/threads/${threadId}`);
     return { success: true, thread_id: threadId };
   }
 

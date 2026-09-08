@@ -70,3 +70,17 @@ class OntologyContributorPlugin(Plugin):
             apply to any memory type.
         """
         return {}
+
+    def get_entity_types(self) -> dict[str, dict]:
+        """Return entity types contributed by this plugin.
+
+        Subclasses may override to contribute domain-specific entity types
+        beyond the base vocabulary (person/org/project/place/event/concept).
+        Default is empty (contribute nothing).
+
+        Returns:
+            Mapping of ``type_name -> {"ner_label": str | None, "description":
+            str}``. ``ner_label`` is the label sent to the zero-shot NER model
+            (``None`` = type exists but is not NER-extracted).
+        """
+        return {}

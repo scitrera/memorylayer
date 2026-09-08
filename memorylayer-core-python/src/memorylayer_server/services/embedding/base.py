@@ -135,12 +135,17 @@ class MultimodalEmbeddingProvider(EmbeddingProvider):
 
                 with urllib.request.urlopen(image) as response:
                     return response.read()
-            elif len(image) > 500 and not Path(image).exists():
-                # Likely base64 string
-                return base64.b64decode(image)
-            else:
-                # File path
-                return Path(image).read_bytes()
+            # Could be a filesystem path or a raw base64 string. Probe the
+            # path safely: Path(image).exists() raises OSError ENAMETOOLONG
+            # (Errno 36) on long base64 strings, so guard it and fall back to
+            # base64 decoding (real image base64 is far longer than any path).
+            try:
+                p = Path(image)
+                if len(image) < 4096 and p.exists():
+                    return p.read_bytes()
+            except OSError:
+                pass
+            return base64.b64decode(image)
         raise ValueError(f"Unsupported image type: {type(image)}")
 
 

@@ -6,10 +6,9 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "agent",
-            "prompt": "CRITICAL: Context compaction is about to occur. You MUST preserve important information to MemoryLayer before context is lost.\n\nHook input: $ARGUMENTS\n\nSTEP 1: Read the conversation transcript from the transcript_path in the hook input above. The file is JSONL format with conversation messages.\n\nSTEP 2: Analyze the transcript to identify important information worth preserving:\n\nCRITICAL (importance 0.9):\n- User directives and instructions — \"always do X\", \"never do Y\", \"prefer X over Y\" (type: \"semantic\", subtype: \"directive\")\n\nHIGH (importance 0.7-0.8):\n- Decisions made with rationale (type: \"semantic\", subtype: \"decision\")\n- Problems solved — problem + solution pairs (type: \"semantic\", subtype: \"fix\")\n- Current task state and progress (type: \"working\")\n\nNORMAL (importance 0.5-0.6):\n- Patterns discovered (type: \"procedural\", subtype: \"code_pattern\")\n- Files actively being worked on (type: \"working\", tags: [\"active-file\"])\n\nSTEP 3: Use `memory_remember` to store each important piece of context with appropriate type, subtype, importance, and tags.\n\nSTEP 4: Call `memory_session_commit` to checkpoint working memory to long-term storage.\n\nSTEP 5: If a context environment session is active, call `memory_context_checkpoint` to persist sandbox state before compaction. The SessionStart hook will automatically detect and inject sandbox state when the session resumes.\n\nBriefly report what was preserved.",
-            "model": "claude-sonnet-4-5",
-            "timeout": 60
+            "type": "command",
+            "command": "memorylayer-hook PreCompact",
+            "timeout": 20000
           }
         ]
       }

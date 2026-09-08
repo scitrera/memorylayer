@@ -12,9 +12,10 @@ Endpoints:
 import json
 import logging
 from datetime import UTC
+from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from scitrera_app_framework import Plugin, Variables
 
@@ -30,6 +31,9 @@ from .. import EXT_MULTI_API_ROUTERS
 from .deps import get_audit_service, get_auth_service, get_authz_service, get_memory_service, get_workspace_service
 from .schemas import (
     AssociationExportItem,
+    ContextCreateRequest,
+    ContextListResponse,
+    ContextResponse,
     ErrorResponse,
     MemoryExportItem,
     WorkspaceCreateRequest,
@@ -99,6 +103,7 @@ async def create_workspace(
             tenant_id=ctx.tenant_id,
             name=request.name,
             settings=request.settings,
+            tags=request.tags,
         )
 
         # Store workspace via workspace service
@@ -140,23 +145,29 @@ async def create_workspace(
 )
 async def list_workspaces(
     http_request: Request,
+    tags: list[str] | None = Query(None, description="Filter workspaces by tag(s), e.g. ?tags=knowledge&tags=topic:finance"),
+    match: Literal["any", "all"] = Query("all", description="Tag match mode: 'all' (every tag) or 'any' (at least one)"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     workspace_service: WorkspaceService = Depends(get_workspace_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> WorkspaceListResponse:
     """
-    List all workspaces.
+    List workspaces, optionally filtered by tag.
+
+    Args:
+        tags: Optional tag filter. When provided, only workspaces carrying the tag(s) are returned.
+        match: 'all' requires every tag; 'any' requires at least one.
 
     Returns:
-        List of all workspaces
+        List of matching workspaces
     """
     try:
         ctx = await auth_service.build_context(http_request, None)
         await authz_service.require_authorization(ctx, "workspaces", "read")
 
-        logger.debug("Listing workspaces")
-        workspaces = await workspace_service.list_workspaces()
+        logger.debug("Listing workspaces (tags=%s, match=%s)", tags, match)
+        workspaces = await workspace_service.list_workspaces(tags=tags, match=match)
 
         return WorkspaceListResponse(workspaces=workspaces)
 
@@ -291,6 +302,8 @@ async def update_workspace(
             workspace = workspace.model_copy(update={"name": request.name})
         if request.settings is not None:
             workspace = workspace.model_copy(update={"settings": request.settings})
+        if request.tags is not None:
+            workspace = workspace.model_copy(update={"tags": request.tags})
         workspace = await workspace_service.update_workspace(workspace)
         return WorkspaceResponse(workspace=workspace)
 
@@ -811,6 +824,169 @@ async def import_workspace(
     except Exception as e:
         logger.error("Failed to import into workspace %s: %s", workspace_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to import workspace data")
+
+
+@router.post(
+    "/{workspace_id}/contexts",
+    response_model=ContextResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        404: {"model": ErrorResponse, "description": "Workspace not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def create_context(
+    http_request: Request,
+    workspace_id: str,
+    request: ContextCreateRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> ContextResponse:
+    """Create a context (logical grouping) within a workspace."""
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(ctx, "workspaces", "write", resource_id=workspace_id, workspace_id=workspace_id)
+
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace not found: {workspace_id}")
+
+        from ...models.workspace import Context
+
+        context_id = request.id or f"ctx_{uuid4().hex[:16]}"
+        context = Context(
+            id=context_id,
+            workspace_id=workspace_id,
+            name=request.name,
+            description=request.description,
+            settings=request.settings,
+        )
+
+        logger.info("Creating context: %s in workspace: %s", context_id, workspace_id)
+        context = await memory_service.storage.create_context(workspace_id, context)
+
+        try:
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="create",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=context.id,
+                )
+            )
+        except Exception:
+            logger.debug("Audit record failed for context create")
+        return ContextResponse(context=context)
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.warning("Invalid context creation request: %s", e)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to create context in workspace %s: %s", workspace_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create context")
+
+
+@router.get(
+    "/{workspace_id}/contexts",
+    response_model=ContextListResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        404: {"model": ErrorResponse, "description": "Workspace not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def list_contexts(
+    http_request: Request,
+    workspace_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> ContextListResponse:
+    """List all contexts in a workspace."""
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(ctx, "workspaces", "read", resource_id=workspace_id, workspace_id=workspace_id)
+
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace not found: {workspace_id}")
+
+        logger.debug("Listing contexts in workspace: %s", workspace_id)
+        contexts = await memory_service.storage.list_contexts(workspace_id)
+        return ContextListResponse(contexts=contexts)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to list contexts in workspace %s: %s", workspace_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list contexts")
+
+
+@router.delete(
+    "/{workspace_id}/contexts/{context_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        404: {"model": ErrorResponse, "description": "Context not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def delete_context(
+    http_request: Request,
+    workspace_id: str,
+    context_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
+):
+    """Delete a context within a workspace (does not delete its memories)."""
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(ctx, "workspaces", "delete", resource_id=workspace_id, workspace_id=workspace_id)
+
+        logger.info("Deleting context: %s in workspace: %s", context_id, workspace_id)
+        deleted = await memory_service.storage.delete_context(workspace_id, context_id)
+        if not deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Context not found: {context_id}")
+
+        try:
+            await audit_service.record(
+                AuditEvent(
+                    event_type="context",
+                    action="delete",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="context",
+                    resource_id=context_id,
+                )
+            )
+        except Exception:
+            logger.debug("Audit record failed for context delete")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete context %s in workspace %s: %s", context_id, workspace_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete context")
 
 
 class WorkspacesAPIPlugin(Plugin):

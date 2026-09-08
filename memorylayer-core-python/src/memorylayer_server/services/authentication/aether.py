@@ -39,10 +39,14 @@ from pydantic import BaseModel
 from scitrera_app_framework import Variables, ext_parse_bool
 
 from memorylayer_server.config import (
+    DEFAULT_MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT,
     DEFAULT_MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+    DEFAULT_MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
     DEFAULT_TENANT_ID,
     DEFAULT_WORKSPACE_ID,
+    MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT,
     MEMORYLAYER_SESSION_IMPLICIT_CREATE,
+    MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
 )
 from memorylayer_server.models.auth import (
     AuthIdentity,
@@ -53,8 +57,11 @@ from memorylayer_server.models.auth import (
 from memorylayer_server.models.session import Session
 from memorylayer_server.services.authentication.base import (
     HEADER_SESSION_ID,
+    AuthenticationError,
     AuthenticationService,
     AuthenticationServicePluginBase,
+    ensure_resolved_workspace,
+    request_may_create,
 )
 from memorylayer_server.services.session import EXT_SESSION_SERVICE, SessionService
 from memorylayer_server.services.workspace import EXT_WORKSPACE_SERVICE, WorkspaceService
@@ -112,12 +119,19 @@ class AetherAuthenticationService(AuthenticationService):
         session_service: SessionService,
         workspace_service: WorkspaceService,
         implicit_session_create: bool = True,
+        allow_default_tenant_fallback: bool = False,
+        implicit_workspace_create: bool = True,
         logger: logging.Logger | None = None,
     ):
         super().__init__(logger)
         self.session_service = session_service
         self.workspace_service = workspace_service
         self._implicit_session_create = implicit_session_create
+        self._implicit_workspace_create = implicit_workspace_create
+        # Fail-closed by default: a missing X-Auth-Tenant-ID raises 401 rather
+        # than silently using DEFAULT_TENANT_ID. Only the explicit dev opt-in
+        # (MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT) restores the legacy fallback.
+        self._allow_default_tenant_fallback = allow_default_tenant_fallback
 
     # ------------------------------------------------------------------
     # ABC implementation
@@ -154,6 +168,7 @@ class AetherAuthenticationService(AuthenticationService):
         request_workspace_id: str | None,
         session: Session | None,
         tenant_id: str,
+        allow_create: bool = True,
         authority: AuthorityContext | None = None,
     ) -> str:
         """Resolve workspace with priority order and auto-creation.
@@ -179,10 +194,13 @@ class AetherAuthenticationService(AuthenticationService):
                     detail=f"workspace '{workspace_id}' is not in grant scope",
                 )
 
-        await self.workspace_service.ensure_workspace(
-            workspace_id=workspace_id,
-            tenant_id=tenant_id,
-            auto_create=True,
+        await ensure_resolved_workspace(
+            self.workspace_service,
+            workspace_id,
+            tenant_id,
+            may_create=allow_create,
+            implicit_create=self._implicit_workspace_create,
+            explicitly_named=bool(request_workspace_id),
         )
 
         return workspace_id
@@ -279,15 +297,17 @@ class AetherAuthenticationService(AuthenticationService):
             request_workspace_id = request.headers.get("X-Workspace-ID")
 
         # 7. Resolve effective workspace (with OBO scope enforcement)
+        may_create = request_may_create(request)
         workspace_id = await self.resolve_workspace(
             request_workspace_id=request_workspace_id,
             session=session,
             tenant_id=identity.tenant_id,
+            allow_create=may_create,
             authority=authority,
         )
 
-        # 8. Implicit session creation
-        if session_id and session is None and request_workspace_id:
+        # 8. Implicit session creation (same safe-method rule as the workspace)
+        if may_create and session_id and session is None and request_workspace_id:
             session = await self.ensure_session(
                 session_id,
                 workspace_id,
@@ -333,16 +353,27 @@ class AetherAuthenticationService(AuthenticationService):
     def _extract_identity_from_headers(self, request: Request) -> AuthIdentity:
         """Extract :class:`AuthIdentity` from gateway-injected headers.
 
-        Falls back to default tenant when headers are absent.
+        Fails closed: a missing ``X-Auth-Tenant-ID`` raises
+        :class:`AuthenticationError` (HTTP 401) so an unauthenticated request
+        is rejected rather than silently treated as the default tenant. The
+        legacy default-tenant fallback is only used when the explicit dev
+        opt-in (``MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT``) is set.
         """
         tenant_id = request.headers.get(HEADER_AUTH_TENANT_ID)
         user_id = request.headers.get(HEADER_AUTH_USER_ID)
         api_key_id = request.headers.get(HEADER_AUTH_API_KEY_ID)
 
         if not tenant_id:
-            self.logger.debug(
-                "No %s header found; falling back to default tenant",
+            if not self._allow_default_tenant_fallback:
+                raise AuthenticationError(
+                    f"Missing {HEADER_AUTH_TENANT_ID} header; request is unauthenticated",
+                    status_code=401,
+                )
+            self.logger.warning(
+                "No %s header found; falling back to default tenant because "
+                "%s is enabled (dev only — do NOT use in gateway-fronted envs)",
                 HEADER_AUTH_TENANT_ID,
+                MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT,
             )
             tenant_id = DEFAULT_TENANT_ID
 
@@ -468,10 +499,24 @@ class AetherAuthenticationServicePlugin(AuthenticationServicePluginBase):
             type_fn=ext_parse_bool,
         )
 
+        allow_default_tenant_fallback = v.environ(
+            MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT,
+            default=DEFAULT_MEMORYLAYER_AUTH_ALLOW_DEFAULT_TENANT,
+            type_fn=ext_parse_bool,
+        )
+
+        implicit_workspace_create = v.environ(
+            MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
+            default=DEFAULT_MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE,
+            type_fn=ext_parse_bool,
+        )
+
         return AetherAuthenticationService(
             session_service=session_service,
             workspace_service=workspace_service,
             implicit_session_create=implicit_create,
+            allow_default_tenant_fallback=allow_default_tenant_fallback,
+            implicit_workspace_create=implicit_workspace_create,
             logger=logger,
         )
 

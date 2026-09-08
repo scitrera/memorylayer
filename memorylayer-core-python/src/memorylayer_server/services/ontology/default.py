@@ -6,20 +6,56 @@ contribution mechanism (pull via OntologyContributorPlugin, push via
 extend_ontology).
 """
 
+import re
 from logging import Logger
 
 from scitrera_app_framework import get_extensions, get_logger
 from scitrera_app_framework.api import Variables
 
 from ...models.memory import OSS_KNOWN_SUBTYPES
+from ...models.generation import GenerationActivity
 from .._constants import EXT_MULTI_ONTOLOGY_CONTRIBUTORS
+from ...config import (
+    DEFAULT_MEMORYLAYER_ONTOLOGY_MAX_TOKENS,
+    MEMORYLAYER_ENTITY_TYPES,
+    MEMORYLAYER_ONTOLOGY_MAX_TOKENS,
+)
 from .base import (
+    _REQUIRED_ENTITY_TYPE_META_FIELDS,
+    BASE_ENTITY_TYPES,
     BASE_ONTOLOGY,
     OntologyService,
     OntologyServicePluginBase,
 )
 
 _REQUIRED_META_FIELDS = ("description", "symmetric", "transitive", "inverse", "category")
+
+#: Relationship classification asks for ONE label, so reasoning is pure cost and
+#: pure risk: a thinking model spends its budget deliberating and then emits the
+#: deliberation as the answer.
+DEFAULT_CLASSIFY_REASONING_EFFORT = "none"
+
+#: Matches a <think>...</think> block, including an unclosed one (a reply
+#: truncated mid-thought leaves no closing tag).
+_THINK_BLOCK_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.DOTALL | re.IGNORECASE)
+
+
+def _clean_label(content: str | None) -> str:
+    """Reduce a model reply to a bare lowercase label.
+
+    Defence in depth behind ``reasoning_effort``: a model that reasons anyway
+    (or a profile pointed at a model that cannot disable it) would otherwise
+    have its whole chain of thought treated as the label, matching nothing and
+    silently downgrading every edge to ``related_to``. Taking the LAST non-empty
+    line recovers the verdict, since reasoning precedes the answer.
+    """
+    if not content:
+        return ""
+    text = _THINK_BLOCK_RE.sub("", content).strip()
+    if not text:
+        return ""
+    last_line = text.splitlines()[-1].strip()
+    return last_line.lower().replace('"', "").replace("'", "").rstrip(".").strip()
 
 
 class DefaultOntologyService(OntologyService):
@@ -39,6 +75,12 @@ class DefaultOntologyService(OntologyService):
         self.base_ontology = BASE_ONTOLOGY
         self.llm_service = llm_service
         self.logger = get_logger(v, name=self.__class__.__name__)
+        # Completion cap for relationship classification (env-tunable).
+        self.ontology_max_tokens = (
+            v.get(MEMORYLAYER_ONTOLOGY_MAX_TOKENS,
+                  DEFAULT_MEMORYLAYER_ONTOLOGY_MAX_TOKENS)
+            if v is not None else DEFAULT_MEMORYLAYER_ONTOLOGY_MAX_TOKENS
+        )
         # Contributed types (pull via OntologyContributorPlugin or push via
         # extend_ontology). Both paths funnel into the same dict.
         self._contributions: dict[str, dict] = {}
@@ -52,6 +94,15 @@ class DefaultOntologyService(OntologyService):
         # Tenant/workspace-scoped persisted custom ontologies. In-memory
         # only for this PR; the seam exists for a SQL follow-up.
         self._persistent: dict[tuple[str, str | None], dict[str, dict]] = {}
+        # Contributed entity types (pull via OntologyContributorPlugin.get_entity_types
+        # or push via extend_entity_types). Mirrors the subtype contribution storage.
+        self._contributed_entity_types: dict[str, dict] = {}
+        self._entity_type_sources: dict[str, str] = {}
+        # Deployment-level entity-type extensions from env (per-tenant, since ML is
+        # deployed per tenant): MEMORYLAYER_ENTITY_TYPES = CSV of "type" or
+        # "type:ner_label" (ner_label defaults to the type name; use "type:" to add a
+        # non-NER type). E.g. "equipment,chemical:chemical,standard:standard".
+        self._load_entity_types_from_env(v)
         base_categories = len({v["category"] for v in BASE_ONTOLOGY.values()})
         self.logger.info(
             "Initialized DefaultOntologyService with %s base relationship types across %s categories",
@@ -245,6 +296,101 @@ class DefaultOntologyService(OntologyService):
         return subtype in self._oss_known_subtypes_for(memory_type) or subtype in self._contributed_subtypes_for(memory_type)
 
     # ------------------------------------------------------------------
+    # Entity-type vocabulary (base + contributions)
+    # ------------------------------------------------------------------
+
+    def _load_entity_types_from_env(self, v: Variables | None) -> None:
+        """Parse MEMORYLAYER_ENTITY_TYPES (CSV of ``type`` / ``type:ner_label``)."""
+        if v is None:
+            return
+        raw = v.environ(MEMORYLAYER_ENTITY_TYPES, default="")
+        if not raw:
+            return
+        contributed: dict[str, dict] = {}
+        for token in raw.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if ":" in token:
+                name, _, label = token.partition(":")
+                name = name.strip()
+                label = label.strip() or None  # "type:" -> non-NER type
+            else:
+                name = token
+                label = token  # bare "type" -> ner_label defaults to the type name
+            if name:
+                contributed[name] = {"ner_label": label, "description": f"Domain entity type '{name}'."}
+        if contributed:
+            self.extend_entity_types(contributed, source="env:MEMORYLAYER_ENTITY_TYPES")
+
+    def _merged_entity_types(self) -> dict[str, dict]:
+        """base ∪ contributed (contributions win on collision)."""
+        merged = dict(BASE_ENTITY_TYPES)
+        merged.update(self._contributed_entity_types)
+        return merged
+
+    def extend_entity_types(
+        self, entity_types: dict[str, dict] | None = None, *, source: str = "runtime"
+    ) -> None:
+        if not entity_types:
+            return
+        for name, meta in entity_types.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"Entity type name must be a non-empty string, got {name!r}")
+            if not isinstance(meta, dict):
+                raise ValueError(f"Entity type '{name}' metadata must be a dict, got {type(meta).__name__}")
+            missing = [f for f in _REQUIRED_ENTITY_TYPE_META_FIELDS if f not in meta]
+            if missing:
+                raise ValueError(
+                    f"Entity type '{name}' is missing required metadata field(s): {', '.join(missing)}"
+                )
+            if name in BASE_ENTITY_TYPES:
+                self.logger.warning(
+                    "Entity-type contribution from '%s' overrides base entity type '%s'", source, name
+                )
+            prior = self._entity_type_sources.get(name)
+            if prior is not None and prior != source:
+                self.logger.warning(
+                    "Entity-type contribution from '%s' overrides previous '%s' from '%s'", source, name, prior
+                )
+            self._contributed_entity_types[name] = dict(meta)
+            self._entity_type_sources[name] = source
+
+    def list_entity_types(self, tenant_id: str = "_default", workspace_id: str | None = None) -> list[str]:
+        return sorted(self._merged_entity_types().keys())
+
+    def validate_entity_type(
+        self, entity_type: str, tenant_id: str = "_default", workspace_id: str | None = None
+    ) -> bool:
+        return entity_type in self._merged_entity_types()
+
+    def get_entity_type_info(
+        self, entity_type: str, tenant_id: str = "_default", workspace_id: str | None = None
+    ) -> dict | None:
+        info = self._merged_entity_types().get(entity_type)
+        return dict(info) if info is not None else None
+
+    def get_ner_labels(self, tenant_id: str = "_default", workspace_id: str | None = None) -> list[str]:
+        labels: list[str] = []
+        seen: set[str] = set()
+        for meta in self._merged_entity_types().values():
+            label = meta.get("ner_label")
+            if label and label not in seen:
+                seen.add(label)
+                labels.append(label)
+        return labels
+
+    def ner_label_to_entity_type(
+        self, tenant_id: str = "_default", workspace_id: str | None = None
+    ) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+        for name, meta in self._merged_entity_types().items():
+            label = meta.get("ner_label")
+            if label:
+                mapping.setdefault(label, name)  # first (base before contributed) wins
+        return mapping
+
+    # ------------------------------------------------------------------
     # Push (extend) and create (persisted) APIs
     # ------------------------------------------------------------------
 
@@ -362,11 +508,20 @@ class DefaultOntologyService(OntologyService):
                     LLMMessage(role=LLMRole.USER, content=prompt),
                 ],
                 temperature_factor=0.15,
-                max_tokens=250,
+                max_tokens=self.ontology_max_tokens,
+                # This is a single-label classification, not a reasoning task.
+                # A thinking model emits its chain of thought into `content`,
+                # which matches no relationship type and silently degrades EVERY
+                # edge to related_to -- visible only as a log warning.
+                reasoning_effort=DEFAULT_CLASSIFY_REASONING_EFFORT,
             )
 
-            response = await self.llm_service.complete(request, profile="ontology")
-            result = response.content.strip().lower().replace('"', "").replace("'", "").rstrip(".")
+            response = await self.llm_service.complete(
+                request,
+                profile="ontology",
+                activity=GenerationActivity.RELATIONSHIP_CLASSIFICATION,
+            )
+            result = _clean_label(response.content)
 
             if result in ontology:
                 self.logger.debug("LLM classified relationship as %s", result)
@@ -393,6 +548,127 @@ class DefaultOntologyService(OntologyService):
         except Exception:
             self.logger.exception("Failed to classify relationship via LLM, falling back to related_to")
             return "related_to"
+
+    async def classify_relationships_batch(
+        self,
+        content_a: str,
+        candidates: list[tuple[str, str]],
+        tenant_id: str = "_default",
+        workspace_id: str | None = None,
+    ) -> dict[str, str]:
+        """Classify ``content_a`` against every candidate in a SINGLE LLM call.
+
+        The ontology type menu is listed once; each candidate is numbered and
+        the model returns one ``index: relationship`` line per candidate. This
+        collapses what used to be N per-pair calls into one call per new
+        memory. Missing/invalid lines fall back to ``related_to``.
+        """
+        if not candidates:
+            return {}
+
+        # No LLM -> uniform related_to (matches single-call fallback contract).
+        if self.llm_service is None:
+            return {cand_id: "related_to" for cand_id, _ in candidates}
+
+        # A single candidate isn't worth the batch framing/parse overhead.
+        if len(candidates) == 1:
+            cand_id, cand_content = candidates[0]
+            return {
+                cand_id: await self.classify_relationship(
+                    content_a=content_a,
+                    content_b=cand_content,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                )
+            }
+
+        ontology = self.get_merged_ontology(tenant_id, workspace_id)
+        types_list = "\n".join(f"  {rel_type}: {info['description']}" for rel_type, info in sorted(ontology.items()))
+
+        candidate_lines = "\n".join(f"[{i}] {cand_content}" for i, (_, cand_content) in enumerate(candidates))
+
+        prompt = (
+            "Classify the relationship from the ANCHOR content to each numbered CANDIDATE.\n"
+            "\n"
+            f"ANCHOR (A): {content_a}\n"
+            "\n"
+            "CANDIDATES (B):\n"
+            f"{candidate_lines}\n"
+            "\n"
+            "Available relationship types (A -> B):\n"
+            f"{types_list}\n"
+            "\n"
+            "Respond with ONE line per candidate in the exact form `<index>: <relationship>`\n"
+            '(e.g. "0: causes"). Use only relationship type names from the list above.\n'
+            'If unsure for a candidate, use "related_to".'
+        )
+
+        try:
+            from ...models.llm import LLMMessage, LLMRequest, LLMRole
+
+            # Scale the completion budget with the candidate count so long
+            # batches aren't truncated mid-list.
+            max_tokens = min(self.ontology_max_tokens * max(1, len(candidates)), self.ontology_max_tokens * 8)
+            request = LLMRequest(
+                messages=[LLMMessage(role=LLMRole.USER, content=prompt)],
+                temperature_factor=0.15,
+                max_tokens=max_tokens,
+                # Same reasoning as the single-pair path: labels, not analysis.
+                # More acute here — one leaked chain of thought costs the WHOLE
+                # batch, not one edge.
+                reasoning_effort=DEFAULT_CLASSIFY_REASONING_EFFORT,
+            )
+            response = await self.llm_service.complete(
+                request,
+                profile="ontology",
+                activity=GenerationActivity.RELATIONSHIP_CLASSIFICATION,
+            )
+            parsed = self._parse_batch_response(response.content, ontology, len(candidates))
+        except Exception:
+            self.logger.exception("Batch relationship classification failed; falling back to related_to")
+            parsed = {}
+
+        # Map parsed index -> candidate_id, defaulting anything unparsed.
+        results: dict[str, str] = {}
+        for i, (cand_id, _) in enumerate(candidates):
+            results[cand_id] = parsed.get(i, "related_to")
+        return results
+
+    def _parse_batch_response(self, raw: str, ontology: dict, n: int) -> dict[int, str]:
+        """Parse ``<index>: <relationship>`` lines into ``{index: rel_type}``.
+
+        Tolerates surrounding prose, quoting, trailing punctuation, and
+        truncated type names (single-prefix match), mirroring the single-call
+        parser. Out-of-range indices are dropped.
+
+        Reasoning is stripped before scanning rather than merely tolerated: a
+        chain of thought discussing the candidates contains lines that LOOK like
+        ``<index>: <text>`` and would be parsed as verdicts, so leaving it in
+        risks a confidently wrong answer instead of an honest fallback.
+        """
+        parsed: dict[int, str] = {}
+        if not raw:
+            return parsed
+        for line in _THINK_BLOCK_RE.sub("", raw).splitlines():
+            line = line.strip()
+            if ":" not in line:
+                continue
+            idx_part, _, rel_part = line.partition(":")
+            idx_part = idx_part.strip().lstrip("[").rstrip("]").strip()
+            if not idx_part.isdigit():
+                continue
+            idx = int(idx_part)
+            if idx < 0 or idx >= n:
+                continue
+            rel = rel_part.strip().lower().replace('"', "").replace("'", "").rstrip(".").strip()
+            if rel in ontology:
+                parsed[idx] = rel
+                continue
+            if rel:
+                prefix_matches = [t for t in ontology if t.startswith(rel)]
+                if len(prefix_matches) == 1:
+                    parsed[idx] = prefix_matches[0]
+        return parsed
 
 
 class DefaultOntologyServicePlugin(OntologyServicePluginBase):
@@ -430,4 +706,10 @@ class DefaultOntologyServicePlugin(OntologyServicePluginBase):
                     value.extend_subtypes(subtypes, source=name)
             except Exception:
                 logger.exception("Ontology contributor %s failed (subtypes)", name)
+            try:
+                entity_types = c.get_entity_types()
+                if entity_types:
+                    value.extend_entity_types(entity_types, source=name)
+            except Exception:
+                logger.exception("Ontology contributor %s failed (entity types)", name)
         return None

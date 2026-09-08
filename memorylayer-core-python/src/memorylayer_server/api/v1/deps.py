@@ -21,6 +21,7 @@ from ...services.session import EXT_SESSION_SERVICE, SessionService
 from ...services.skills import EXT_SKILLS_SERVICE, SkillsService
 from ...services.skills.resolution import SkillsResolutionService
 from ...services.tasks import EXT_TASK_SERVICE, TaskService
+from ...services.versioned_resources import EXT_VERSIONED_RESOURCE_SERVICE, VersionedResourceService
 from ...services.workspace import EXT_WORKSPACE_SERVICE, WorkspaceService
 from ...tasks.session_touch_handler import SESSION_TOUCH_HANDLER_TASK
 
@@ -123,3 +124,8 @@ def get_mcp_servers_resolution_service(
 ) -> "McpServerResolutionService":
     """FastAPI dependency that builds a McpServerResolutionService from the active StorageBackend."""
     return McpServerResolutionService(storage=mcp_service._storage)
+
+
+def get_versioned_resource_service(v: Variables = Depends(get_variables_dep)) -> VersionedResourceService:
+    """Get the internal revision authority used by typed resource APIs."""
+    return get_extension(EXT_VERSIONED_RESOURCE_SERVICE, v)

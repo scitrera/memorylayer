@@ -87,6 +87,9 @@ class TestMemoryEnums:
         # v3: inference subtype
         assert MemorySubtype.INFERENCE.value == "inference"
 
+        # Fact channel subtype
+        assert MemorySubtype.FACT.value == "fact"
+
         # Verify all expected values exist (RPG subtypes live in the RPG
         # plugin contributor, not the OSS enum).
         assert set(MemorySubtype) == {
@@ -103,6 +106,7 @@ class TestMemoryEnums:
             MemorySubtype.EVENT,
             MemorySubtype.DIRECTIVE,
             MemorySubtype.INFERENCE,
+            MemorySubtype.FACT,
         }
 
     def test_recall_mode_enum_values(self):
@@ -110,8 +114,14 @@ class TestMemoryEnums:
         assert RecallMode.RAG.value == "rag"
         assert RecallMode.LLM.value == "llm"
         assert RecallMode.HYBRID.value == "hybrid"
+        assert RecallMode.AGENTIC.value == "agentic"
 
-        assert set(RecallMode) == {RecallMode.RAG, RecallMode.LLM, RecallMode.HYBRID}
+        assert set(RecallMode) == {
+            RecallMode.RAG,
+            RecallMode.LLM,
+            RecallMode.HYBRID,
+            RecallMode.AGENTIC,
+        }
 
     def test_search_tolerance_enum_values(self):
         """Test all SearchTolerance enum values."""

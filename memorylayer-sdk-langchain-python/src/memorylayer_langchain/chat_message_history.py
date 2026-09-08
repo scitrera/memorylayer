@@ -4,7 +4,6 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-import httpx
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import (
     AIMessage,
@@ -15,6 +14,7 @@ from langchain_core.messages import (
     messages_to_dict,
 )
 from memorylayer import SyncMemoryLayerClient
+from memorylayer.exceptions import MemoryLayerError
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ class MemoryLayerChatMessageHistory(BaseChatMessageHistory):
 
             return messages
 
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to retrieve messages: {e}")
             return []
 
@@ -266,7 +266,7 @@ class MemoryLayerChatMessageHistory(BaseChatMessageHistory):
                         "message_data": message_data,
                     },
                 )
-            except httpx.HTTPStatusError as e:
+            except MemoryLayerError as e:
                 logger.error(f"Failed to store message: {e}")
                 raise
 
@@ -295,9 +295,9 @@ class MemoryLayerChatMessageHistory(BaseChatMessageHistory):
             for memory in memories:
                 try:
                     self._client.forget(memory.id)
-                except httpx.HTTPStatusError as e:
+                except MemoryLayerError as e:
                     logger.warning(f"Failed to delete memory {memory.id}: {e}")
 
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to clear messages: {e}")
             raise

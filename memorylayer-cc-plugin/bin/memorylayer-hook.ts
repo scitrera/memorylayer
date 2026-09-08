@@ -27,6 +27,7 @@ import {handleUserPromptSubmit} from "../src/hooks/handlers/user-prompt.js";
 import {handlePreToolUse} from "../src/hooks/handlers/pre-tool.js";
 import {handlePostToolUse} from "../src/hooks/handlers/post-tool.js";
 import {handleStop} from "../src/hooks/handlers/stop.js";
+import {handlePreCompact} from "../src/hooks/handlers/pre-compact.js";
 import {resetRecallStatus, updateSessionInfo} from "../src/hooks/state.js";
 import {getClient} from "../src/hooks/client.js";
 
@@ -104,8 +105,8 @@ function buildOutput(
         output.reason = reason || "Blocked by MemoryLayer hook";
     }
 
-    // Only add hookSpecificOutput for hooks that support it
-    // SessionStart, Stop, PreCompact do NOT support hookSpecificOutput
+    // Only add hookSpecificOutput for hooks that support it.
+    // SessionStart works empirically for context injection; Stop and PreCompact do not.
     if (additionalContext && HOOKS_WITH_ADDITIONAL_CONTEXT.has(hookType)) {
         output.hookSpecificOutput = {
             hookEventName: hookType,
@@ -126,6 +127,26 @@ function buildErrorOutput(hookType: HookEvent, error: string): HookOutput {
             additionalContext: `MemoryLayer hook error: ${error}`,
         },
     };
+}
+
+/**
+ * Quote a value for a POSIX shell env file without permitting expansion.
+ */
+function shellQuote(value: string): string {
+    return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+/**
+ * Redact IDs before diagnostic logging.
+ */
+function redactId(value: string | undefined): string {
+    if (!value) {
+        return "(none)";
+    }
+    if (value.length <= 8) {
+        return `${value.slice(0, 2)}...`;
+    }
+    return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
 /** Internal result from handlers */
@@ -150,9 +171,9 @@ function legacyToResult(output: HookOutput): HandlerResult {
     }
     // Handle legacy format (has additionalContext at top level)
     return {
-        additionalContext: (output as any).additionalContext,
-        block: (output as any).block,
-        reason: (output as any).blockReason,
+        additionalContext: output.additionalContext,
+        block: output.block,
+        reason: output.blockReason,
         error: output.error,
     };
 }
@@ -194,13 +215,13 @@ async function dispatch(hookType: HookEvent, input: HookInput): Promise<HandlerR
                     workspaceId = client.getWorkspaceId();
                     const sessionResult = await client.startSession({ttl_seconds: 3600});
                     sessionId = sessionResult.session_id;
-                    console.error(`[session-start] created hook session=${sessionId} workspace=${workspaceId} (direct, no handoff)`);
+                    console.error(`[session-start] created hook session=${redactId(sessionId)} workspace=${redactId(workspaceId)} (direct, no handoff)`);
                 } catch {
                     // Ignore - memory features will still work via MCP tools
                     console.error("[session-start] failed to create hook session (server unreachable?)");
                 }
             } else {
-                console.error(`[session-start] got hook session=${sessionId} workspace=${workspaceId} (from handoff file)`);
+                console.error(`[session-start] got hook session=${redactId(sessionId)} workspace=${redactId(workspaceId)} (from handoff file)`);
             }
 
             // Write to CLAUDE_ENV_FILE so subsequent hook processes get the session.
@@ -208,12 +229,12 @@ async function dispatch(hookType: HookEvent, input: HookInput): Promise<HandlerR
             if (envFile) {
                 try {
                     if (workspaceId) {
-                        appendFileSync(envFile, `export MEMORYLAYER_WORKSPACE_ID="${workspaceId}"\n`);
+                        appendFileSync(envFile, `export MEMORYLAYER_WORKSPACE_ID=${shellQuote(workspaceId)}\n`);
                     }
                     if (sessionId) {
-                        appendFileSync(envFile, `export MEMORYLAYER_SESSION_ID="${sessionId}"\n`);
+                        appendFileSync(envFile, `export MEMORYLAYER_SESSION_ID=${shellQuote(sessionId)}\n`);
                     }
-                    console.error(`[session-start] wrote to CLAUDE_ENV_FILE=${envFile} sessionId=${sessionId || "(none)"} workspaceId=${workspaceId || "(none)"}`);
+                    console.error(`[session-start] wrote to CLAUDE_ENV_FILE=${envFile} sessionId=${redactId(sessionId)} workspaceId=${redactId(workspaceId)}`);
                 } catch (err) {
                     console.error(`[session-start] failed to write CLAUDE_ENV_FILE=${envFile}:`, err);
                 }
@@ -241,8 +262,7 @@ async function dispatch(hookType: HookEvent, input: HookInput): Promise<HandlerR
             return legacyToResult(await handlePostToolUse(input));
 
         case HookEvent.PreCompact:
-            // PreCompact: Can't inject instructions at this point, just continue
-            return {};
+            return legacyToResult(await handlePreCompact(input));
 
         case HookEvent.Stop:
             // Stop: commit working memory and end session (side effects only, no context injection)

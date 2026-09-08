@@ -48,6 +48,7 @@ async with MemoryLayerClient(
 - **Type-safe** - Full type hints with Pydantic models
 - **Memory Operations** - Remember, recall, reflect, forget, decay
 - **Relationship Graph** - Link memories with typed relationships
+- **Repository Planning Graph** - Typed `client.rpg` / `sync_client.rpg` namespaces for repository sync, traversal, overlays, conflicts, maintenance, and enrichment
 - **Session Management** - Working memory with TTL and commit
 - **Batch Operations** - Bulk create, update, delete
 - **Error Handling** - Comprehensive exception hierarchy
@@ -84,6 +85,35 @@ results = await client.recall(
 
 # Note: LLM and Hybrid modes are deprecated. Use Context Environment's
 # context_rlm() for LLM-powered analysis instead.
+```
+
+Recall can enforce a hard response budget and expose deterministic evidence:
+
+```python
+result = await client.recall(
+    "Who works for Acme?",
+    budget_tokens=600,
+    include_confidence=True,
+    include_relations=True,
+)
+print(result.retrieval_confidence, result.budget_summary, result.relation_paths)
+```
+
+For compaction-safe sessions, capture raw transcript data first and resume from a
+single context pack and cursor:
+
+```python
+from hashlib import sha256
+
+checkpoint = await client.create_checkpoint(
+    session.id,
+    transcript_segment,
+    content_hash=sha256(transcript_segment.encode()).hexdigest(),
+    idempotency_key="host-session:boundary:hash",
+    source_boundary=boundary,
+)
+pack = await client.get_context_pack(session.id, budget_tokens=2048)
+delta = await client.get_context_delta(session.id, pack.cursor, budget_tokens=512)
 ```
 
 ### Reflect (Synthesize Memories)

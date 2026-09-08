@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator, Sequence
 from logging import Logger
 from typing import Any
 
-from scitrera_app_framework import Variables, get_logger
+from scitrera_app_framework import Variables, get_logger, ext_parse_bool
 
 from .._vllm_runner import VLLMSubprocessRunner
 from .base import LLMProvider
@@ -44,6 +44,7 @@ class VLLMSubprocessLLMProvider(LLMProvider):
         tensor_parallel_size: int = 1,
         aliases: Sequence[str] | None = None,
         extra_args: Sequence[str] | None = None,
+        enable_prompt_embeds: bool = False,
         cmd: str = "vllm",
         startup_timeout_sec: float = 600.0,
         request_timeout_sec: float = 600.0,
@@ -79,6 +80,7 @@ class VLLMSubprocessLLMProvider(LLMProvider):
             tensor_parallel_size=tensor_parallel_size,
             served_model_names=served,
             extra_args=extra_args,
+            enable_prompt_embeds=enable_prompt_embeds,
             cmd=cmd,
             startup_timeout_sec=startup_timeout_sec,
             logger=self.logger,
@@ -277,13 +279,18 @@ def build_provider_from_env(
     enforce_eager = _env(
         "ENFORCE_EAGER",
         default=False,
-        type_fn=lambda s: str(s).lower() in ("true", "1", "yes", "on"),
+        type_fn=ext_parse_bool,
     )
     tp_size = _env("TENSOR_PARALLEL_SIZE", default=1, type_fn=int)
     startup_timeout = _env("STARTUP_TIMEOUT_SEC", default=600.0, type_fn=float)
     cmd = _env("CMD", default="vllm")
     host = _env("HOST", default="127.0.0.1")
     extra_args = _shellsplit(_env("EXTRA_ARGS", default=""))
+    enable_prompt_embeds = _env(
+        "ENABLE_PROMPT_EMBEDS",
+        default=False,
+        type_fn=ext_parse_bool,
+    )
 
     return VLLMSubprocessLLMProvider(
         v=v,
@@ -298,6 +305,7 @@ def build_provider_from_env(
         tensor_parallel_size=tp_size,
         aliases=aliases,
         extra_args=extra_args,
+        enable_prompt_embeds=enable_prompt_embeds,
         cmd=cmd,
         startup_timeout_sec=startup_timeout,
     )

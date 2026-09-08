@@ -1,0 +1,15 @@
+{"key": "python-backend", "content": "Python is an excellent language for backend web development and building server side APIs.", "tags": ["python", "backend"]}
+{"key": "python-ml", "content": "Python with NumPy and PyTorch powers most machine learning and deep learning research today.", "tags": ["python", "ml"]}
+{"key": "rust-systems", "content": "Rust provides memory safety guarantees for systems programming without a garbage collector.", "tags": ["rust", "systems"]}
+{"key": "postgres-db", "content": "PostgreSQL is a robust relational database supporting advanced SQL queries, joins, and transactions.", "tags": ["database", "sql"]}
+{"key": "redis-cache", "content": "Redis is an in-memory key value store commonly used for caching, rate limiting, and pub sub.", "tags": ["cache", "redis"]}
+{"key": "docker-deploy", "content": "Docker packages applications and their dependencies into containers for reproducible deployment.", "tags": ["docker", "containers"]}
+{"key": "k8s-orchestration", "content": "Kubernetes orchestrates containerized workloads and services across a cluster of machines.", "tags": ["kubernetes", "containers"]}
+{"key": "vector-search", "content": "Vector databases enable semantic similarity search over high dimensional embeddings.", "tags": ["vectors", "search"]}
+{"key": "rag-retrieval", "content": "Retrieval augmented generation grounds large language models with retrieved source documents.", "tags": ["rag", "retrieval"]}
+{"key": "transformer-arch", "content": "The transformer architecture uses self attention to model dependencies across an input sequence.", "tags": ["transformer", "attention"]}
+{"key": "git-vcs", "content": "Git is a distributed version control system for tracking changes in source code over time.", "tags": ["git", "vcs"]}
+{"key": "testing-pytest", "content": "Pytest is a popular Python testing framework featuring fixtures, parametrization, and plugins.", "tags": ["python", "testing"]}
+{"key": "fastapi-web", "content": "FastAPI is a modern Python web framework for building APIs quickly using type hints.", "tags": ["python", "web", "api"]}
+{"key": "numpy-arrays", "content": "NumPy provides efficient multi dimensional arrays for numerical computing in Python.", "tags": ["python", "numpy"]}
+{"key": "llm-agents", "content": "LLM agents combine tools and memory to autonomously accomplish multi step tasks.", "tags": ["agents", "llm"]}

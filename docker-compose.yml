@@ -1,0 +1,85 @@
+# MemoryLayer, running locally with real semantic embeddings.
+#
+#   docker compose up
+#
+# No GPU, no API key, no accounts. The server comes up on http://localhost:61001
+# with a self-hosted embed-server peer doing the embeddings.
+#
+# WHY THIS EXISTS
+# ---------------
+# `pip install memorylayer-server && memorylayer serve` works with no setup, but
+# starts on the `hash` provider, which is LEXICAL — it matches shared words, not
+# meaning. Good enough to exercise the API, not good enough to judge retrieval.
+# Getting real embeddings previously meant a cloud API key or a GPU. This is the
+# third option.
+#
+# WHAT YOU GET
+# ------------
+#   single-vector : sentence-transformers all-MiniLM-L6-v2, 384-d
+#   multi-vector  : ColPali / ModernVBERT (visual / late-interaction retrieval)
+#
+# Both run on CPU. Expect the FIRST request to be slow — the embed server
+# downloads model weights (~90 MB MiniLM, ~250 MB ColPali) on first use, cached in
+# the `hf-cache` volume thereafter. `docker compose up` returns once the server is
+# healthy; the embed server may still be fetching models behind it.
+#
+# For GPU throughput (vLLM, OCR, transcription), swap the embed image for the
+# `-cuda13` tag and add a GPU reservation — see the note on that service below.
+
+name: memorylayer
+
+services:
+  embed-server:
+    image: scitrera/memorylayer-embed-server:0.2.0
+    # For GPU: use `scitrera/memorylayer-embed-server:0.2.0-cuda13` and add
+    #   deploy: {resources: {reservations: {devices: [{capabilities: [gpu]}]}}}
+    # The CUDA build additionally serves vLLM, OCR and transcription.
+    environment:
+      # Plain HTTP. The image defaults to running the Aether proxy-sidecar as PID 1
+      # for mesh deployments; inside a compose network that indirection buys nothing.
+      EMBED_SERVER_RUN_SIDECAR: "false"
+      MEMORYLAYER_EMBED_SERVER_HOST: 0.0.0.0
+    volumes:
+      # Persist downloaded model weights so a restart is not another download.
+      - hf-cache:/home/memorylayer/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:61051/health"]
+      interval: 10s
+      timeout: 5s
+      # Long start_period, not long retries: the first model download is slow and
+      # a container marked unhealthy mid-download would restart into another one.
+      start_period: 300s
+      retries: 3
+    restart: unless-stopped
+
+  server:
+    image: scitrera/memorylayer-server:0.2.0
+    depends_on:
+      embed-server:
+        # Wait for models to be loaded, not merely for the port to open — a recall
+        # issued against a still-loading peer fails rather than waits.
+        condition: service_healthy
+    ports:
+      - "61001:61001"
+    environment:
+      MEMORYLAYER_EMBEDDING_PROVIDER: embed_server
+      MEMORYLAYER_EMBED_SERVER_URL: http://embed-server:61051
+      # MUST match the embed server's single-vector model. all-MiniLM-L6-v2 is
+      # 384-d. This is not a tuning knob: the width is written into every stored
+      # vector, so changing it later means re-embedding, and mixing widths in one
+      # workspace breaks recall outright on sqlite-vec.
+      MEMORYLAYER_EMBEDDING_DIMENSIONS: "384"
+      MEMORYLAYER_DATA_DIR: /data
+    volumes:
+      - memorylayer-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:61001/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  memorylayer-data:
+  hf-cache:

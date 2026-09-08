@@ -67,6 +67,11 @@ class GraphAnalysisService(ABC):
         workspace_id: str,
         context_id: str | None = None,
         include_rpg: bool = False,
+        include_central_nodes: bool = True,
     ) -> GraphAnalysis:
-        """Run full graph analysis (snapshot + communities + centrality + bridges + stats)."""
+        """Run full graph analysis (snapshot + communities + centrality + bridges + stats).
+
+        ``include_central_nodes=False`` skips betweenness + the per-memory
+        central_nodes payload for a lighter communities-only result.
+        """
         pass

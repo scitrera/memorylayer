@@ -87,7 +87,13 @@ export interface MemoryLayerHooks {
 
   /** Inject context before context compaction */
   "experimental.session.compacting"?: (
-    input: { sessionID: string },
+    input: {
+      sessionID: string;
+      /** Optional raw transcript supplied by compatible OpenCode hosts. */
+      transcript?: string;
+      /** Optional structured messages when a raw transcript is unavailable. */
+      messages?: unknown[];
+    },
     output: { context: string[]; prompt?: string },
   ) => Promise<void>;
 
@@ -141,4 +147,6 @@ export interface HookState {
   currentTopic?: string;
   /** User's current prompt text for intent detection */
   currentPrompt?: string;
+  /** Last durably acknowledged transcript byte boundary per host session. */
+  checkpointBoundaries?: Record<string, { transcriptKey: string; boundary: number }>;
 }

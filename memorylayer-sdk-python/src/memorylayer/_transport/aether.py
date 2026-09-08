@@ -3,7 +3,8 @@
 When ``MemoryLayerClient(transport='aether', aether_client=..., aether_target=...)``
 is constructed, every request goes via the Aether SDK's ``proxy_http_async``
 initiator against the MemoryLayer service principal (default
-``sv::memorylayer::default``).  The on-prem Aether terminator running inside
+``sv::memorylayer`` — bare implementation, aether routes to an available
+instance).  The on-prem Aether terminator running inside
 MemoryLayer (Phase 2c) handles the inbound envelope, mints
 ``X-Auth-*`` headers from the validated authority, and forwards to FastAPI.
 
@@ -91,7 +92,7 @@ class AetherTransport:
     def __init__(
         self,
         aether_client: Any,
-        target: str = "sv::memorylayer::default",
+        target: str = "sv::memorylayer",
         *,
         api_key: str | None = None,
         session_id: str | None = None,

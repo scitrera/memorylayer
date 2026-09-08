@@ -74,7 +74,9 @@ Start OpenCode and run `/memorylayer-status` to check the connection.
 ## How Hooks Work
 
 ### Session Start (`experimental.chat.system.transform`)
-On first interaction, loads workspace briefing, user directives, and any existing sandbox state into the system prompt.
+On first interaction, starts a server session and injects one bounded deterministic
+context pack. If the server does not expose context packs, the plugin falls back
+to the briefing/directive/sandbox requests.
 
 ### User Messages (`chat.message`)
 Detects 5 pattern categories in user messages and performs targeted recall:
@@ -89,7 +91,10 @@ Detects 5 pattern categories in user messages and performs targeted recall:
 - **After**: Silently captures observations (files, facts, concepts, intent) as working memory
 
 ### Context Compaction (`experimental.session.compacting`)
-Commits working memory to long-term storage and checkpoints server-side sandbox state before the context window is trimmed.
+When OpenCode supplies transcript or message data, uploads only bytes after the
+last acknowledged boundary as idempotent raw checkpoints. It then commits working
+memory and checkpoints server-side sandbox state. Retries are bounded and failures
+are diagnostic only, so MemoryLayer cannot indefinitely block host compaction.
 
 ### Shell Environment (`shell.env`)
 Propagates `MEMORYLAYER_URL` and `MEMORYLAYER_API_KEY` to shell commands.

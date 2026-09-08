@@ -165,10 +165,20 @@ class FastApiPlugin(Plugin):
 
         try:
             routers = get_extensions(EXT_MULTI_API_ROUTERS, v)
-            if routers:
-                for router in routers.values():
-                    app.include_router(router)
-                logger.info("Registered %d API routers", len(routers))
+            included = 0
+            for name, router in (routers or {}).items():
+                # A multi-extension plugin that (incorrectly) gates via
+                # initialize() can contribute None when disabled. Skip those
+                # defensively — a single include_router(None) would otherwise
+                # raise and abort registration of every sibling router that
+                # follows it in iteration order (silently 404-ing them).
+                if router is None:
+                    logger.debug("Skipping disabled/None API router: %s", name)
+                    continue
+                app.include_router(router)
+                included += 1
+            if included:
+                logger.info("Registered %d API routers", included)
         except Exception as e:
             logger.debug("No API routers registered yet (will be available after init): %s", e)
 

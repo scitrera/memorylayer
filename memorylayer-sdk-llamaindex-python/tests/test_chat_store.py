@@ -4,6 +4,7 @@ import pytest
 import respx
 from httpx import Response
 from llama_index.core.llms import ChatMessage, MessageRole
+from memorylayer.exceptions import AuthenticationError, MemoryLayerError, ServerError
 
 from memorylayer_llamaindex import (
     CHAT_KEY_TAG_PREFIX,
@@ -17,6 +18,15 @@ from memorylayer_llamaindex import (
 )
 
 # ========== Test Fixtures ==========
+
+
+_MEMORY_DEFAULTS = {
+    "workspace_id": "ws_test",
+    "type": "episodic",
+    "importance": 0.5,
+    "created_at": "2026-01-27T10:00:00Z",
+    "updated_at": "2026-01-27T10:00:00Z",
+}
 
 
 @pytest.fixture
@@ -280,6 +290,7 @@ class TestMemoryToChatMessage:
     def test_assistant_memory(self) -> None:
         """Test conversion of assistant memory."""
         memory = {
+            **_MEMORY_DEFAULTS,
             "id": "mem_456",
             "content": "assistant: Sure, I can help!",
             "metadata": {
@@ -295,6 +306,7 @@ class TestMemoryToChatMessage:
     def test_fallback_to_content(self) -> None:
         """Test fallback when no blocks in metadata."""
         memory = {
+            **_MEMORY_DEFAULTS,
             "id": "mem_789",
             "content": "Hello there!",
             "metadata": {"role": "user"},
@@ -305,7 +317,7 @@ class TestMemoryToChatMessage:
 
     def test_empty_metadata(self) -> None:
         """Test handling of empty metadata."""
-        memory = {"id": "mem_000", "content": "No metadata"}
+        memory = {**_MEMORY_DEFAULTS, "id": "mem_000", "content": "No metadata"}
 
         message = memory_to_chat_message(memory)
         assert message.role == MessageRole.USER  # Default
@@ -321,13 +333,13 @@ class TestGetMessageIndex:
 
     def test_returns_default_when_missing(self) -> None:
         """Test default return when index is missing."""
-        memory = {"id": "mem_123", "content": "test"}
+        memory = {**_MEMORY_DEFAULTS, "id": "mem_123", "content": "test"}
         index = get_message_index(memory)
         assert index == 0
 
     def test_handles_empty_metadata(self) -> None:
         """Test handling of empty metadata."""
-        memory = {"id": "mem_123", "content": "test", "metadata": {}}
+        memory = {**_MEMORY_DEFAULTS, "id": "mem_123", "content": "test", "metadata": {}}
         index = get_message_index(memory)
         assert index == 0
 
@@ -342,13 +354,13 @@ class TestGetChatKey:
 
     def test_returns_none_when_missing(self) -> None:
         """Test None return when key is missing."""
-        memory = {"id": "mem_123", "content": "test"}
+        memory = {**_MEMORY_DEFAULTS, "id": "mem_123", "content": "test"}
         key = get_chat_key(memory)
         assert key is None
 
     def test_handles_empty_metadata(self) -> None:
         """Test handling of empty metadata."""
-        memory = {"id": "mem_123", "content": "test", "metadata": {}}
+        memory = {**_MEMORY_DEFAULTS, "id": "mem_123", "content": "test", "metadata": {}}
         key = get_chat_key(memory)
         assert key is None
 
@@ -409,7 +421,7 @@ class TestSyncSetMessages:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
+        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": create_memory_response()}))
 
         # Test
         message = ChatMessage.from_str("Hello!", role=MessageRole.USER)
@@ -422,7 +434,7 @@ class TestSyncSetMessages:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
+        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": create_memory_response()}))
 
         # Test
         messages = [
@@ -480,7 +492,7 @@ class TestSyncAddMessage:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
+        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": create_memory_response()}))
 
         # Test
         message = ChatMessage.from_str("Hello!", role=MessageRole.USER)
@@ -500,7 +512,7 @@ class TestSyncAddMessage:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": mock_memories, "total_count": 1}))
 
         # Mock memory creation
-        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
+        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": create_memory_response()}))
 
         # Test
         message = ChatMessage.from_str("Second message", role=MessageRole.ASSISTANT)
@@ -530,6 +542,7 @@ class TestSyncDeleteMessages:
         """Test deleting messages returns the deleted messages."""
         mock_memories = [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_0",
                 "content": "Message to delete",
                 "metadata": {"message_index": 0, "role": "user", "chat_key": "user_123"},
@@ -570,11 +583,13 @@ class TestSyncDeleteMessage:
         """Test deleting a specific message by index."""
         mock_memories = [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_0",
                 "content": "Keep this",
                 "metadata": {"message_index": 0, "role": "user", "chat_key": "user_123"},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_1",
                 "content": "Delete this",
                 "metadata": {"message_index": 1, "role": "assistant", "chat_key": "user_123"},
@@ -616,11 +631,13 @@ class TestSyncDeleteLastMessage:
         """Test deleting the last message."""
         mock_memories = [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_0",
                 "content": "First",
                 "metadata": {"message_index": 0, "role": "user", "chat_key": "user_123"},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_1",
                 "content": "Last",
                 "metadata": {"message_index": 1, "role": "assistant", "chat_key": "user_123"},
@@ -699,7 +716,7 @@ class TestAsyncSetMessages:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
+        respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": create_memory_response()}))
 
         # Test
         messages = [
@@ -731,11 +748,13 @@ class TestAsyncGetMessages:
         """Test async messages are returned sorted by index."""
         mock_memories = [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_1",
                 "content": "Second",
                 "metadata": {"message_index": 1, "role": "assistant", "chat_key": "user_123"},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_0",
                 "content": "First",
                 "metadata": {"message_index": 0, "role": "user", "chat_key": "user_123"},
@@ -764,7 +783,7 @@ class TestAsyncAddMessage:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(200, json={"memories": [], "total_count": 0}))
 
         # Mock memory creation
-        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json=create_memory_response()))
+        create_route = respx.post(f"{base_url}/v1/memories").mock(return_value=Response(200, json={"memory": create_memory_response()}))
 
         # Test
         message = ChatMessage.from_str("Hello!", role=MessageRole.USER)
@@ -796,6 +815,7 @@ class TestAsyncDeleteMessages:
         """Test async deleting messages."""
         mock_memories = [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_0",
                 "content": "To delete",
                 "metadata": {"message_index": 0, "role": "user", "chat_key": "user_123"},
@@ -838,6 +858,7 @@ class TestAsyncDeleteMessage:
         """Test async deleting a specific message."""
         mock_memories = [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_0",
                 "content": "Delete me",
                 "metadata": {"message_index": 0, "role": "user", "chat_key": "user_123"},
@@ -880,11 +901,13 @@ class TestAsyncDeleteLastMessage:
         """Test async deleting the last message."""
         mock_memories = [
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_0",
                 "content": "First",
                 "metadata": {"message_index": 0, "role": "user", "chat_key": "user_123"},
             },
             {
+                **_MEMORY_DEFAULTS,
                 "id": "mem_1",
                 "content": "Last",
                 "metadata": {"message_index": 1, "role": "assistant", "chat_key": "user_123"},
@@ -954,10 +977,10 @@ class TestErrorHandling:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(500, json={"detail": "Internal server error"}))
 
         # Test
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(ServerError) as exc_info:
             chat_store.get_messages("user_123")
 
-        assert "500" in str(exc_info.value)
+        assert exc_info.value.status_code == 500
         assert "Internal server error" in str(exc_info.value)
 
     @respx.mock
@@ -967,10 +990,10 @@ class TestErrorHandling:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(401, json={"detail": "Invalid API key"}))
 
         # Test
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(AuthenticationError) as exc_info:
             chat_store.get_messages("user_123")
 
-        assert "401" in str(exc_info.value)
+        assert exc_info.value.status_code == 401
         assert "Invalid API key" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -981,8 +1004,8 @@ class TestErrorHandling:
         respx.post(f"{base_url}/v1/memories/recall").mock(return_value=Response(400, json={"detail": "Bad request"}))
 
         # Test
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(MemoryLayerError) as exc_info:
             await chat_store.aget_messages("user_123")
 
-        assert "400" in str(exc_info.value)
+        assert exc_info.value.status_code == 400
         assert "Bad request" in str(exc_info.value)

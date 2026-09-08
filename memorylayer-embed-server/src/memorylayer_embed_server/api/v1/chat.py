@@ -13,6 +13,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from scitrera_app_framework import ext_parse_bool
 from scitrera_app_framework.api import Plugin, Variables
 
 from ...config import DEFAULT_EMBED_SERVER_LLM_ENABLED, EMBED_SERVER_LLM_ENABLED
@@ -117,13 +118,31 @@ class LLMChatRoutePlugin(Plugin):
         return EXT_MULTI_API_ROUTERS
 
     def is_enabled(self, v: Variables) -> bool:
-        # ext_parse_bool would be cleaner but the plugin contract just needs a bool.
-        raw = v.environ(EMBED_SERVER_LLM_ENABLED, default=str(DEFAULT_EMBED_SERVER_LLM_ENABLED))
-        return str(raw).strip().lower() in ("true", "1", "yes", "on")
+        # MUST be False for a multi-extension router plugin. Returning True makes
+        # this the single-extension winner for the router extension point, which
+        # causes get_extensions() to return THIS router for every registered
+        # name — shadowing all sibling routers (transcription, embeddings,
+        # score, visual-tokenizer).
+        return False
 
     def is_multi_extension(self, v: Variables) -> bool:
-        return True
+        # Gate enablement HERE, not in initialize(). A multi-extension router that
+        # contributes only when a flag is set must report that via
+        # is_multi_extension so the framework simply omits it from the extension
+        # registry when disabled. Gating in initialize() by returning None is
+        # unsafe: the router consumer (lifecycle/fastapi.py) iterates
+        # get_extensions() values and a None poisons app.include_router(None),
+        # which silently drops every sibling router registered after it — the
+        # embeddings/score/images 404 regression seen once LLM hosting moved off
+        # the embed server (EMBED_SERVER_LLM_ENABLED=false).
+        return v.environ(
+            EMBED_SERVER_LLM_ENABLED,
+            default=DEFAULT_EMBED_SERVER_LLM_ENABLED,
+            type_fn=ext_parse_bool,
+        )
 
     def initialize(self, v: Variables, logger: logging.Logger) -> object | None:
+        # Enablement is already decided by is_multi_extension(); just contribute
+        # the router.
         logger.info("Registering OpenAI-compatible LLM routes on embed-server")
         return router

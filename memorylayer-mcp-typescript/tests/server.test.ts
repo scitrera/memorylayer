@@ -132,7 +132,7 @@ describe("Tool counts", () => {
 
   it("should have expected number of session tools", () => {
     // memory_session_start, memory_session_end, memory_session_commit, memory_session_status
-    expect(SESSION_TOOLS.length).toBe(4);
+    expect(SESSION_TOOLS.length).toBe(7);
   });
 
   it("should have expected number of context environment tools", () => {
@@ -142,7 +142,7 @@ describe("Tool counts", () => {
     expect(CONTEXT_ENVIRONMENT_TOOLS.length).toBe(8);
   });
 
-  it("should have 21 total tools when combined", () => {
-    expect(TOOLS.length + SESSION_TOOLS.length + CONTEXT_ENVIRONMENT_TOOLS.length).toBe(21);
+  it("should have 24 total tools when combined", () => {
+    expect(TOOLS.length + SESSION_TOOLS.length + CONTEXT_ENVIRONMENT_TOOLS.length).toBe(24);
   });
 });

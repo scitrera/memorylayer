@@ -61,9 +61,19 @@ _PERMISSION_MAP: dict[tuple[str, str], int] = {
     ("workspaces", "write"): ACCESS_READWRITE,
     ("workspaces", "delete"): ACCESS_MANAGE,
     # Documents
+    #
+    # write/delete are READWRITE (not MANAGE): a principal with write access to
+    # a workspace can manage that workspace's documents — create, update, and
+    # remove them. This matches the convention used by every other content
+    # resource here (memories/sessions/threads write=READWRITE) and, crucially,
+    # the platform files-library flow: the platform-bridge front-door already
+    # verifies the acting user's can_write_to_workspace before issuing the
+    # delete, so requiring MANAGE at this layer only rejected legitimate owners
+    # (a workspace admin deleting their own private-workspace files). MANAGE was
+    # also an outlier for documents:write specifically (all other write=RW).
     ("documents", "read"): ACCESS_READ,
-    ("documents", "write"): ACCESS_MANAGE,
-    ("documents", "delete"): ACCESS_MANAGE,
+    ("documents", "write"): ACCESS_READWRITE,
+    ("documents", "delete"): ACCESS_READWRITE,
     # Chat / threads
     ("threads", "read"): ACCESS_READ,
     ("threads", "write"): ACCESS_READWRITE,
@@ -78,15 +88,58 @@ _PERMISSION_MAP: dict[tuple[str, str], int] = {
     # Context environment
     ("context", "read"): ACCESS_READ,
     ("context", "write"): ACCESS_READWRITE,
+    # Skills — read/write/delete resolve via the action defaults below; "mcp"
+    # is a non-standard action (read/use MCP-backed skills), so map it explicitly.
+    ("skills", "mcp"): ACCESS_READ,
+    # Create actions for user-content resources are write-level (READWRITE),
+    # matching each resource's "write" entry. The API enforces action="create"
+    # (NOT "write") for these, and without an explicit entry "create" falls
+    # through to the MANAGE default (_DEFAULT_REQUIRED_LEVEL) — wrongly
+    # rejecting an ordinary RW writer. Observed: the platform-bridge committing
+    # a chat memory into the user's own private workspace →
+    # "memories:create DENY required=MANAGE(30) granted=READWRITE(20)".
+    ("memories", "create"): ACCESS_READWRITE,
+    ("sessions", "create"): ACCESS_READWRITE,
+    ("documents", "create"): ACCESS_READWRITE,
+    ("workspaces", "create"): ACCESS_READWRITE,
     # Admin catch-all
     ("admin", "read"): ACCESS_ADMIN,
     ("admin", "write"): ACCESS_ADMIN,
     ("admin", "delete"): ACCESS_ADMIN,
 }
 
-# Default level required when a (resource, action) pair is not explicitly
-# mapped.  MANAGE is a safe conservative default.
+# Default level required for an unknown action (one not covered by the
+# action-aware defaults below). MANAGE is a safe conservative fallback.
 _DEFAULT_REQUIRED_LEVEL = ACCESS_MANAGE
+
+# Action-aware fallback for (resource, action) pairs not enumerated in
+# _PERMISSION_MAP. Without this, every un-enumerated resource (e.g. skills,
+# applications, collections, knowledgebase, ...) fell through to MANAGE — so an
+# ordinary READ wrongly required MANAGE(30).
+#
+# Deliberately only READ-class actions are relaxed here: a read should require
+# READ. Writes/creates/deletes of un-enumerated resources stay at the
+# conservative MANAGE default — many are enterprise *management* resources whose
+# write level is a policy decision; add an explicit _PERMISSION_MAP entry to
+# grant write at READWRITE where intended. Explicit entries always win.
+_ACTION_DEFAULT_LEVEL: dict[str, int] = {
+    "read": ACCESS_READ,
+    "list": ACCESS_READ,
+}
+
+
+def _required_level(resource: str, action: str) -> int:
+    """Minimum access level for a (resource, action).
+
+    Precedence: wildcard ``*`` => ADMIN; explicit ``_PERMISSION_MAP`` entry;
+    else the action-aware default; else (unknown action) MANAGE.
+    """
+    if action == "*":
+        return ACCESS_ADMIN
+    explicit = _PERMISSION_MAP.get((resource, action))
+    if explicit is not None:
+        return explicit
+    return _ACTION_DEFAULT_LEVEL.get(action, _DEFAULT_REQUIRED_LEVEL)
 
 
 def _access_level_name(level: int) -> str:
@@ -146,14 +199,7 @@ class AetherAuthorizationService(AuthorizationService):
         if grant_ceiling is not None:
             granted_level = min(granted_level, grant_ceiling)
 
-        # Handle wildcard admin actions
-        if context.action == "*":
-            required = ACCESS_ADMIN
-        else:
-            required = _PERMISSION_MAP.get(
-                (context.resource, context.action),
-                _DEFAULT_REQUIRED_LEVEL,
-            )
+        required = _required_level(context.resource, context.action)
 
         if granted_level >= required:
             self.logger.debug(
@@ -239,12 +285,11 @@ class AetherAuthorizationServicePlugin(AuthorizationServicePluginBase):
 def get_required_access_level(resource: str, action: str) -> int:
     """Look up the minimum access level for a resource/action pair.
 
-    Returns the mapped level or :data:`_DEFAULT_REQUIRED_LEVEL` if the
-    pair is not explicitly configured.
+    Returns the explicit mapped level, else the action-aware default (e.g.
+    ``read`` => READ, ``write`` => READWRITE, ``delete`` => MANAGE), else
+    MANAGE for an unknown action.
     """
-    if action == "*":
-        return ACCESS_ADMIN
-    return _PERMISSION_MAP.get((resource, action), _DEFAULT_REQUIRED_LEVEL)
+    return _required_level(resource, action)
 
 
 __all__ = [

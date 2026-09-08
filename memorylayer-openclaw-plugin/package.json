@@ -1,0 +1,60 @@
+{
+  "name": "@scitrera/memorylayer-openclaw-plugin",
+  "version": "0.2.0",
+  "description": "OpenClaw plugin for MemoryLayer.ai \u2014 first-class memory capability, recall, and persistence",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "openclaw": {
+    "extensions": [
+      "./dist/bundle/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "npm run build:tsc && npm run build:bundle",
+    "build:tsc": "tsc",
+    "build:bundle": "node scripts/bundle.mjs",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "scitrera.ai",
+  "homepage": "https://memorylayer.ai",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scitrera/memorylayer",
+    "directory": "memorylayer-openclaw-plugin"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "0.8.1"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.9.3"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@scitrera/aether-client": "^0.2.2",
+    "@scitrera/memorylayer-sdk": "file:../memorylayer-sdk-typescript",
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.28.0",
+    "openclaw": "^2026.9.3",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=24.16.0"
+  },
+  "files": [
+    "dist/",
+    "openclaw.plugin.json"
+  ],
+  "overrides": {
+    "@grpc/grpc-js": "$@grpc/grpc-js"
+  }
+}

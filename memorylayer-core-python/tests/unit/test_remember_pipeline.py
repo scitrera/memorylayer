@@ -9,6 +9,7 @@ Verifies:
 - FactDecompositionTaskHandler uses ingest_fact() for per-fact pipeline
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -427,6 +428,11 @@ class TestRememberConditionalPipeline:
         decompose_calls = [c for c in mock_task_service.schedule_task.call_args_list if c[0][0] == "decompose_facts"]
         assert len(decompose_calls) == 1
 
+        # remember() goes through the shared hook with no job_id, so the payload
+        # carries job_id=None (the OSS handler ignores it).
+        payload = decompose_calls[0][0][1]
+        assert payload["job_id"] is None
+
         # Should NOT have run post-store pipeline on the composite
         mock_tier_gen.request_tier_generation.assert_not_called()
         mock_contradiction.check_new_memory.assert_not_called()
@@ -505,6 +511,80 @@ class TestRememberConditionalPipeline:
 
         # Should have run post-store pipeline instead
         mock_tier_gen.request_tier_generation.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# enqueue_post_store (shared post-store hook) tests
+# ---------------------------------------------------------------------------
+
+
+class TestEnqueuePostStore:
+    """Tests for the shared enqueue_post_store hook.
+
+    The hook is the post-store branch extracted from remember(); it must route
+    decomposable memories to decompose_facts and non-decomposable memories to
+    _post_store_pipeline, identically to remember().
+    """
+
+    @pytest.mark.asyncio
+    async def test_decomposable_schedules_decompose_facts(
+        self, memory_service_unit, mock_task_service, mock_tier_gen, mock_contradiction
+    ):
+        """Decomposable content schedules decompose_facts, not the post-store pipeline."""
+        content = "Drew likes Python for backend. He also prefers dark mode editors."
+        mem = _make_memory(content=content)
+
+        await memory_service_unit.enqueue_post_store("ws_test", mem, [0.1] * 384)
+
+        decompose_calls = [
+            c for c in mock_task_service.schedule_task.call_args_list
+            if c[0][0] == "decompose_facts"
+        ]
+        assert len(decompose_calls) == 1
+        # Composite is NOT enriched directly.
+        mock_tier_gen.request_tier_generation.assert_not_called()
+        mock_contradiction.check_new_memory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_decompose_payload_threads_job_id(
+        self, memory_service_unit, mock_task_service
+    ):
+        """job_id is threaded into the decompose_facts payload."""
+        content = "Drew likes Python for backend. He also prefers dark mode editors."
+        mem = _make_memory(content=content)
+
+        await memory_service_unit.enqueue_post_store(
+            "ws_test", mem, [0.1] * 384, job_id="job_xyz"
+        )
+
+        decompose_calls = [
+            c for c in mock_task_service.schedule_task.call_args_list
+            if c[0][0] == "decompose_facts"
+        ]
+        assert len(decompose_calls) == 1
+        payload = decompose_calls[0][0][1]
+        assert payload["memory_id"] == mem.id
+        assert payload["workspace_id"] == "ws_test"
+        assert payload["job_id"] == "job_xyz"
+
+    @pytest.mark.asyncio
+    async def test_non_decomposable_runs_post_store_pipeline(
+        self, memory_service_unit, mock_task_service, mock_tier_gen, mock_contradiction
+    ):
+        """Non-decomposable content runs _post_store_pipeline (enrichment), no decompose."""
+        # Short single-sentence content does not qualify for decomposition.
+        mem = _make_memory(content="Short note.")
+
+        await memory_service_unit.enqueue_post_store("ws_test", mem, [0.1] * 384)
+
+        decompose_calls = [
+            c for c in mock_task_service.schedule_task.call_args_list
+            if c[0][0] == "decompose_facts"
+        ]
+        assert len(decompose_calls) == 0
+        # Post-store enrichment ran on the memory.
+        mock_tier_gen.request_tier_generation.assert_called_once()
+        mock_contradiction.check_new_memory.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -700,6 +780,178 @@ class TestFactDecompositionHandlerIntegration:
 
         # Parent still archived
         mock_storage.update_memory.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# decompose_complete event emission (feed A)
+# ---------------------------------------------------------------------------
+
+
+class TestDecomposeCompleteEmission:
+    """The fact handler emits memorylayer.decompose_complete after a successful
+    decompose+archival (feed A), and no-ops cleanly when Aether is absent."""
+
+    def _build_handler_deps(self, *, facts, fact_results, job_id=None):
+        """Build the mocks for a successful decompose run.
+
+        Returns (handler, mock_v, payload, get_ext, parent).
+        """
+        from memorylayer_server.tasks.fact_decomposition_handler import (
+            FactDecompositionTaskHandler,
+        )
+
+        handler = FactDecompositionTaskHandler()
+        mock_v = MagicMock()
+
+        parent = _make_memory(
+            memory_id="mem_parent",
+            content="Drew likes Python. He uses vim.",
+            metadata={},
+        )
+
+        mock_storage = AsyncMock()
+        mock_storage.get_memory = AsyncMock(return_value=parent)
+        mock_storage.update_memory = AsyncMock()
+        mock_storage.create_association = AsyncMock()
+
+        mock_extraction = AsyncMock()
+        mock_extraction.decompose_to_facts = AsyncMock(return_value=facts)
+
+        mock_memory_service = AsyncMock()
+        mock_memory_service.ingest_fact = AsyncMock(side_effect=fact_results)
+
+        def get_ext(name, v):
+            from memorylayer_server.services.extraction.base import EXT_EXTRACTION_SERVICE
+            from memorylayer_server.services.memory import EXT_MEMORY_SERVICE
+            from memorylayer_server.services.storage import EXT_STORAGE_BACKEND
+
+            if name == EXT_STORAGE_BACKEND:
+                return mock_storage
+            elif name == EXT_EXTRACTION_SERVICE:
+                return mock_extraction
+            elif name == EXT_MEMORY_SERVICE:
+                return mock_memory_service
+            return MagicMock()
+
+        payload = {
+            "memory_id": "mem_parent",
+            "workspace_id": "ws_test",
+        }
+        if job_id is not None:
+            payload["job_id"] = job_id
+
+        return handler, mock_v, payload, get_ext, parent
+
+    @pytest.mark.asyncio
+    async def test_emits_decompose_complete_after_success(self):
+        """A successful decompose emits decompose_complete with the expected payload."""
+        fact1 = _make_memory(memory_id="mem_fact1", content="Drew likes Python")
+        fact2 = _make_memory(memory_id="mem_fact2", content="Drew uses vim")
+        handler, mock_v, payload, get_ext, _ = self._build_handler_deps(
+            facts=[
+                {"content": "Drew likes Python"},
+                {"content": "Drew uses vim"},
+            ],
+            fact_results=[fact1, fact2],
+            job_id="job_abc",
+        )
+
+        with patch.object(handler, "get_extension", side_effect=get_ext), patch(
+            "memorylayer_server.tasks.fact_decomposition_handler.emit_event",
+            new=AsyncMock(),
+        ) as mock_emit:
+            await handler.handle(mock_v, payload)
+
+        mock_emit.assert_called_once()
+        args = mock_emit.call_args.args
+        # emit_event(v, workspace_id, event_name, data, logger)
+        assert args[1] == "ws_test"
+        assert args[2] == "memorylayer.decompose_complete"
+        # The handler passes the event-specific data; emit_event adds workspace_id.
+        data = args[3]
+        assert data == {
+            "job_id": "job_abc",
+            "memory_id": "mem_parent",
+            "fact_count": 2,
+        }
+
+    @pytest.mark.asyncio
+    async def test_no_emit_when_atomic(self):
+        """An atomic memory (<=1 fact) returns early and never emits."""
+        handler, mock_v, payload, get_ext, _ = self._build_handler_deps(
+            facts=[{"content": "Single fact."}],
+            fact_results=[],
+        )
+
+        with patch.object(handler, "get_extension", side_effect=get_ext), patch(
+            "memorylayer_server.tasks.fact_decomposition_handler.emit_event",
+            new=AsyncMock(),
+        ) as mock_emit:
+            await handler.handle(mock_v, payload)
+
+        mock_emit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_emit_noop_without_aether_connection(self):
+        """In OSS-standalone (no Aether send_event) the real emit_event no-ops, no raise."""
+        from memorylayer_server.services.events import emit_event
+        from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
+
+        # Aether service resolves but its client has no send_event.
+        agent_svc = MagicMock()
+        agent_svc.client = MagicMock(spec=[])  # no send_event
+
+        v = MagicMock()
+        logger = MagicMock()
+
+        with patch(
+            "memorylayer_server.services.events.get_extension",
+            side_effect=lambda name, v=None: agent_svc
+            if name == EXT_AETHER_SERVICE_CONNECTION
+            else None,
+        ):
+            # Must not raise.
+            await emit_event(
+                v, "ws_test", "memorylayer.decompose_complete",
+                {"memory_id": "mem_parent", "fact_count": 2, "job_id": None},
+                logger,
+            )
+
+    @pytest.mark.asyncio
+    async def test_emit_sends_event_when_aether_present(self):
+        """When send_event exists, emit_event ships the JSON EventPayload envelope."""
+        from memorylayer_server.services.events import emit_event
+        from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
+
+        client = AsyncMock()
+        client.send_event = AsyncMock()
+        agent_svc = MagicMock()
+        agent_svc.client = client
+
+        v = MagicMock()
+        logger = MagicMock()
+
+        with patch(
+            "memorylayer_server.services.events.get_extension",
+            side_effect=lambda name, v=None: agent_svc
+            if name == EXT_AETHER_SERVICE_CONNECTION
+            else None,
+        ):
+            await emit_event(
+                v, "ws_test", "memorylayer.decompose_complete",
+                {"memory_id": "mem_parent", "fact_count": 2, "job_id": "job_abc"},
+                logger,
+            )
+
+        client.send_event.assert_called_once()
+        raw = client.send_event.call_args.args[0]
+        envelope = json.loads(raw.decode("utf-8"))
+        assert envelope["source_agent"] == "memorylayer"
+        assert envelope["event_names"] == ["memorylayer.decompose_complete"]
+        assert envelope["data"]["workspace_id"] == "ws_test"
+        assert envelope["data"]["memory_id"] == "mem_parent"
+        assert envelope["data"]["fact_count"] == 2
+        assert envelope["data"]["job_id"] == "job_abc"
 
 
 # ---------------------------------------------------------------------------

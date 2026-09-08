@@ -8,7 +8,12 @@
 export type {
   Memory,
   RecallResult,
-  Association
+  Association,
+  ContextPack,
+  ContextDelta,
+  ContextPackOptions,
+  EntityRelationInput,
+  SessionCheckpoint,
 } from "@scitrera/memorylayer-sdk";
 
 export {
@@ -31,6 +36,7 @@ export interface RememberInput {
   associations?: string[];
   context_id?: string;
   user_id?: string;
+  relations?: import("@scitrera/memorylayer-sdk").EntityRelationInput[];
 }
 
 export interface RecallInput {
@@ -52,6 +58,9 @@ export interface RecallInput {
   context?: Array<{ role: string; content: string }>;
   rag_threshold?: number;
   detail_level?: 'abstract' | 'overview' | 'full';
+  budget_tokens?: number;
+  include_confidence?: boolean;
+  include_relations?: boolean;
 }
 
 export interface ReflectInput {

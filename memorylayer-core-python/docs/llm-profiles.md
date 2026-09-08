@@ -43,16 +43,46 @@ peers concurrently, independent of the embedding-side client.
 
 ## Activity-to-profile routing
 
+The full set of internal activities (the canonical list lives in
+`services/llm/registry.py` as `INTERNAL_ACTIVITIES`):
+
 ```
-MEMORYLAYER_LLM_ASSIGN_REFLECT=<profile_name>
-MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION=<profile_name>
-MEMORYLAYER_LLM_ASSIGN_ONTOLOGY=<profile_name>
+MEMORYLAYER_LLM_ASSIGN_EXTRACTION=<profile_name>        # fact decomposition, entity extraction
+MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION=<profile_name>   # abstract / overview summaries
+MEMORYLAYER_LLM_ASSIGN_ONTOLOGY=<profile_name>          # relationship typing
+MEMORYLAYER_LLM_ASSIGN_REFLECTION=<profile_name>        # reflection + KB article generation
+MEMORYLAYER_LLM_ASSIGN_RERANKER=<profile_name>          # LLM / HyDE reranking
+MEMORYLAYER_LLM_ASSIGN_INFERENCE=<profile_name>         # inference service
 ```
+
+> The activity name must match exactly. `MEMORYLAYER_LLM_ASSIGN_REFLECT` (rather than
+> `..._REFLECTION`) is a real footgun: it parses fine, matches no activity, and is
+> discarded — the traffic keeps going to `default`. Unknown activity names are warned
+> about at startup.
 
 When an activity isn't explicitly assigned, the registry falls back
 to the profile named `default`. If no `default` profile exists, the
 registry installs a `NoOpLLMProvider` that raises
 `LLMNotConfiguredError` on any call.
+
+### Cost note: assign the maintenance activities
+
+`extraction`, `tier_generation`, and `ontology` run on **every stored memory**, several
+times per `remember()` once a memory decomposes into multiple facts. Left unassigned they
+inherit `default` — typically the largest configured chat model — for work that is mostly
+summarization and classification. A small model is usually sufficient:
+
+```
+MEMORYLAYER_LLM_PROFILE_CHEAP_PROVIDER=openai
+MEMORYLAYER_LLM_PROFILE_CHEAP_MODEL=gpt-4o-mini
+
+MEMORYLAYER_LLM_ASSIGN_EXTRACTION=cheap
+MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION=cheap
+MEMORYLAYER_LLM_ASSIGN_ONTOLOGY=cheap
+```
+
+Startup logs which activities are still on `default`, so this is visible without
+reading config.
 
 ## Provider matrix
 
@@ -114,7 +144,7 @@ MEMORYLAYER_LLM_PROFILE_REFLECT_EMBED_SERVER_URL=http://embed-b:61051
 
 # Route activities
 MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION=tier_gen
-MEMORYLAYER_LLM_ASSIGN_REFLECT=reflect
+MEMORYLAYER_LLM_ASSIGN_REFLECTION=reflect
 ```
 
 ### 3. Cross-region embed-server via Aether mTLS
@@ -149,7 +179,7 @@ MEMORYLAYER_LLM_PROFILE_PRIVATE_MODEL=qwen-7b
 MEMORYLAYER_LLM_PROFILE_PRIVATE_EMBED_SERVER_URL=http://embed-private:61051
 
 MEMORYLAYER_LLM_ASSIGN_TIER_GENERATION=cloud
-MEMORYLAYER_LLM_ASSIGN_REFLECT=private
+MEMORYLAYER_LLM_ASSIGN_REFLECTION=private
 MEMORYLAYER_LLM_ASSIGN_ONTOLOGY=private
 ```
 

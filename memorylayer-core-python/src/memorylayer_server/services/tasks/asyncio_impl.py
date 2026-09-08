@@ -44,7 +44,10 @@ class AsyncIOTaskService(TaskService):
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info("Initialized AsyncIOTaskService")
 
-    async def schedule_task(self, task_type: str, payload: dict, delay_seconds: int = 0, priority: int = 5) -> str | None:
+    async def schedule_task(
+        self, task_type: str, payload: dict, delay_seconds: int = 0, priority: int = 5,
+        retry_policy=None, metadata: dict | None = None,
+    ) -> str | None:
         """
         Schedule a task for background execution.
 
@@ -53,6 +56,11 @@ class AsyncIOTaskService(TaskService):
             payload: Task payload data
             delay_seconds: Delay before execution
             priority: Task priority (ignored in asyncio implementation)
+            retry_policy: Ignored in the in-process asyncio implementation (no
+                distributed backend to carry it); accepted for ABC parity.
+            metadata: Ignored in the in-process asyncio implementation (no
+                distributed task record to attach it to); accepted for ABC
+                parity. The handler runs directly with ``payload`` only.
 
         Returns:
             Task ID

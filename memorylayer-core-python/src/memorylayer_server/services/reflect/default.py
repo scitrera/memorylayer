@@ -14,6 +14,7 @@ from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
 from ...models import DetailLevel, RecallInput, RecallMode, ReflectInput, ReflectResult
+from ...models.generation import GenerationActivity
 from ..llm import EXT_LLM_SERVICE, LLMNotConfiguredError, LLMService
 from ..memory import EXT_MEMORY_SERVICE, MemoryService
 from ..storage import EXT_STORAGE_BACKEND, StorageBackend
@@ -201,6 +202,7 @@ Reflection:"""
                 max_tokens=max_tokens,
                 # temperature=0.7,
                 profile="reflection",
+                activity=GenerationActivity.REFLECTION,
             )
             return result
         except LLMNotConfiguredError:

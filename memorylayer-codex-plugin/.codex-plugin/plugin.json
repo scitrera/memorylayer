@@ -1,0 +1,27 @@
+{
+  "name": "memorylayer-codex-plugin",
+  "version": "0.2.0",
+  "description": "MemoryLayer integration for Codex via MCP and persistent project-memory guidance.",
+  "author": {
+    "name": "scitrera.ai",
+    "email": "open-source-team@scitrera.com"
+  },
+  "homepage": "https://memorylayer.ai",
+  "repository": "https://github.com/scitrera/memorylayer",
+  "license": "Apache-2.0",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "MemoryLayer for Codex",
+    "shortDescription": "Persistent MemoryLayer memory and recall for Codex.",
+    "longDescription": "Connects Codex to MemoryLayer through the MemoryLayer MCP server and adds guidance for recall, durable memory capture, sessions, and context-environment workflows.",
+    "developerName": "scitrera.ai",
+    "category": "Productivity",
+    "capabilities": [
+      "MCP",
+      "Memory",
+      "Project context"
+    ],
+    "defaultPrompt": "Use MemoryLayer when prior project decisions, preferences, or durable agent memory would improve the Codex task."
+  }
+}

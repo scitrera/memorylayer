@@ -26,6 +26,8 @@ export {
   getWorkspaceId,
   getSessionIdFromHookState,
   resolveSessionId,
+  getCheckpointBoundary,
+  acknowledgeCheckpointBoundary,
 } from "./state.js";
 
 // Client (same MemoryLayerClient used by MCP tools)
@@ -50,3 +52,4 @@ export { handleUserPromptSubmit } from "./handlers/user-prompt.js";
 export { handlePreToolUse } from "./handlers/pre-tool.js";
 export { handlePostToolUse } from "./handlers/post-tool.js";
 export { handleStop } from "./handlers/stop.js";
+export { handlePreCompact } from "./handlers/pre-compact.js";

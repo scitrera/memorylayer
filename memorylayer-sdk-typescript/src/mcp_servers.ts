@@ -1,5 +1,10 @@
 import type { MemoryLayerClient } from "./client.js";
-import type { AuthorityContext } from "./types.js";
+import type {
+  AuthorityContext,
+  McpJsonDocument,
+  McpServerImportOptions,
+  McpServerImportResult,
+} from "./types.js";
 
 // ------------------------------------------------------------------ //
 // MCP Server types
@@ -213,6 +218,49 @@ export class McpServersNamespace {
       options.authority,
     );
     return response.mcp_server;
+  }
+
+  /**
+   * Import a `.mcp.json` document (push). Each entry under `mcpServers` is
+   * exploded into its own server record; existing servers (matched by name)
+   * are updated rather than duplicated.
+   */
+  async import(
+    doc: McpJsonDocument,
+    options: McpServerImportOptions = {},
+    authority?: AuthorityContext,
+  ): Promise<McpServerImportResult> {
+    const body: Record<string, unknown> = { mcpServers: doc.mcpServers };
+    const wsId = options.workspaceId ?? this._workspaceId;
+    if (wsId) body.workspace_id = wsId;
+    if (options.userId !== undefined) body.user_id = options.userId;
+    if (options.sourceMode !== undefined) body.source_mode = options.sourceMode;
+    return this._req<McpServerImportResult>(
+      "POST",
+      "/v1/mcp-servers/import",
+      body,
+      authority,
+    );
+  }
+
+  /**
+   * Export visible servers (pull) as a `.mcp.json`-shaped document. Secret
+   * values are masked unless the server is configured to reveal them.
+   */
+  async export(
+    options: { workspaceId?: string } = {},
+    authority?: AuthorityContext,
+  ): Promise<McpJsonDocument> {
+    const params = new URLSearchParams();
+    const wsId = options.workspaceId ?? this._workspaceId;
+    if (wsId) params.set("workspace_id", wsId);
+    const query = params.toString();
+    return this._req<McpJsonDocument>(
+      "GET",
+      `/v1/mcp-servers/export${query ? `?${query}` : ""}`,
+      undefined,
+      authority,
+    );
   }
 }
 

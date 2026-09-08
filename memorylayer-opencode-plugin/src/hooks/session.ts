@@ -32,11 +32,6 @@ async function checkSandboxState(client: ReturnType<typeof getClient>): Promise<
  * of a session, or from the `event` hook on session start.
  */
 export async function initializeSession(topic?: string): Promise<string | null> {
-  const healthy = await checkHealth();
-  if (!healthy) {
-    return "MemoryLayer server not reachable. Memory features unavailable this session.";
-  }
-
   try {
     const client = getClient();
 
@@ -56,7 +51,22 @@ export async function initializeSession(topic?: string): Promise<string | null> 
     // Reset recall status for new session
     resetRecallStatus();
 
-    // Run briefing, directive recall, and sandbox check in parallel
+    if (sessionId) {
+      try {
+        const pack = await client.getContextPack(sessionId, {
+          topic,
+          budgetTokens: 2048,
+          includeSandboxSummary: true,
+          includeCheckpointRecovery: true,
+        });
+        if (topic) markRecallDone(topic);
+        return `${pack.rendered}\n\nMemoryLayer context cursor: ${pack.cursor}`;
+      } catch (error) {
+        console.error("[session-start] context pack unavailable; using compatibility retrieval:", error instanceof Error ? error.message : error);
+      }
+    }
+
+    // Compatibility path for servers that do not yet expose context packs.
     const [briefingResult, directiveResult, sandboxResult] = await Promise.allSettled([
       client.getBriefing({ limit: 10, includeMemories: false }),
       client.recall({

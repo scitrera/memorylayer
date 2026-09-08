@@ -40,6 +40,7 @@ console.log(result.memories);
 - **Full TypeScript Support** - Complete type definitions included
 - **Memory Operations** - Remember, recall, reflect, forget, decay
 - **Relationship Graph** - Link memories with 60+ relationship types organized into 11 categories
+- **Repository Planning Graph** - Typed `client.rpg` namespace for repository sync, traversal, overlays, conflicts, maintenance, and enrichment
 - **Session Management** - Working memory with TTL and commit
 - **Context Environment** - Server-side Python sandbox for data operations
 - **Batch Operations** - Bulk create, update, delete
@@ -138,6 +139,27 @@ const result = await client.batchMemories([
 ]);
 
 console.log(`Successful: ${result.successful}, Failed: ${result.failed}`);
+```
+
+Recall budgets, evidence-backed typed relations, and deterministic session
+recovery are available on the same client:
+
+```typescript
+const recalled = await client.recall({
+  query: "Who works for Acme?",
+  budget_tokens: 600,
+  include_confidence: true,
+  include_relations: true,
+});
+
+const checkpoint = await client.createCheckpoint(sessionId, {
+  transcript_segment: transcript,
+  content_hash: sha256,
+  idempotency_key: `host:${boundary}:${sha256}`,
+  source_boundary: boundary,
+});
+const pack = await client.getContextPack(sessionId, { budgetTokens: 2048 });
+const delta = await client.getContextDelta(sessionId, pack.cursor, 512);
 ```
 
 ## Associations

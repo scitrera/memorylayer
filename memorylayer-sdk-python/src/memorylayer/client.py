@@ -14,6 +14,10 @@ from ._transport import (
     HttpTransport,
     Transport,
 )
+from .constants import (
+    MESSAGE_META_APP_WORKSPACE_KEY,
+    USER_CHAT_HOME_WORKSPACE,
+)
 from .exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -32,12 +36,17 @@ from .models import (
     ChatMessage,
     ChatThread,
     ChatThreadWithMessages,
+    ContextDelta,
+    ContextPack,
     DatasetInfo,
     DatasetJobInfo,
     DatasetSliceResult,
     DecompositionResult,
     DocumentInfo,
     DocumentPage,
+    Entity,
+    EntityRelationInput,
+    EntityResolution,
     JobInfo,
     Memory,
     PageSearchResult,
@@ -45,8 +54,12 @@ from .models import (
     ReflectResult,
     Session,
     SessionBriefing,
+    SessionCheckpoint,
+    TokenCreateResult,
+    TokenInfo,
     Workspace,
 )
+from .rpg import RpgAPI
 from .skills import SkillsAPI
 from .types import (
     MemoryType,
@@ -56,6 +69,24 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _with_app_workspace(msg: dict[str, Any], workspace_id: str) -> dict[str, Any]:
+    """Stamp the caller's originating app workspace on a message dict's metadata.
+
+    Used by ``append_messages`` when substituting storage workspace to
+    :data:`USER_CHAT_HOME_WORKSPACE` for user-owned threads — the caller's
+    workspace context isn't lost; it rides on the message row's metadata
+    under :data:`MESSAGE_META_APP_WORKSPACE_KEY` for per-message indexing /
+    filtering by origin.
+
+    Does not overwrite an existing value (caller-supplied metadata wins).
+    """
+    out = dict(msg)
+    md = dict(out.get("metadata") or {})
+    md.setdefault(MESSAGE_META_APP_WORKSPACE_KEY, workspace_id)
+    out["metadata"] = md
+    return out
 
 
 def _to_value(v: Any) -> Any:
@@ -96,9 +127,10 @@ class MemoryLayerClient:
         timeout: float = 30.0,
         default_authority: AuthorityContext | None = None,
         *,
+        max_retries: int = 3,
         transport: str | Transport = "http",
         aether_client: Any = None,
-        aether_target: str = "sv::memorylayer::default",
+        aether_target: str = "sv::memorylayer",
     ):
         """
         Initialize MemoryLayer client.
@@ -111,6 +143,10 @@ class MemoryLayerClient:
             session_id: Session ID for session-based workspace resolution
             timeout: Request timeout in seconds (default: 30.0)
             default_authority: Default OBO authority applied to every request
+            max_retries: Max retry attempts for idempotent requests (GET/PUT/
+                DELETE/PATCH/HEAD/OPTIONS) on transient failures (5xx/429/
+                connection errors), honoring ``Retry-After`` (default: 3; 0
+                disables). POST is never auto-retried. HTTP transport only.
             transport: ``"http"`` (default; direct httpx) or ``"aether"``
                 (route via ``proxy_http_async`` on a shared Aether SDK
                 connection).  May also be a custom ``Transport`` instance
@@ -120,13 +156,17 @@ class MemoryLayerClient:
                 ``scitrera_aether_client`` that is already connected.  The
                 SDK does NOT own this client (lifecycle is the caller's).
             aether_target: Target topic for Aether transport (default
-                ``sv::memorylayer::default``).
+                ``sv::memorylayer`` — bare implementation; aether routes to
+                an available memorylayer service. Override with an explicit
+                ``sv::memorylayer::<specifier>`` to pin to a specific
+                instance).
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.workspace_id = workspace_id
         self.session_id = session_id
         self.timeout = timeout
+        self.max_retries = max_retries
         self.default_authority = default_authority
         self._transport_kind = transport
         self._aether_client = aether_client
@@ -144,6 +184,7 @@ class MemoryLayerClient:
         self.skills = SkillsAPI(self)
         self.mcp_servers = McpServersAPI(self)
         self.kb = KnowledgebaseAPI(self)
+        self.rpg = RpgAPI(self)
 
     async def __aenter__(self) -> "MemoryLayerClient":
         """Async context manager entry."""
@@ -154,6 +195,7 @@ class MemoryLayerClient:
                     api_key=self.api_key,
                     session_id=self.session_id,
                     timeout=self.timeout,
+                    max_retries=self.max_retries,
                 )
                 self._transport = http
                 self._client = http.httpx_client
@@ -334,7 +376,7 @@ class MemoryLayerClient:
             path: API path
             json: JSON body
             params: Query parameters
-            enterprise_feature: If set, a 404 raises EnterpriseRequiredError
+            enterprise_feature: If set, a 501 raises EnterpriseRequiredError
                 instead of NotFoundError, indicating the feature needs Enterprise.
             authority: Per-request OBO authority (overrides default_authority)
 
@@ -409,6 +451,7 @@ class MemoryLayerClient:
         user_id: str | None = None,
         workspace_id: str | None = None,
         authority: AuthorityContext | None = None,
+        relations: list[EntityRelationInput | dict[str, Any]] | None = None,
     ) -> Memory:
         """
         Store a new memory.
@@ -450,6 +493,11 @@ class MemoryLayerClient:
             payload["context_id"] = context_id
         if user_id is not None:
             payload["user_id"] = user_id
+        if relations:
+            payload["relations"] = [
+                relation.model_dump(exclude_none=True) if isinstance(relation, EntityRelationInput) else relation
+                for relation in relations
+            ]
         ws_id = workspace_id or self.workspace_id
         if ws_id:
             payload["workspace_id"] = ws_id
@@ -473,9 +521,18 @@ class MemoryLayerClient:
         max_expansion: int | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
+        offset: int | None = None,
+        event_after: str | None = None,
+        event_before: str | None = None,
+        time_order: str | None = None,
+        include_global: bool | None = None,
+        include_global_user: bool | None = None,
         user_id: str | None = None,
         workspace_id: str | None = None,
         authority: AuthorityContext | None = None,
+        budget_tokens: int | None = None,
+        include_confidence: bool = True,
+        include_relations: bool = True,
     ) -> RecallResult:
         """
         Search memories by semantic query.
@@ -493,6 +550,13 @@ class MemoryLayerClient:
             include_associations: Include linked memories (None = server default)
             traverse_depth: Multi-hop graph traversal depth (None = server default)
             max_expansion: Max memories discovered via graph expansion (None = server default)
+            offset: Number of results to skip for pagination (None = server default)
+            event_after: Keep memories whose effective event time is >= this (ISO 8601)
+            event_before: Keep memories whose effective event time is <= this (ISO 8601)
+            time_order: Order by effective event time: "asc" or "desc" (None = by relevance)
+            include_global: Include the _global workspace in search (None = server default)
+            include_global_user: Include the user-scoped global workspace (_global_user),
+                filtered by user_id (None = server default; only effective when user_id is set)
 
         Returns:
             Recall results with memories
@@ -533,24 +597,37 @@ class MemoryLayerClient:
             payload["created_after"] = created_after
         if created_before is not None:
             payload["created_before"] = created_before
+        if offset is not None:
+            payload["offset"] = offset
+        if event_after is not None:
+            payload["event_after"] = event_after
+        if event_before is not None:
+            payload["event_before"] = event_before
+        if time_order is not None:
+            payload["time_order"] = time_order
+        if include_global is not None:
+            payload["include_global"] = include_global
+        if include_global_user is not None:
+            payload["include_global_user"] = include_global_user
         if user_id is not None:
             payload["user_id"] = user_id
+        if budget_tokens is not None:
+            payload["budget_tokens"] = budget_tokens
+        payload["include_confidence"] = include_confidence
+        payload["include_relations"] = include_relations
         ws_id = workspace_id or self.workspace_id
         if ws_id:
             payload["workspace_id"] = ws_id
 
         data = await self._request("POST", "/memories/recall", json=payload, authority=authority)
 
-        # Parse memories
-        memories_adapter = TypeAdapter(list[Memory])
-        memories = memories_adapter.validate_python(data.get("memories", []))
-
-        return RecallResult(
-            memories=memories,
-            total_count=data.get("total_count", len(memories)),
-            query_tokens=data.get("query_tokens"),
-            search_latency_ms=data.get("search_latency_ms"),
-        )
+        # Preserve compatibility with older gateways/test transports that used
+        # ``results`` and omitted aggregate fields while still validating all
+        # additive deterministic-recall metadata returned by current servers.
+        normalized = dict(data)
+        normalized.setdefault("memories", normalized.pop("results", []))
+        normalized.setdefault("total_count", len(normalized["memories"]))
+        return RecallResult.model_validate(normalized)
 
     async def reflect(
         self,
@@ -732,6 +809,518 @@ class MemoryLayerClient:
         associations_adapter = TypeAdapter(list[Association])
         return associations_adapter.validate_python(data.get("associations", []))
 
+    async def update_association(
+        self,
+        memory_id: str,
+        association_id: str,
+        *,
+        strength: float | None = None,
+        metadata: dict[str, Any] | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> bool:
+        """
+        Update an association's strength and/or metadata.
+
+        Re-typing an edge (changing its relationship) is not supported — delete
+        and recreate instead. ``memory_id`` must be one of the association's
+        endpoints (source or target) or the server returns 404.
+
+        Args:
+            memory_id: A memory that is an endpoint of the association
+            association_id: Association (edge) ID
+            strength: New relationship strength 0.0-1.0 (None = unchanged)
+            metadata: New metadata dict, replaces existing (None = unchanged)
+            authority: Per-request OBO authority
+
+        Returns:
+            True on success, False if the association was not found.
+
+        Example:
+            await client.update_association("mem_123", "assoc_1", strength=0.9)
+        """
+        payload: dict[str, Any] = {}
+        if strength is not None:
+            payload["strength"] = strength
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        try:
+            await self._request(
+                "PATCH",
+                f"/memories/{memory_id}/associations/{association_id}",
+                json=payload,
+                authority=authority,
+            )
+            return True
+        except NotFoundError:
+            return False
+
+    async def delete_association(
+        self,
+        memory_id: str,
+        association_id: str,
+        *,
+        authority: AuthorityContext | None = None,
+    ) -> bool:
+        """
+        Delete an association (graph edge) by ID.
+
+        ``memory_id`` must be one of the association's endpoints (source or
+        target) or the server returns 404.
+
+        Args:
+            memory_id: A memory that is an endpoint of the association
+            association_id: Association (edge) ID
+            authority: Per-request OBO authority
+
+        Returns:
+            True on success, False if the association was not found.
+
+        Example:
+            await client.delete_association("mem_123", "assoc_1")
+        """
+        try:
+            await self._request(
+                "DELETE",
+                f"/memories/{memory_id}/associations/{association_id}",
+                authority=authority,
+            )
+            return True
+        except NotFoundError:
+            return False
+
+    async def traverse_graph(
+        self,
+        memory_id: str,
+        *,
+        max_depth: int = 2,
+        relationship_types: list[str] | None = None,
+        direction: str = "both",
+        min_strength: float = 0.0,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> dict[str, Any]:
+        """
+        Traverse the memory graph starting from a specific memory.
+
+        Args:
+            memory_id: Starting memory for traversal
+            max_depth: Maximum traversal depth (1-5, default 2)
+            relationship_types: Filter by relationship types (None/empty = all)
+            direction: "outgoing", "incoming", or "both" (default: "both")
+            min_strength: Minimum edge strength (default: 0.0)
+            workspace_id: Workspace override (defaults to client workspace)
+            authority: Per-request OBO authority
+
+        Returns:
+            Graph query result dict with keys: paths, total_paths, unique_nodes,
+            query_latency_ms.
+
+        Example:
+            result = await client.traverse_graph("mem_123", max_depth=3)
+            print(result["unique_nodes"])
+        """
+        payload: dict[str, Any] = {
+            "max_depth": max_depth,
+            "direction": direction,
+            "min_strength": min_strength,
+        }
+        if relationship_types is not None:
+            payload["relationship_types"] = relationship_types
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            payload["workspace_id"] = ws_id
+
+        return await self._request(
+            "POST",
+            f"/memories/{memory_id}/traverse",
+            json=payload,
+            authority=authority,
+        )
+
+    async def list_memories(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        type: str | MemoryType | None = None,
+        subtype: str | None = None,
+        tag: str | None = None,
+        context_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> RecallResult:
+        """
+        List/browse memories ordered by recency (no vector search).
+
+        Unlike :meth:`recall` this is a plain filtered enumeration for browsing,
+        with pagination and optional type/subtype/tag/context filters.
+
+        Args:
+            limit: Maximum memories to return (default: 50)
+            offset: Number of memories to skip for pagination (default: 0)
+            type: Filter by cognitive type
+            subtype: Filter by domain subtype
+            tag: Filter by a single tag
+            context_id: Filter by memory context
+            authority: Per-request OBO authority
+
+        Returns:
+            RecallResult with ``memories`` and ``total_count``.  Note that
+            ``total_count`` reflects the number of memories in the returned
+            page, not a grand total across all pages — do not use it for
+            pagination math.  Use :meth:`iterate_memories` to walk all pages
+            automatically.
+
+        Example:
+            page = await client.list_memories(limit=20, offset=0)
+            for mem in page.memories:
+                print(mem.content)
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if type is not None:
+            params["type"] = _to_value(type)
+        if subtype is not None:
+            params["subtype"] = subtype
+        if tag is not None:
+            params["tag"] = tag
+        if context_id is not None:
+            params["context_id"] = context_id
+
+        data = await self._request("GET", "/memories", params=params, authority=authority)
+
+        memories_adapter = TypeAdapter(list[Memory])
+        memories = memories_adapter.validate_python(data.get("memories", []))
+        return RecallResult(
+            memories=memories,
+            total_count=data.get("total_count", len(memories)),
+        )
+
+    async def iterate_memories(
+        self,
+        *,
+        page_size: int = 50,
+        type: str | MemoryType | None = None,
+        subtype: str | None = None,
+        tag: str | None = None,
+        context_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> AsyncGenerator[Memory, None]:
+        """
+        Auto-paginate :meth:`list_memories`, yielding every memory.
+
+        Transparently walks the limit/offset pages so callers don't have to
+        hand-roll an offset loop. Iteration stops when a page returns fewer
+        than ``page_size`` items.
+
+        Args:
+            page_size: Memories to fetch per request (default: 50, max 200).
+                Values above 200 are silently clamped to 200 to stay within
+                the server's ``limit`` cap and avoid 422 errors.
+            type: Filter by cognitive type
+            subtype: Filter by domain subtype
+            tag: Filter by a single tag
+            context_id: Filter by memory context
+            authority: Per-request OBO authority
+
+        Yields:
+            Each :class:`Memory` across all pages.
+
+        Example:
+            async for mem in client.iterate_memories(tag="preferences"):
+                print(mem.content)
+        """
+        page_size = min(page_size, 200)
+        offset = 0
+        while True:
+            page = await self.list_memories(
+                limit=page_size,
+                offset=offset,
+                type=type,
+                subtype=subtype,
+                tag=tag,
+                context_id=context_id,
+                authority=authority,
+            )
+            for mem in page.memories:
+                yield mem
+            if len(page.memories) < page_size:
+                return
+            offset += page_size
+
+    # Entity registry methods (gated by MEMORYLAYER_ENTITY_REGISTRY_ENABLED)
+
+    async def list_entities(
+        self,
+        *,
+        status: str = "active",
+        limit: int = 100,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> list[Entity]:
+        """
+        List canonical entities in a workspace (deterministic order by id).
+
+        Requires the server-side entity registry to be enabled; on servers
+        where it is disabled this raises ``EnterpriseRequiredError``.
+
+        Args:
+            status: Entity status filter: "active" or "merged" (default: "active")
+            limit: Maximum entities to return (default: 100)
+            workspace_id: Workspace override (defaults to client workspace)
+            authority: Per-request OBO authority
+
+        Returns:
+            List of canonical entities.
+        """
+        params: dict[str, Any] = {"status": status, "limit": limit}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = await self._request(
+            "GET",
+            "/entities",
+            params=params,
+            enterprise_feature="Entity registry",
+            authority=authority,
+        )
+        entities_adapter = TypeAdapter(list[Entity])
+        return entities_adapter.validate_python(data.get("entities", []))
+
+    async def get_entity(
+        self,
+        entity_id: str,
+        *,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> Entity:
+        """
+        Get a single canonical entity by id.
+
+        Requires the server-side entity registry to be enabled.
+
+        Args:
+            entity_id: Entity ID
+            workspace_id: Workspace override (defaults to client workspace)
+            authority: Per-request OBO authority
+
+        Returns:
+            The canonical entity.
+        """
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = await self._request(
+            "GET",
+            f"/entities/{entity_id}",
+            params=params or None,
+            enterprise_feature="Entity registry",
+            authority=authority,
+        )
+        return Entity(**data["entity"])
+
+    async def resolve_entity(
+        self,
+        name: str,
+        *,
+        entity_type: str = "person",
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> EntityResolution | None:
+        """
+        Resolve a surface name/alias to an existing canonical entity.
+
+        Never creates an entity. Returns None if no entity matched the name.
+        Requires the server-side entity registry to be enabled.
+
+        Args:
+            name: Surface name to resolve
+            entity_type: Entity type to resolve against (default: "person")
+            workspace_id: Workspace override (defaults to client workspace)
+            authority: Per-request OBO authority
+
+        Returns:
+            EntityResolution, or None if no entity matched.
+        """
+        params: dict[str, Any] = {"name": name, "entity_type": entity_type}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        try:
+            data = await self._request(
+                "GET",
+                "/entities/resolve",
+                params=params,
+                enterprise_feature="Entity registry",
+                authority=authority,
+            )
+        except NotFoundError:
+            return None
+        return EntityResolution(**data["resolution"])
+
+    async def merge_entities(
+        self,
+        source_id: str,
+        target_id: str,
+        *,
+        reason: str,
+        workspace_id: str | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> Entity:
+        """
+        Merge ``source_id`` into ``target_id``; returns the surviving entity.
+
+        Requires the server-side entity registry to be enabled (and may be
+        flag-gated); on servers where it is disabled this raises
+        ``EnterpriseRequiredError``.
+
+        Args:
+            source_id: Entity to merge FROM (tombstoned on success)
+            target_id: Entity to merge INTO (survives)
+            reason: Audit reason recorded in the merged entity's provenance
+            workspace_id: Workspace override (defaults to client workspace)
+            authority: Per-request OBO authority
+
+        Returns:
+            The surviving (target) entity.
+        """
+        payload: dict[str, Any] = {
+            "source_id": source_id,
+            "target_id": target_id,
+            "reason": reason,
+        }
+        params: dict[str, Any] = {}
+        ws_id = workspace_id or self.workspace_id
+        if ws_id:
+            params["workspace_id"] = ws_id
+
+        data = await self._request(
+            "POST",
+            "/entities/merge",
+            json=payload,
+            params=params or None,
+            enterprise_feature="Entity registry",
+            authority=authority,
+        )
+        return Entity(**data["entity"])
+
+    # API token methods (/v1/tokens)
+
+    async def create_token(
+        self,
+        name: str,
+        *,
+        principal_type: str = "User",
+        workspace_patterns: list[str] | None = None,
+        scopes: list[str] | None = None,
+        expires_in_days: int | None = None,
+        authority: AuthorityContext | None = None,
+    ) -> TokenCreateResult:
+        """
+        Create a new API token.
+
+        The returned object includes the one-time plaintext ``token`` secret —
+        store it securely; it cannot be retrieved again.
+
+        Args:
+            name: Human-readable token name
+            principal_type: Principal type (default: "User")
+            workspace_patterns: Workspace glob patterns (default: ["*"])
+            scopes: Permission scopes (default: ["*"])
+            expires_in_days: Optional expiry in days (None = no expiry)
+            authority: Per-request OBO authority
+
+        Returns:
+            TokenCreateResult including the plaintext ``token``.
+        """
+        payload: dict[str, Any] = {
+            "name": name,
+            "principal_type": principal_type,
+            "workspace_patterns": workspace_patterns if workspace_patterns is not None else ["*"],
+            "scopes": scopes if scopes is not None else ["*"],
+        }
+        if expires_in_days is not None:
+            payload["expires_in_days"] = expires_in_days
+
+        data = await self._request("POST", "/tokens", json=payload, authority=authority)
+        return TokenCreateResult(**data)
+
+    async def list_tokens(
+        self,
+        *,
+        include_revoked: bool = False,
+        authority: AuthorityContext | None = None,
+    ) -> list[TokenInfo]:
+        """
+        List API tokens.
+
+        Args:
+            include_revoked: Include revoked tokens in the result (default: False)
+            authority: Per-request OBO authority
+
+        Returns:
+            List of token records (without plaintext secrets).
+        """
+        params = {"include_revoked": str(include_revoked).lower()}
+        data = await self._request("GET", "/tokens", params=params, authority=authority)
+        tokens_adapter = TypeAdapter(list[TokenInfo])
+        return tokens_adapter.validate_python(data.get("tokens", []))
+
+    async def get_token(
+        self,
+        token_id: str,
+        *,
+        authority: AuthorityContext | None = None,
+    ) -> TokenInfo:
+        """
+        Get details for a single API token.
+
+        Args:
+            token_id: Token ID
+            authority: Per-request OBO authority
+
+        Returns:
+            Token record (without plaintext secret).
+        """
+        data = await self._request("GET", f"/tokens/{token_id}", authority=authority)
+        return TokenInfo(**data)
+
+    async def delete_token(
+        self,
+        token_id: str,
+        *,
+        authority: AuthorityContext | None = None,
+    ) -> None:
+        """
+        Delete an API token.
+
+        Args:
+            token_id: Token ID
+            authority: Per-request OBO authority
+        """
+        await self._request("DELETE", f"/tokens/{token_id}", authority=authority)
+
+    async def revoke_token(
+        self,
+        token_id: str,
+        *,
+        authority: AuthorityContext | None = None,
+    ) -> None:
+        """
+        Revoke an API token.
+
+        Revoked tokens are invalidated immediately but remain visible in token
+        listings with ``revoked=True``.
+
+        Args:
+            token_id: Token ID
+            authority: Per-request OBO authority
+        """
+        await self._request("POST", f"/tokens/{token_id}/revoke", authority=authority)
+
     # Session methods
 
     async def create_session(
@@ -791,6 +1380,73 @@ class MemoryLayerClient:
         """
         data = await self._request("GET", f"/sessions/{session_id}")
         return Session(**data)
+
+    async def create_checkpoint(
+        self,
+        session_id: str,
+        transcript_segment: str,
+        *,
+        content_hash: str,
+        idempotency_key: str,
+        source_kind: str = "transcript",
+        source_sequence: int | None = None,
+        source_boundary: int | None = None,
+    ) -> SessionCheckpoint:
+        payload = {
+            "transcript_segment": transcript_segment,
+            "content_hash": content_hash,
+            "idempotency_key": idempotency_key,
+            "source_kind": source_kind,
+            "source_sequence": source_sequence,
+            "source_boundary": source_boundary,
+        }
+        data = await self._request(
+            "POST",
+            f"/sessions/{session_id}/checkpoints",
+            json={key: value for key, value in payload.items() if value is not None},
+        )
+        return SessionCheckpoint.model_validate(data)
+
+    async def get_checkpoint(self, session_id: str, checkpoint_id: str) -> SessionCheckpoint:
+        data = await self._request("GET", f"/sessions/{session_id}/checkpoints/{checkpoint_id}")
+        return SessionCheckpoint.model_validate(data)
+
+    async def get_context_pack(
+        self,
+        session_id: str,
+        *,
+        topic: str | None = None,
+        entity_ids: list[str] | None = None,
+        entity_names: list[str] | None = None,
+        budget_tokens: int = 2048,
+        section_limits: dict[str, int] | None = None,
+        **inclusion_controls: bool,
+    ) -> ContextPack:
+        payload: dict[str, Any] = {
+            "topic": topic,
+            "entity_ids": entity_ids or [],
+            "entity_names": entity_names or [],
+            "budget_tokens": budget_tokens,
+        }
+        if section_limits is not None:
+            payload["section_limits"] = section_limits
+        payload.update(inclusion_controls)
+        data = await self._request("POST", f"/sessions/{session_id}/context-pack", json=payload)
+        return ContextPack.model_validate(data)
+
+    async def get_context_delta(
+        self,
+        session_id: str,
+        cursor: str,
+        *,
+        budget_tokens: int = 2048,
+    ) -> ContextDelta:
+        data = await self._request(
+            "POST",
+            f"/sessions/{session_id}/context-delta",
+            json={"cursor": cursor, "budget_tokens": budget_tokens},
+        )
+        return ContextDelta.model_validate(data)
 
     async def set_context(
         self,
@@ -887,22 +1543,51 @@ class MemoryLayerClient:
 
     # Workspace methods
 
-    async def create_workspace(self, name: str) -> Workspace:
+    async def create_workspace(self, name: str, tags: list[str] | None = None) -> Workspace:
         """
         Create a new workspace.
 
         Args:
             name: Workspace name
+            tags: Optional discovery tags (e.g. ["knowledge", "topic:finance"])
 
         Returns:
             Created workspace
 
         Example:
-            workspace = await client.create_workspace("my-project")
+            workspace = await client.create_workspace("my-project", tags=["knowledge"])
         """
-        payload = {"name": name}
+        payload: dict[str, Any] = {"name": name}
+        if tags is not None:
+            payload["tags"] = tags
         data = await self._request("POST", "/workspaces", json=payload)
         return Workspace(**data)
+
+    async def list_workspaces(
+        self,
+        tags: list[str] | None = None,
+        match: str = "all",
+    ) -> list[Workspace]:
+        """
+        List workspaces, optionally filtered by tag.
+
+        Args:
+            tags: Optional tag filter. When provided, only workspaces carrying the
+                tag(s) are returned.
+            match: 'all' requires every tag; 'any' requires at least one.
+
+        Returns:
+            List of matching workspaces
+
+        Example:
+            knowledge = await client.list_workspaces(tags=["knowledge"])
+        """
+        params: dict[str, Any] = {}
+        if tags:
+            params["tags"] = tags
+            params["match"] = match
+        data = await self._request("GET", "/workspaces", params=params)
+        return [Workspace(**w) for w in data.get("workspaces", [])]
 
     async def get_workspace(self, workspace_id: str | None = None) -> Workspace:
         """
@@ -929,6 +1614,7 @@ class MemoryLayerClient:
         workspace_id: str,
         name: str | None = None,
         settings: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
     ) -> Workspace:
         """
         Update an existing workspace.
@@ -937,6 +1623,7 @@ class MemoryLayerClient:
             workspace_id: Workspace ID
             name: New workspace name (optional)
             settings: New workspace settings (optional)
+            tags: New discovery tags (optional)
 
         Returns:
             Updated workspace
@@ -945,14 +1632,17 @@ class MemoryLayerClient:
             workspace = await client.update_workspace(
                 "ws_123",
                 name="New Name",
-                settings={"key": "value"}
+                settings={"key": "value"},
+                tags=["knowledge"],
             )
         """
-        payload = {}
+        payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
         if settings is not None:
             payload["settings"] = settings
+        if tags is not None:
+            payload["tags"] = tags
 
         data = await self._request("PUT", f"/workspaces/{workspace_id}", json=payload)
         return Workspace(**data.get("workspace", data))
@@ -1009,6 +1699,26 @@ class MemoryLayerClient:
         """
         data = await self._request("GET", f"/workspaces/{workspace_id}/contexts")
         return data.get("contexts", [])
+
+    async def delete_context(self, context_id: str, workspace_id: str | None = None) -> None:
+        """
+        Delete a context from a workspace.
+
+        Args:
+            context_id: Context ID to delete
+            workspace_id: Parent workspace ID (defaults to client ``workspace_id``)
+
+        Raises:
+            ValueError: If no workspace_id is available.
+
+        Example:
+            await client.delete_context("project-alpha")
+            await client.delete_context("project-alpha", workspace_id="ws_123")
+        """
+        ws_id = workspace_id or self.workspace_id
+        if not ws_id:
+            raise ValueError("workspace_id must be provided or set on the client")
+        await self._request("DELETE", f"/workspaces/{ws_id}/contexts/{context_id}")
 
     async def get_workspace_schema(self, workspace_id: str) -> dict[str, Any]:
         """
@@ -1258,26 +1968,6 @@ class MemoryLayerClient:
         payload = {"decay_rate": decay_rate}
         data = await self._request("POST", f"/memories/{memory_id}/decay", json=payload)
         return Memory(**data.get("memory", data))
-
-    async def trace_memory(self, memory_id: str) -> dict[str, Any]:
-        """
-        Trace memory provenance back to source.
-
-        Returns information about the memory's origin including
-        source resource, category membership, and association chain.
-
-        Args:
-            memory_id: Memory ID
-
-        Returns:
-            Trace result with provenance information
-
-        Example:
-            trace = await client.trace_memory("mem_123")
-            print(trace["chain"])
-        """
-        data = await self._request("GET", f"/memories/{memory_id}/trace")
-        return data.get("trace", data)
 
     async def batch_memories(
         self,
@@ -1701,6 +2391,7 @@ class MemoryLayerClient:
         metadata: dict[str, Any] | None = None,
         expires_at: str | None = None,
         scope: str | None = None,
+        ownership: str = "user",
     ) -> ChatThread:
         """
         Create a new chat thread.
@@ -1724,6 +2415,17 @@ class MemoryLayerClient:
         """
         payload: dict[str, Any] = {}
         ws_id = workspace_id or self.workspace_id
+        # User-owned threads always live under USER_CHAT_HOME_WORKSPACE;
+        # the caller's workspace_id is contextual and should be preserved
+        # on per-message metadata via append_messages.
+        if ownership == "user":
+            if ws_id and ws_id != USER_CHAT_HOME_WORKSPACE:
+                logger.warning(
+                    "create_thread: ownership='user' overrides workspace_id=%r → %r "
+                    "(originating workspace context belongs on per-message metadata)",
+                    ws_id, USER_CHAT_HOME_WORKSPACE,
+                )
+            ws_id = USER_CHAT_HOME_WORKSPACE
         if ws_id:
             payload["workspace_id"] = ws_id
         if thread_id is not None:
@@ -1744,6 +2446,9 @@ class MemoryLayerClient:
             payload["expires_at"] = expires_at
         if scope is not None:
             payload["scope"] = scope
+        # Always forward ownership so server uses the SDK-side default ('user')
+        # rather than relying on a request-schema default that may drift.
+        payload["ownership"] = ownership
 
         data = await self._request("POST", "/threads", json=payload)
         return ChatThread(**data)
@@ -1756,6 +2461,7 @@ class MemoryLayerClient:
         limit: int = 50,
         offset: int = 0,
         scope_filter: str | None = None,
+        ownership_filter: str | None = None,
     ) -> list[ChatThread]:
         """
         List chat threads.
@@ -1780,8 +2486,53 @@ class MemoryLayerClient:
             params["user_id"] = user_id
         if scope_filter is not None:
             params["scope_filter"] = scope_filter
+        if ownership_filter is not None:
+            params["ownership_filter"] = ownership_filter
 
         data = await self._request("GET", "/threads", params=params)
+        threads_adapter = TypeAdapter(list[ChatThread])
+        return threads_adapter.validate_python(data.get("threads", data if isinstance(data, list) else []))
+
+    async def list_user_threads(
+        self,
+        user_id: str,
+        *,
+        ownership: str = "user",
+        scope_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ChatThread]:
+        """
+        List chat threads owned by a user across all workspaces.
+
+        Unlike ``list_threads``, this method is keyed on
+        (tenant, user, ownership) — no ``workspace_id`` required.
+        Used by the user-session-scoped right rail in the web app;
+        each returned thread carries its existing ``metadata`` (where
+        callers may stash a ``preferredWorkspace`` for sidebar grouping).
+
+        Args:
+            user_id: User ID to list threads for
+            ownership: Ownership filter (default: 'user')
+            scope_filter: Optional surface scope filter ('web' | 'office')
+            limit: Maximum threads to return (default: 50)
+            offset: Pagination offset (default: 0)
+
+        Returns:
+            List of ChatThread objects across all workspaces
+
+        Example:
+            threads = await client.list_user_threads("user_123")
+        """
+        params: dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "ownership": ownership,
+        }
+        if scope_filter is not None:
+            params["scope_filter"] = scope_filter
+
+        data = await self._request("GET", f"/threads/user/{user_id}", params=params)
         threads_adapter = TypeAdapter(list[ChatThread])
         return threads_adapter.validate_python(data.get("threads", data if isinstance(data, list) else []))
 
@@ -1944,6 +2695,8 @@ class MemoryLayerClient:
         messages: list[dict[str, Any]],
         *,
         workspace_id: str | None = None,
+        ownership: str = "user",
+        authority: AuthorityContext | None = None,
     ) -> list[ChatMessage]:
         """
         Append messages to a thread.
@@ -1951,7 +2704,14 @@ class MemoryLayerClient:
         Args:
             thread_id: Thread ID
             messages: List of message dicts, each with: role, content, metadata (optional)
-            workspace_id: Workspace ID (uses default if not provided)
+            workspace_id: Workspace ID (uses default if not provided).
+                When ``ownership='user'`` the caller's workspace is treated as
+                the originating app workspace and folded into each message's
+                metadata under :data:`MESSAGE_META_APP_WORKSPACE_KEY`; the
+                storage workspace becomes :data:`USER_CHAT_HOME_WORKSPACE`.
+            ownership: ``'user'`` (default — user-owned threads, cross-workspace)
+                or ``'workspace'`` (legacy — workspace-scoped storage).
+            authority: Per-request OBO authority
 
         Returns:
             List of created ChatMessage objects
@@ -1962,10 +2722,21 @@ class MemoryLayerClient:
                 [{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi!"}]
             )
         """
-        params: dict[str, Any] = {}
         ws_id = workspace_id or self.workspace_id
-        if ws_id:
-            params["workspace_id"] = ws_id
+        storage_ws = ws_id
+        if ownership == "user":
+            if ws_id and ws_id != USER_CHAT_HOME_WORKSPACE:
+                logger.warning(
+                    "append_messages: ownership='user' overrides workspace_id=%r → %r "
+                    "(originating workspace folded into per-message metadata)",
+                    ws_id, USER_CHAT_HOME_WORKSPACE,
+                )
+                messages = [_with_app_workspace(m, ws_id) for m in messages]
+            storage_ws = USER_CHAT_HOME_WORKSPACE
+
+        params: dict[str, Any] = {}
+        if storage_ws:
+            params["workspace_id"] = storage_ws
 
         payload: dict[str, Any] = {"messages": messages}
         data = await self._request(
@@ -1973,6 +2744,7 @@ class MemoryLayerClient:
             f"/threads/{thread_id}/messages",
             json=payload,
             params=params or None,
+            authority=authority,
         )
         messages_adapter = TypeAdapter(list[ChatMessage])
         return messages_adapter.validate_python(data.get("messages", data if isinstance(data, list) else []))
@@ -2626,6 +3398,7 @@ class _OBOProxy:
         user_id: str | None = None,
         workspace_id: str | None = None,
         authority: AuthorityContext | None = None,
+        relations: list[EntityRelationInput | dict[str, Any]] | None = None,
     ) -> Memory:
         return await self._parent.remember(
             content,
@@ -2638,6 +3411,7 @@ class _OBOProxy:
             user_id=user_id,
             workspace_id=self._resolve_workspace(workspace_id),
             authority=self._resolve_authority(authority),
+            relations=relations,
         )
 
     async def recall(
@@ -2656,9 +3430,18 @@ class _OBOProxy:
         max_expansion: int | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
+        offset: int | None = None,
+        event_after: str | None = None,
+        event_before: str | None = None,
+        time_order: str | None = None,
+        include_global: bool | None = None,
+        include_global_user: bool | None = None,
         user_id: str | None = None,
         workspace_id: str | None = None,
         authority: AuthorityContext | None = None,
+        budget_tokens: int | None = None,
+        include_confidence: bool = True,
+        include_relations: bool = True,
     ) -> RecallResult:
         return await self._parent.recall(
             query,
@@ -2675,9 +3458,18 @@ class _OBOProxy:
             max_expansion=max_expansion,
             created_after=created_after,
             created_before=created_before,
+            offset=offset,
+            event_after=event_after,
+            event_before=event_before,
+            time_order=time_order,
+            include_global=include_global,
+            include_global_user=include_global_user,
             user_id=user_id,
             workspace_id=self._resolve_workspace(workspace_id),
             authority=self._resolve_authority(authority),
+            budget_tokens=budget_tokens,
+            include_confidence=include_confidence,
+            include_relations=include_relations,
         )
 
     async def reflect(
@@ -2706,6 +3498,23 @@ class _OBOProxy:
             thread_id,
             message_id,
             workspace_id=self._resolve_workspace(workspace_id),
+            authority=self._resolve_authority(authority),
+        )
+
+    async def append_messages(
+        self,
+        thread_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        workspace_id: str | None = None,
+        ownership: str = "user",
+        authority: AuthorityContext | None = None,
+    ) -> list[ChatMessage]:
+        return await self._parent.append_messages(
+            thread_id,
+            messages,
+            workspace_id=self._resolve_workspace(workspace_id),
+            ownership=ownership,
             authority=self._resolve_authority(authority),
         )
 
@@ -2931,14 +3740,6 @@ class _McpServersOBOProxy:
         return await self._parent.get(
             server_id,
             authority=authority if authority is not None else self._authority,
-        )
-
-    async def get_by_name(self, name: str, workspace_id: str | None = None, authority: AuthorityContext | None = None, **kwargs: Any):
-        return await self._parent.get_by_name(
-            name,
-            workspace_id=self._ws(workspace_id),
-            authority=authority if authority is not None else self._authority,
-            **kwargs,
         )
 
     async def create(self, workspace_id: str | None = None, authority: AuthorityContext | None = None, **kwargs: Any):

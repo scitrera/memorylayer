@@ -1,6 +1,21 @@
 # MemoryLayer Embed Server — GPU image
 # Build context: ``oss/`` (the OSS repo root, or the monorepo's ``oss/`` subdir).
 #
+# !! PLATFORM LOCK: build with --platform linux/amd64 ONLY !!
+# This image depends on nvidia/cuda (CUDA toolkit + vLLM/triton/flashinfer),
+# which has no arm64 variant that supports GPU-accelerated inference. It is
+# intentionally excluded from the multi-arch build loop in
+# saas/scripts/build-and-push-images.sh (see IMAGE_MAP comment "Deliberately
+# skipped") and must be built and pushed separately:
+#
+#   CI / ML-repo build script:
+#     docker buildx build --platform linux/amd64 \
+#       -f memorylayer-embed-server/Dockerfile .    # from oss/
+#
+#   Local dev:
+#     docker buildx build --platform linux/amd64 \
+#       -f oss/memorylayer-embed-server/Dockerfile oss/
+#
 #   CI:    docker build -f memorylayer-embed-server/Dockerfile .       # from oss/
 #   Dev:   docker build -f oss/memorylayer-embed-server/Dockerfile oss/
 #
@@ -65,23 +80,40 @@ RUN set -eu; \
         "/src/memorylayer-core-python[all]" \
         "/src/memorylayer-embed-server[all]"
 
-# ── Stage 2: minimal CUDA runtime ────────────────────────────────────
-FROM nvidia/cuda:13.1.1-runtime-ubuntu24.04
+# ── Stage 2: CUDA devel runtime ──────────────────────────────────────
+# Uses the -devel (not -runtime) base because vLLM's triton/flashinfer
+# kernels JIT-compile at warmup: triton shells out to a C compiler + ptxas,
+# flashinfer invokes nvcc against the CUDA headers. The -runtime image ships
+# neither, so warmup dies with "Failed to find C compiler" / nvcc not found.
+# Pin to the SAME CUDA minor as the builder stage so JIT-compiled kernels link
+# against the toolkit the wheels were built against.
+FROM nvidia/cuda:13.1.2-devel-ubuntu24.04
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    CUDA_HOME=/usr/local/cuda
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv \
+        python3.12 python3.12-venv python3.12-dev \
+        build-essential \
         curl ca-certificates && \
     ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     ln -sf /usr/bin/python3 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 65532 memorylayer && \
-    useradd --uid 65532 --gid memorylayer --create-home memorylayer
+    useradd --uid 65532 --gid memorylayer --create-home memorylayer && \
+    # Pre-create the XDG cache tree (incl. the HF_HOME mountpoint) so docker
+    # mounts the bf_ml_embed_hf_cache volume INTO an existing memorylayer-owned
+    # .cache, rather than synthesizing a root-owned .cache parent. Without this,
+    # the volume target's missing path components (/home/memorylayer/.cache) are
+    # created as root:root, and runtime libraries that write siblings of HF_HOME
+    # (flashinfer -> ~/.cache/flashinfer, triton, torch) hit EPERM on warmup.
+    mkdir -p /home/memorylayer/.cache/huggingface && \
+    chown -R memorylayer:memorylayer /home/memorylayer && \
+    chmod 0755 /home/memorylayer/.cache
 
 # Copy the fully-built venv from the builder
 COPY --from=builder /opt/memorylayer-embed /opt/memorylayer-embed

@@ -12,6 +12,16 @@ from .base import (
     ExtractionService,
     ExtractionServicePluginBase,
 )
+from .deterministic import (
+    ClassificationResult,
+    DeterministicSegment,
+    ExtractiveTier,
+    MarkerCandidate,
+    classify_content,
+    extract_marker_candidates,
+    extractive_tiers,
+    segment_content,
+)
 
 
 def get_extraction_service(v: Variables = None) -> ExtractionService:
@@ -29,4 +39,12 @@ __all__ = (
     "ExtractedMemory",
     "ExtractionResult",
     "CATEGORY_MAPPING",
+    "ClassificationResult",
+    "DeterministicSegment",
+    "ExtractiveTier",
+    "MarkerCandidate",
+    "classify_content",
+    "extract_marker_candidates",
+    "extractive_tiers",
+    "segment_content",
 )

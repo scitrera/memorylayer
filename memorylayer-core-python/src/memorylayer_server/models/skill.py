@@ -63,8 +63,16 @@ class Skill(BaseModel):
 
     enabled: bool = Field(True, description="Whether the skill is active")
 
+    # Manifest revisions deliberately exclude bundle-file contents. Files are
+    # independent child resources; their aggregate ``bundle_hash`` may change
+    # without invalidating a concurrent manifest edit. This keeps refinement
+    # CAS precise instead of turning unrelated asset updates into conflicts.
+    revision: int = Field(0, ge=0, description="Authoritative manifest revision")
+    etag: str = Field("", description="Opaque manifest compare-and-swap token")
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    deleted_at: datetime | None = Field(None, description="Durable manifest tombstone timestamp")
 
     @field_validator("name")
     @classmethod
@@ -110,6 +118,16 @@ class SkillFile(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class SkillFileInput(BaseModel):
+    """A bundle file (utils.py, references/*, assets/*) supplied inline on skill
+    create. content is UTF-8 text; binary assets should use the PUT
+    /skills/{id}/files/{path} endpoint (content_b64) instead."""
+
+    path: str = Field(..., description="Bundle-relative path, e.g. utils.py or references/qa.md")
+    content: str = Field("", description="UTF-8 file content")
+    mime_type: str | None = None
+
+
 class SkillCreateInput(BaseModel):
     """Request model for creating a new skill."""
 
@@ -124,6 +142,10 @@ class SkillCreateInput(BaseModel):
     source_mode: Literal["server", "filesystem", "mirrored"] = Field("server")
     workspace_id: str | None = Field(None, description="Target workspace (overrides header)")
     user_id: str | None = Field(None, description="User scope override")
+    # Inline bundle files persisted with the skill (equivalent to PUT-ing each to
+    # /skills/{id}/files/{path} after create). The SDK's save(files=...) sends these;
+    # without this field they were silently dropped, so bundle files never persisted.
+    files: list[SkillFileInput] = Field(default_factory=list, description="Inline bundle files")
 
     @field_validator("name")
     @classmethod
@@ -171,6 +193,66 @@ class SkillUpdateInput(BaseModel):
         if v is not None and len(v) > 500:
             raise ValueError(f"Skill compatibility must be 500 chars or fewer, got {len(v)}")
         return v
+
+
+class SkillReplaceInput(BaseModel):
+    """Complete semantic replacement used by conditional refinement writes."""
+
+    description: str = Field(..., description="Skill description")
+    version: str = Field("0.1.0", description="Skill version")
+    license: str | None = Field(None, description="License identifier")
+    compatibility: str | None = Field(None, description="Compatibility notes")
+    allowed_tools: str | None = Field(None, description="Tool allowlist")
+    body: str = Field("", description="SKILL.md body")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source_mode: Literal["server", "filesystem", "mirrored"] = Field("server")
+    enabled: bool = Field(True)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Skill description cannot be empty")
+        if len(v) > 1024:
+            raise ValueError(f"Skill description must be 1024 chars or fewer, got {len(v)}")
+        return v
+
+    @field_validator("compatibility")
+    @classmethod
+    def validate_compatibility(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 500:
+            raise ValueError(f"Skill compatibility must be 500 chars or fewer, got {len(v)}")
+        return v
+
+
+SkillMutationAction = Literal["create", "replace", "delete", "restore"]
+
+
+class SkillMutation(BaseModel):
+    """Storage-level atomic mutation of a native skill manifest."""
+
+    action: SkillMutationAction
+    skill: Skill
+    operation_id: str
+    request_hash: str
+    expected_etag: str
+
+
+class SkillMutationResult(BaseModel):
+    """Accepted native skill mutation, including exact idempotent replay."""
+
+    skill: Skill
+    replayed: bool = False
+
+
+class SkillRevision(BaseModel):
+    """Immutable native skill-manifest snapshot."""
+
+    skill: Skill
+    sequence: int = Field(ge=1)
+    action: SkillMutationAction
+    operation_id: str
+    request_hash: str
 
 
 class SkillFileInput(BaseModel):

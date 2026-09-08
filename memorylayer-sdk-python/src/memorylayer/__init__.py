@@ -1,6 +1,10 @@
 """MemoryLayer.ai Python SDK - Memory infrastructure for AI agents."""
 
 from .client import MemoryLayerClient
+from .constants import (
+    MESSAGE_META_APP_WORKSPACE_KEY,
+    USER_CHAT_HOME_WORKSPACE,
+)
 from .exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -30,6 +34,9 @@ from .models import (
     ChatMessageContent,
     ChatThread,
     ChatThreadWithMessages,
+    ContextDelta,
+    ContextPack,
+    ContextPackItem,
     DatasetColumn,
     DatasetInfo,
     DatasetJobInfo,
@@ -37,15 +44,47 @@ from .models import (
     DecompositionResult,
     DocumentInfo,
     DocumentPage,
+    Entity,
+    EntityRelationInput,
+    EntityRelationPath,
+    EntityRelationWriteResult,
+    EntityResolution,
     JobInfo,
     Memory,
+    MemoryListResponse,
     PageSearchResult,
     PrincipalRef,
     RecallResult,
     ReflectResult,
     Session,
     SessionBriefing,
+    SessionCheckpoint,
+    TokenCreateResult,
+    TokenInfo,
     Workspace,
+)
+from .rpg import (
+    RpgAPI,
+    RpgConflict,
+    RpgConflictResult,
+    RpgDeleteResult,
+    RpgEdge,
+    RpgEdgeInput,
+    RpgEnrichmentResult,
+    RpgMaintenanceResult,
+    RpgNode,
+    RpgNodeInput,
+    RpgNodeList,
+    RpgOverlay,
+    RpgOverlayDeleteResult,
+    RpgOverlayList,
+    RpgSearchResult,
+    RpgStatus,
+    RpgSubgraph,
+    RpgSymbolConflict,
+    RpgSymbolConflictResult,
+    RpgSyncResult,
+    SyncRpgAPI,
 )
 from .sync_client import SyncMemoryLayerClient, sync_client
 from .types import (
@@ -57,7 +96,7 @@ from .types import (
     SearchTolerance,
 )
 
-__version__ = "0.1.22"
+__version__ = "0.2.0"
 
 __all__ = [
     # Main clients
@@ -67,14 +106,31 @@ __all__ = [
     # OBO authority types
     "AuthorityContext",
     "PrincipalRef",
+    # Stable constants (mirrored from memorylayer-core-python)
+    "USER_CHAT_HOME_WORKSPACE",
+    "MESSAGE_META_APP_WORKSPACE_KEY",
     # Models
     "Memory",
+    "MemoryListResponse",
     "RecallResult",
     "ReflectResult",
     "Association",
     "Session",
     "SessionBriefing",
+    "SessionCheckpoint",
+    "ContextPack",
+    "ContextDelta",
+    "ContextPackItem",
     "Workspace",
+    # API token models
+    "TokenInfo",
+    "TokenCreateResult",
+    # Entity registry models
+    "Entity",
+    "EntityResolution",
+    "EntityRelationInput",
+    "EntityRelationPath",
+    "EntityRelationWriteResult",
     # Chat history models
     "ChatMessage",
     "ChatMessageContent",
@@ -102,6 +158,28 @@ __all__ = [
     "KbBridge",
     "KbGraphAnalysis",
     "KbGraphSnapshot",
+    # Repository Planning Graph models + namespace
+    "RpgAPI",
+    "SyncRpgAPI",
+    "RpgNodeInput",
+    "RpgEdgeInput",
+    "RpgNode",
+    "RpgEdge",
+    "RpgSyncResult",
+    "RpgSubgraph",
+    "RpgSearchResult",
+    "RpgStatus",
+    "RpgOverlay",
+    "RpgOverlayList",
+    "RpgOverlayDeleteResult",
+    "RpgDeleteResult",
+    "RpgNodeList",
+    "RpgConflict",
+    "RpgConflictResult",
+    "RpgSymbolConflict",
+    "RpgSymbolConflictResult",
+    "RpgMaintenanceResult",
+    "RpgEnrichmentResult",
     # Types
     "MemoryType",
     "MemorySubtype",

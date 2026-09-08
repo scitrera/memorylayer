@@ -37,6 +37,30 @@ class DocumentStatus(str, Enum):
     PARTIAL = "partial"  # some pages succeeded, some failed
 
 
+class DocumentEnrichmentStatus(str, Enum):
+    """Knowledge-phase status, tracked separately from ``DocumentStatus``.
+
+    ``DocumentStatus`` answers "can this document be retrieved against?" — it
+    goes COMPLETED once pages, transcripts, embeddings and composite memories
+    are durable. Fact decomposition and the enrichment that follows it are
+    deliberately NOT part of that: they fan out to thousands of background tasks
+    (a decomposed page yields ~35-40 facts, each scheduling its own tiering and
+    association work) and can run long after the document is usable. Callers
+    that only search or read pages must not wait on them.
+
+    This enum answers the second question — "is the knowledge extraction for
+    this document finished?" — for the callers that do care.
+    """
+
+    #: Nothing was scheduled: decomposition is disabled, or no memory qualified.
+    #: A terminal state, distinct from COMPLETE so "never ran" stays legible.
+    NOT_APPLICABLE = "not_applicable"
+    #: Decomposition was scheduled and at least one memory is still outstanding.
+    PENDING = "pending"
+    #: Every scheduled decomposition has finished.
+    COMPLETE = "complete"
+
+
 class JobStatus(str, Enum):
     """Ingestion job lifecycle status."""
 
@@ -78,6 +102,22 @@ class Document(BaseModel):
     size_bytes: int
     mime_type: str | None = None
     status: DocumentStatus = DocumentStatus.PENDING
+    enrichment_status: DocumentEnrichmentStatus = Field(
+        DocumentEnrichmentStatus.NOT_APPLICABLE,
+        description=(
+            "Knowledge-phase status, independent of `status`. See "
+            "DocumentEnrichmentStatus: `status` says the document is usable, "
+            "this says whether fact extraction has finished."
+        ),
+    )
+    enrichment_memory_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Memories scheduled for fact decomposition at ingest. Recorded so "
+            "completion can be re-derived from stored state rather than counted "
+            "from events, which keeps it correct across retries and restarts."
+        ),
+    )
     target_context_id: str = "_default"
     extraction_options: DocumentExtractionOptions = Field(default_factory=DocumentExtractionOptions)
     page_count: int = 0

@@ -127,7 +127,7 @@ class TestLCELIntegrationWithMockedLLM:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_1", "test", "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", "test", "human", 0)},
             )
         )
 
@@ -188,7 +188,7 @@ class TestLCELIntegrationWithMockedLLM:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_3", "test", "human", 2),
+                json={"memory": create_mock_memory_response("mem_3", "test", "human", 2)},
             )
         )
 
@@ -273,7 +273,7 @@ class TestLCELIntegrationWithMockedLLM:
                 "updated_at": "2026-01-27T10:00:00Z",
             }
             stored_memories.append(memory)
-            return Response(200, json=memory)
+            return Response(200, json={"memory": memory})
 
         def recall_side_effect(request):
             """Return currently stored memories."""
@@ -388,7 +388,7 @@ class TestLCELIntegrationWithMockedLLM:
                 "updated_at": "2026-01-27T10:00:00Z",
             }
             memories_by_session[session_id].append(memory)
-            return Response(200, json=memory)
+            return Response(200, json={"memory": memory})
 
         respx.post(f"{base_url}/v1/memories/recall").mock(side_effect=recall_side_effect)
         respx.post(f"{base_url}/v1/memories").mock(side_effect=create_side_effect)
@@ -448,7 +448,7 @@ class TestLCELIntegrationWithMockedLLM:
         respx.post(f"{base_url}/v1/memories").mock(
             return_value=Response(
                 200,
-                json=create_mock_memory_response("mem_1", "test", "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", "test", "human", 0)},
             )
         )
 
@@ -561,7 +561,7 @@ class TestChatMessageHistoryDirect:
             )
             stored_messages.append(memory)
             msg_counter[0] += 1
-            return Response(200, json=memory)
+            return Response(200, json={"memory": memory})
 
         def recall_side_effect(request):
             return Response(
@@ -636,7 +636,7 @@ class TestChatMessageHistoryDirect:
             request_bodies.append(body)
             return Response(
                 200,
-                json=create_mock_memory_response("mem_1", body["content"], "human", 0),
+                json={"memory": create_mock_memory_response("mem_1", body["content"], "human", 0)},
             )
 
         respx.post(f"{base_url}/v1/memories").mock(side_effect=capture_create)

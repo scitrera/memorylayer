@@ -1,0 +1,18 @@
+{
+  "id": "@scitrera/memorylayer-openclaw-plugin",
+  "name": "memorylayer.ai",
+  "description": "memorylayer.ai memory backend",
+  "version": "0.2.0",
+  "kind": "memory",
+  "activation": {
+    "onStartup": false
+  },
+  "contracts": {
+    "tools": []
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

@@ -1,10 +1,16 @@
 """Unit tests for SQLite skill storage implementation."""
 
 import hashlib
+from datetime import UTC, datetime
 
 import pytest
 
-from memorylayer_server.models.skill import Skill, SkillFile
+from memorylayer_server.models.skill import Skill, SkillFile, SkillMutation
+from memorylayer_server.models.versioned_resource import (
+    VersionedResourceConflictError,
+    VersionedResourcePreconditionFailedError,
+)
+from memorylayer_server.services.skills.versioning import canonical_hash, manifest_state
 from memorylayer_server.services.storage.sqlite import SQLiteStorageBackend
 from memorylayer_server.utils import generate_id
 
@@ -111,6 +117,30 @@ class TestSkillCRUD:
         assert "active-skill" in active_names
         assert "disabled-skill" not in active_names
 
+    async def test_list_skills_include_global_union(self, sqlite_backend):
+        ws_skill = _make_skill(id=generate_id("skl"), name="ws-local", workspace_id="ws_test")
+        global_skill = _make_skill(id=generate_id("skl"), name="global-shared", workspace_id="_global")
+        global_user_skill = _make_skill(
+            id=generate_id("skl"), name="global-user", workspace_id="_global", user_id="user_x"
+        )
+        await sqlite_backend.create_skill(ws_skill)
+        await sqlite_backend.create_skill(global_skill)
+        await sqlite_backend.create_skill(global_user_skill)
+
+        # Default: workspace-only.
+        default_names = {s.name for s in await sqlite_backend.list_skills("ws_test")}
+        assert default_names == {"ws-local"}
+
+        # include_global unions tenant-shared (user_id IS NULL) global skills only.
+        union_names = {s.name for s in await sqlite_backend.list_skills("ws_test", include_global=True)}
+        assert union_names == {"ws-local", "global-shared"}
+
+        # A specific user_id filter suppresses the global union.
+        user_names = {
+            s.name for s in await sqlite_backend.list_skills("ws_test", user_id="user_x", include_global=True)
+        }
+        assert "global-shared" not in user_names
+
     async def test_update_skill(self, sqlite_backend):
         skill = _make_skill()
         await sqlite_backend.create_skill(skill)
@@ -136,6 +166,54 @@ class TestSkillCRUD:
     async def test_delete_skill_not_found(self, sqlite_backend):
         result = await sqlite_backend.delete_skill("ws_test", "nonexistent_id")
         assert result is False
+
+    async def test_scoped_name_remains_reserved_by_tombstone(self, sqlite_backend):
+        first = _make_skill(name="reserved-skill")
+        duplicate = _make_skill(name="reserved-skill")
+        await sqlite_backend.create_skill(first)
+        await sqlite_backend.delete_skill("ws_test", first.id)
+
+        with pytest.raises(VersionedResourceConflictError):
+            await sqlite_backend.create_skill(duplicate)
+
+    async def test_versioned_manifest_replay_stale_writer_and_history(self, sqlite_backend):
+        skill = _make_skill(name="versioned-skill")
+        created = await sqlite_backend.create_skill(skill)
+        assert created.revision == 1
+        assert created.etag
+
+        desired = created.model_copy(
+            update={"description": "Refined", "updated_at": datetime.now(UTC)}
+        )
+        request_hash = canonical_hash(
+            {"action": "replace", "state": manifest_state(desired), "expected_etag": created.etag}
+        )
+        mutation = SkillMutation(
+            action="replace",
+            skill=desired,
+            operation_id="sqlite-versioned-op",
+            request_hash=request_hash,
+            expected_etag=created.etag,
+        )
+        replaced = await sqlite_backend.mutate_skill(mutation)
+        replay = await sqlite_backend.mutate_skill(mutation)
+        assert replaced.skill.revision == 2
+        assert replay.replayed is True
+        assert replay.skill == replaced.skill
+
+        stale = mutation.model_copy(
+            update={
+                "operation_id": "sqlite-stale-op",
+                "request_hash": canonical_hash({"stale": True}),
+            }
+        )
+        with pytest.raises(VersionedResourcePreconditionFailedError):
+            await sqlite_backend.mutate_skill(stale)
+
+        history = await sqlite_backend.list_skill_revisions(
+            created.tenant_id, created.workspace_id, created.id, limit=10
+        )
+        assert [item.action for item in history[:2]] == ["replace", "create"]
 
 
 @pytest.mark.asyncio
@@ -196,16 +274,18 @@ class TestSkillFiles:
         fetched = await sqlite_backend.get_skill_file(skill.id, "scripts/extract.py")
         assert fetched is None
 
-    async def test_delete_skill_cascades_to_files(self, sqlite_backend):
+    async def test_delete_skill_retains_files_for_tombstone_restore(self, sqlite_backend):
         skill = _make_skill()
         await sqlite_backend.create_skill(skill)
         sf = _make_skill_file(skill.id)
         await sqlite_backend.upsert_skill_file(sf)
 
         await sqlite_backend.delete_skill("ws_test", skill.id)
-        # FK cascade should have removed the file
+        # Tombstones retain child files so restoring the manifest restores the
+        # same native bundle rather than a partial recreation.
+        assert await sqlite_backend.get_skill("ws_test", skill.id) is None
         fetched = await sqlite_backend.get_skill_file(skill.id, "scripts/extract.py")
-        assert fetched is None
+        assert fetched is not None
 
 
 @pytest.mark.asyncio

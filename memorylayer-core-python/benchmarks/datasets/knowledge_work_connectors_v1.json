@@ -1,0 +1,377 @@
+{
+  "name": "MemoryLayer Messy Knowledge-Work Connector Relations",
+  "version": "1.0.0",
+  "description": "Connector-shaped professional records with nested identities, vendor keys, aliases, missing values, conflicting synonyms, and generic controls.",
+  "records": [
+    {
+      "id": "jira-credential-rotation",
+      "domain": "operations",
+      "content": "OPS-91 tracks the production credential rotation and remains blocked on the security exception.",
+      "metadata": {
+        "connector_type": "jira",
+        "connector_record": {
+          "record_type": "issue",
+          "key": "OPS-91",
+          "fields": {
+            "summary": "Production Credential Rotation",
+            "assignee": {"displayName": "Ari Singh", "accountId": "ari-1"},
+            "reporter": {"displayName": "Jo Ellis", "emailAddress": "jo@example.test"},
+            "project": {"name": "Operations Program", "key": "OPS"},
+            "components": [{"name": "Secrets Service"}],
+            "blockers": [{"name": "Security Exception", "type": "work_item"}],
+            "status": {"name": "In Progress"}
+          }
+        }
+      },
+      "gold_relations": [
+        ["Ari Singh", "Production Credential Rotation", "responsible_for"],
+        ["Jo Ellis", "Production Credential Rotation", "authored"],
+        ["Production Credential Rotation", "Operations Program", "part_of"],
+        ["Production Credential Rotation", "Secrets Service", "affects"],
+        ["Security Exception", "Production Credential Rotation", "blocks"]
+      ]
+    },
+    {
+      "id": "github-token-refresh",
+      "domain": "software_delivery",
+      "content": "Pull request 418 makes token refresh atomic and is awaiting security review.",
+      "metadata": {
+        "connector_type": "github",
+        "github_type": "pr",
+        "github_title": "Atomic Token Refresh",
+        "github_number": 418,
+        "github_repo": "acme/platform",
+        "user": {"name": "Maya Ortiz", "login": "mortiz", "id": 17},
+        "github_assignees": [{"displayName": "Theo Park", "accountId": "u-9"}],
+        "requested_reviewers": [{"name": "Rina Chen", "login": "rchen"}],
+        "github_labels": ["security", "identity"]
+      },
+      "gold_relations": [
+        ["Maya Ortiz", "Atomic Token Refresh", "authored"],
+        ["Theo Park", "Atomic Token Refresh", "responsible_for"],
+        ["Rina Chen", "Atomic Token Refresh", "reviewed"],
+        ["Atomic Token Refresh", "acme/platform", "part_of"],
+        ["Atomic Token Refresh", "security", "about"],
+        ["Atomic Token Refresh", "identity", "about"]
+      ]
+    },
+    {
+      "id": "gdrive-operating-model",
+      "domain": "organizational_work",
+      "content": "The operating model describes the new support boundaries for the service organization.",
+      "metadata": {
+        "connector_type": "gdrive",
+        "record_type": "document",
+        "name": "Support Operating Model",
+        "gdrive_file_id": "gd-204",
+        "owners": [{"displayName": "Lena Ortiz", "emailAddress": "lena@example.test"}],
+        "space": {"name": "Service Transformation", "type": "project"},
+        "topics": ["support model", "operating boundaries"],
+        "modifiedTime": "2026-08-14T12:00:00Z"
+      },
+      "gold_relations": [
+        ["Lena Ortiz", "Support Operating Model", "owns"],
+        ["Support Operating Model", "Service Transformation", "part_of"],
+        ["Support Operating Model", "support model", "about"],
+        ["Support Operating Model", "operating boundaries", "about"]
+      ]
+    },
+    {
+      "id": "confluence-retention-policy",
+      "domain": "policy_compliance",
+      "content": "The current retention policy incorporates the accepted legal analysis and replaces the 2024 edition.",
+      "metadata": {
+        "connector_type": "confluence",
+        "record_type": "policy",
+        "title": "Data Retention Policy 2026",
+        "id": "page-889",
+        "creator": {"displayName": "Tenzin Wang", "accountId": "tw-4"},
+        "reviewers": ["Priya Nair"],
+        "approvers": [{"name": "Marco Diaz", "id": "md-8"}],
+        "space": "Governance Program",
+        "previous_version": {"name": "Data Retention Policy 2024", "type": "artifact"},
+        "labels": ["retention", "privacy"]
+      },
+      "gold_relations": [
+        ["Tenzin Wang", "Data Retention Policy 2026", "authored"],
+        ["Priya Nair", "Data Retention Policy 2026", "reviewed"],
+        ["Marco Diaz", "Data Retention Policy 2026", "approved"],
+        ["Data Retention Policy 2026", "Governance Program", "part_of"],
+        ["Data Retention Policy 2026", "Data Retention Policy 2024", "supersedes"],
+        ["Data Retention Policy 2026", "retention", "about"],
+        ["Data Retention Policy 2026", "privacy", "about"]
+      ]
+    },
+    {
+      "id": "linear-search-index",
+      "domain": "product_delivery",
+      "content": "ENG-72 cannot ship until privacy review closes and is part of the search platform program.",
+      "metadata": {
+        "connector_type": "linear",
+        "record_type": "issue",
+        "key": "ENG-72",
+        "title": "Search Indexing",
+        "creator": {"displayName": "Evan Cole", "id": "ev-2"},
+        "assignee": {"displayName": "Nora Bell", "id": "nb-8"},
+        "project": "Search Platform",
+        "parent": {"name": "Discovery Delivery", "type": "work_item"},
+        "blocked_by": "Privacy Review",
+        "components": ["Search API"]
+      },
+      "gold_relations": [
+        ["Evan Cole", "Search Indexing", "authored"],
+        ["Nora Bell", "Search Indexing", "responsible_for"],
+        ["Search Indexing", "Search Platform", "part_of"],
+        ["Search Indexing", "Discovery Delivery", "part_of"],
+        ["Privacy Review", "Search Indexing", "blocks"],
+        ["Search Indexing", "Search API", "affects"]
+      ]
+    },
+    {
+      "id": "servicenow-cache-incident",
+      "domain": "incident_management",
+      "content": "INC-440 records the cache saturation incident affecting the checkout service.",
+      "metadata": {
+        "connector_type": "servicenow",
+        "record_type": "incident",
+        "number": "INC-440",
+        "summary": "Cache Saturation Incident",
+        "assigned_to": {"displayName": "Amira Holt", "user_id": "ah-7"},
+        "owner": {"name": "SRE Rotation", "type": "org"},
+        "service": {"name": "Checkout Service", "type": "concept"},
+        "blocked_by": {"name": "Vendor Capacity Report", "type": "work_item"}
+      },
+      "gold_relations": [
+        ["Amira Holt", "Cache Saturation Incident", "responsible_for"],
+        ["SRE Rotation", "Cache Saturation Incident", "owns"],
+        ["Cache Saturation Incident", "Checkout Service", "affects"],
+        ["Vendor Capacity Report", "Cache Saturation Incident", "blocks"]
+      ]
+    },
+    {
+      "id": "notion-cache-decision",
+      "domain": "architecture",
+      "content": "ADR-28 selects the bounded cache design based on the production workload study.",
+      "metadata": {
+        "connector_type": "notion",
+        "record_type": "decision",
+        "title": "Bounded Cache Decision",
+        "external_id": "ADR-28",
+        "createdBy": {"displayName": "Noah Williams", "id": "nw-1"},
+        "decision_maker": {"displayName": "Samira Patel", "id": "sp-3"},
+        "workspace": "Checkout Architecture",
+        "based_on": "Production Workload Study",
+        "affects": "Checkout Service"
+      },
+      "gold_relations": [
+        ["Noah Williams", "Bounded Cache Decision", "authored"],
+        ["Samira Patel", "Bounded Cache Decision", "decided"],
+        ["Bounded Cache Decision", "Checkout Architecture", "part_of"],
+        ["Bounded Cache Decision", "Production Workload Study", "based_on"],
+        ["Bounded Cache Decision", "Checkout Service", "affects"]
+      ]
+    },
+    {
+      "id": "slack-architecture-note",
+      "domain": "collaboration",
+      "content": "The architecture channel note summarizes the cache rollout constraint.",
+      "metadata": {
+        "connector_type": "slack",
+        "record_type": "message",
+        "title": "Cache Rollout Note",
+        "slack_message_id": "1712233.20",
+        "slack_sender": {"displayName": "Kai Monroe", "id": "U42"},
+        "labels": ["cache rollout"]
+      },
+      "gold_relations": [
+        ["Kai Monroe", "Cache Rollout Note", "authored"],
+        ["Cache Rollout Note", "cache rollout", "about"]
+      ]
+    },
+    {
+      "id": "teams-payment-update",
+      "domain": "collaboration",
+      "content": "The payment remediation update reports that retry tests are now complete.",
+      "metadata": {
+        "connector_type": "teams",
+        "record_type": "message",
+        "title": "Payment Remediation Update",
+        "teams_message_id": "tm-17",
+        "teams_sender": "Jules Martin",
+        "affects": {"name": "Payment Service", "type": "concept"}
+      },
+      "gold_relations": [
+        ["Jules Martin", "Payment Remediation Update", "authored"],
+        ["Payment Remediation Update", "Payment Service", "affects"]
+      ]
+    },
+    {
+      "id": "email-launch-approval",
+      "domain": "business_operations",
+      "content": "The launch approval message asks the legal and operations leads to confirm the final schedule.",
+      "metadata": {
+        "connector_type": "email",
+        "record_type": "email",
+        "subject": "Partner Launch Approval",
+        "message_id": "mail-331",
+        "sender": {"displayName": "Jordan Kim", "email": "jordan@example.test"},
+        "to": [
+          {"displayName": "Leila Haddad", "email": "leila@example.test"},
+          {"displayName": "Omar Silva", "email": "omar@example.test"}
+        ],
+        "project": "Alliance Program"
+      },
+      "gold_relations": [
+        ["Jordan Kim", "Partner Launch Approval", "authored"],
+        ["Partner Launch Approval", "Alliance Program", "part_of"],
+        ["Jordan Kim", "Leila Haddad", "sent_to"],
+        ["Jordan Kim", "Omar Silva", "sent_to"]
+      ]
+    },
+    {
+      "id": "analytics-forecast-model",
+      "domain": "analytics",
+      "content": "FM-22 is the governed forecast artifact used by the finance modernization program.",
+      "metadata": {
+        "connector_type": "model_registry",
+        "record_type": "document",
+        "name": "Revenue Forecast Model",
+        "record_id": "FM-22",
+        "author": "Elena García",
+        "contributors": ["Victor Huang", {"displayName": "Mei Tan", "id": "mt-4"}],
+        "source_documents": "Quarterly Revenue Dataset",
+        "project": "Finance Modernization",
+        "topics": "revenue forecasting"
+      },
+      "gold_relations": [
+        ["Elena García", "Revenue Forecast Model", "authored"],
+        ["Victor Huang", "Revenue Forecast Model", "contributed_to"],
+        ["Mei Tan", "Revenue Forecast Model", "contributed_to"],
+        ["Revenue Forecast Model", "Quarterly Revenue Dataset", "based_on"],
+        ["Revenue Forecast Model", "Finance Modernization", "part_of"],
+        ["Revenue Forecast Model", "revenue forecasting", "about"]
+      ]
+    },
+    {
+      "id": "partial-vendor-migration",
+      "domain": "vendor_management",
+      "content": "VM-8 records the vendor migration and its dependency on procurement approval.",
+      "metadata": {
+        "connector_type": "work_tracker",
+        "record_type": "task",
+        "title": "Vendor Migration",
+        "key": "VM-8",
+        "assignee": {"accountId": "missing-display-name"},
+        "owner": "Casey Rowan",
+        "dependencies": ["", "unassigned", {"name": "Procurement Approval", "type": "work_item"}]
+      },
+      "gold_relations": [
+        ["Casey Rowan", "Vendor Migration", "owns"],
+        ["Vendor Migration", "Procurement Approval", "depends_on"]
+      ]
+    },
+    {
+      "id": "duplicate-reviewers",
+      "domain": "quality",
+      "content": "QA-31 is owned by the quality lead and has one canonical reviewer despite duplicate source fields.",
+      "metadata": {
+        "connector_type": "quality_tracker",
+        "record_type": "task",
+        "title": "Release Evidence Check",
+        "key": "QA-31",
+        "owner": "Riley Morgan",
+        "owners": ["Ignored Duplicate Source"],
+        "reviewers": ["Aisha Rahman", "aisha rahman", "Aisha Rahman"]
+      },
+      "gold_relations": [
+        ["Riley Morgan", "Release Evidence Check", "owns"],
+        ["Aisha Rahman", "Release Evidence Check", "reviewed"]
+      ]
+    },
+    {
+      "id": "explicit-profile-precedence",
+      "domain": "governance",
+      "content": "The canonical policy record retains its explicit owner while accepting the connector reviewer.",
+      "metadata": {
+        "connector_type": "policy_system",
+        "title": "Vendor Title",
+        "owner": "Vendor Owner",
+        "reviewer": "Source Reviewer",
+        "knowledge_work": {
+          "subject": {"name": "Canonical Policy", "type": "artifact"},
+          "owner": "Explicit Owner"
+        }
+      },
+      "gold_relations": [
+        ["Explicit Owner", "Canonical Policy", "owns"],
+        ["Source Reviewer", "Canonical Policy", "reviewed"]
+      ]
+    },
+    {
+      "id": "control-writing",
+      "domain": "control",
+      "content": "Technical writing should lead with the decision a reader needs to make.",
+      "metadata": {"filename": "writing-notes.md", "owner": "not interpreted without a connector declaration"},
+      "gold_relations": []
+    },
+    {
+      "id": "control-planning",
+      "domain": "control",
+      "content": "Quarterly planning balances committed delivery with operational health and exploration.",
+      "metadata": {},
+      "gold_relations": []
+    },
+    {
+      "id": "control-research",
+      "domain": "control",
+      "content": "Research synthesis should retain links from conclusions to observations.",
+      "metadata": {},
+      "gold_relations": []
+    },
+    {
+      "id": "control-incident",
+      "domain": "control",
+      "content": "A useful incident review separates contributing conditions from corrective actions.",
+      "metadata": {},
+      "gold_relations": []
+    },
+    {
+      "id": "control-estimation",
+      "domain": "control",
+      "content": "Forecast ranges should state assumptions, uncertainty, and preparation date.",
+      "metadata": {},
+      "gold_relations": []
+    }
+  ],
+  "queries": [
+    {"id": "q01", "family": "responsibility", "query": "Who is assigned to Production Credential Rotation?", "relevant": ["jira-credential-rotation"]},
+    {"id": "q02", "family": "workflow", "query": "What is blocked by Security Exception?", "relevant": ["jira-credential-rotation"]},
+    {"id": "q03", "family": "impact", "query": "What does Production Credential Rotation affect?", "relevant": ["jira-credential-rotation"]},
+    {"id": "q04", "family": "provenance", "query": "Who authored Atomic Token Refresh?", "relevant": ["github-token-refresh"]},
+    {"id": "q05", "family": "governance", "query": "Who reviewed Atomic Token Refresh?", "relevant": ["github-token-refresh"]},
+    {"id": "q06", "family": "structure", "query": "What project is Atomic Token Refresh part of?", "relevant": ["github-token-refresh"]},
+    {"id": "q07", "family": "responsibility", "query": "Who owns Support Operating Model?", "relevant": ["gdrive-operating-model"]},
+    {"id": "q08", "family": "topic", "query": "What is Support Operating Model about?", "relevant": ["gdrive-operating-model"]},
+    {"id": "q09", "family": "governance", "query": "Who approved Data Retention Policy 2026?", "relevant": ["confluence-retention-policy"]},
+    {"id": "q10", "family": "provenance", "query": "What superseded Data Retention Policy 2024?", "relevant": ["confluence-retention-policy"]},
+    {"id": "q11", "family": "responsibility", "query": "Who is responsible for Search Indexing?", "relevant": ["linear-search-index"]},
+    {"id": "q12", "family": "workflow", "query": "What is blocked by Privacy Review?", "relevant": ["linear-search-index"]},
+    {"id": "q13", "family": "responsibility", "query": "Who owns Cache Saturation Incident?", "relevant": ["servicenow-cache-incident"]},
+    {"id": "q14", "family": "impact", "query": "What does Cache Saturation Incident affect?", "relevant": ["servicenow-cache-incident"]},
+    {"id": "q15", "family": "decision", "query": "Who decided Bounded Cache Decision?", "relevant": ["notion-cache-decision"]},
+    {"id": "q16", "family": "evidence", "query": "What is Bounded Cache Decision based on?", "relevant": ["notion-cache-decision"]},
+    {"id": "q17", "family": "provenance", "query": "Who authored Cache Rollout Note?", "relevant": ["slack-architecture-note"]},
+    {"id": "q18", "family": "impact", "query": "What does Payment Remediation Update affect?", "relevant": ["teams-payment-update"]},
+    {"id": "q19", "family": "structure", "query": "What project is Partner Launch Approval part of?", "relevant": ["email-launch-approval"]},
+    {"id": "q20", "family": "contribution", "query": "Who contributed to Revenue Forecast Model?", "relevant": ["analytics-forecast-model"]},
+    {"id": "q21", "family": "evidence", "query": "What is Revenue Forecast Model based on?", "relevant": ["analytics-forecast-model"]},
+    {"id": "q22", "family": "workflow", "query": "What does Vendor Migration depend on?", "relevant": ["partial-vendor-migration"]},
+    {"id": "q23", "family": "governance", "query": "Who reviewed Release Evidence Check?", "relevant": ["duplicate-reviewers"]},
+    {"id": "q24", "family": "responsibility", "query": "Who owns Canonical Policy?", "relevant": ["explicit-profile-precedence"]},
+    {"id": "c01", "family": "generic_control", "query": "How should technical writing begin?", "relevant": ["control-writing"]},
+    {"id": "c02", "family": "generic_control", "query": "What considerations belong in quarterly planning?", "relevant": ["control-planning"]},
+    {"id": "c03", "family": "generic_control", "query": "How should research conclusions retain traceability?", "relevant": ["control-research"]},
+    {"id": "c04", "family": "generic_control", "query": "What makes an incident review useful?", "relevant": ["control-incident"]},
+    {"id": "c05", "family": "generic_control", "query": "What should forecast ranges disclose?", "relevant": ["control-estimation"]}
+  ]
+}

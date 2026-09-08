@@ -128,7 +128,7 @@ class DefaultRerankerService(RerankerService):
         candidate_docs = [documents[idx] for idx in candidate_indices]
 
         # Rerank candidates
-        rerank_scores = await self.provider.rerank(query, candidate_docs, instruction)
+        rerank_scores = await self.rerank(query, candidate_docs, instruction)
 
         # Map back to original indices and sort by rerank score
         results = [(candidate_indices[i], score) for i, score in enumerate(rerank_scores)]

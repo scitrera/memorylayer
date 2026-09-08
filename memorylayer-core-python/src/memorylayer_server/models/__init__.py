@@ -47,9 +47,23 @@ from .graph_analysis import (
     GraphSnapshot,
     GraphStats,
 )
+from .generation import (
+    EnrichmentPolicy,
+    GenerationActivity,
+    GenerationAuthorization,
+    GenerationBudgetExceededError,
+    GenerationLedger,
+    GenerationNotAllowedError,
+    GenerationSummary,
+)
 from .memory import (
     DetailLevel,
     Memory,
+    MemoryMutation,
+    MemoryMutationResult,
+    MemoryReplaceInput,
+    MemoryRevision,
+    MemoryScope,
     MemoryStatus,
     MemorySubtype,
     MemoryType,
@@ -77,10 +91,26 @@ from .workspace import (
     Workspace,
     WorkspaceSettings,
 )
+from .workspace_execution import (
+    ExecutionSite,
+    WorkspaceVCSObservation,
+    WorkspaceView,
+    WorkspaceViewCreateInput,
+    WorkspaceViewKind,
+    WorkspaceViewObservation,
+    WorkspaceViewObservationInput,
+    WorkspaceViewObservationReplaceInput,
+    WorkspaceViewReplaceInput,
+)
 
 __all__ = [
     # Memory models
     "Memory",
+    "MemoryMutation",
+    "MemoryMutationResult",
+    "MemoryReplaceInput",
+    "MemoryRevision",
+    "MemoryScope",
     "MemoryStatus",
     "MemoryType",
     "MemorySubtype",
@@ -107,6 +137,15 @@ __all__ = [
     "WorkspaceSettings",
     "Context",
     "ContextSettings",
+    "ExecutionSite",
+    "WorkspaceViewKind",
+    "WorkspaceView",
+    "WorkspaceViewCreateInput",
+    "WorkspaceViewReplaceInput",
+    "WorkspaceVCSObservation",
+    "WorkspaceViewObservation",
+    "WorkspaceViewObservationInput",
+    "WorkspaceViewObservationReplaceInput",
     # Session models
     "Session",
     "WorkingMemory",
@@ -146,4 +185,12 @@ __all__ = [
     "GraphAnalysis",
     "GraphSnapshot",
     "GraphStats",
+    # Generation policy models
+    "EnrichmentPolicy",
+    "GenerationActivity",
+    "GenerationAuthorization",
+    "GenerationBudgetExceededError",
+    "GenerationLedger",
+    "GenerationNotAllowedError",
+    "GenerationSummary",
 ]

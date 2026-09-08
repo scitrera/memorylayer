@@ -29,6 +29,7 @@ from ...models.graph_analysis import (
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
 from ...services.graph_analysis import EXT_GRAPH_ANALYSIS_SERVICE, GraphAnalysisService
+from ...services.graph_analysis._densify import DensifyConfig
 from .. import EXT_MULTI_API_ROUTERS
 from .deps import get_auth_service, get_authz_service
 from .schemas import ErrorResponse
@@ -65,6 +66,24 @@ class GraphAnalysisRequest(BaseModel):
     workspace_id: str | None = Field(None, description="Workspace ID (overrides auth context)")
     context_id: str | None = Field(None, description="Context filter")
     include_rpg: bool = Field(False, description="Include RPG (code graph) nodes")
+
+
+class DensifyPreviewRequest(BaseModel):
+    """Densify parameters for the POST /v1/graph/densify-preview tuning tool."""
+
+    workspace_id: str | None = Field(None, description="Workspace ID (overrides auth context)")
+    context_id: str | None = Field(None, description="Context filter")
+    cosine_enabled: bool = True
+    cosine_threshold: float = 0.82
+    cosine_k: int = 8
+    cosine_weight: float = 1.0
+    maxsim_enabled: bool = True
+    maxsim_threshold: float = 0.0
+    maxsim_k: int = 8
+    maxsim_weight: float = 1.5
+    entity_enabled: bool = True
+    entity_weight: float = 1.0
+    entity_max_group: int = 50
 
 
 # ── Dependency ───────────────────────────────────────────────────────────────
@@ -112,6 +131,70 @@ async def get_graph_snapshot(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to build graph snapshot",
+        )
+
+
+@router.post(
+    "/densify-preview",
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        501: {"model": ErrorResponse},
+    },
+)
+async def densify_preview(
+    http_request: Request,
+    request: DensifyPreviewRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    graph_service: GraphAnalysisService = Depends(get_graph_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> dict:
+    """Experimental KB graph-densification tuning tool.
+
+    Builds the base association graph and runs community detection (baseline),
+    then applies densification with the supplied parameters to the SAME graph and
+    runs detection again — returning a before/after comparison (community counts,
+    size histogram, weighted modularity) plus the per-signal edge counts. Purely
+    analytical (no writes), so you can sweep densify parameters via repeated calls
+    WITHOUT restarting the service. Heavy (loads vectors + O(N^2) MaxSim) — admin
+    only.
+    """
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        workspace_id = request.workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(ctx, "admin", "read", workspace_id=workspace_id)
+
+        if not hasattr(graph_service, "densify_preview"):
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Configured graph analysis backend does not support densify preview",
+            )
+
+        cfg = DensifyConfig(
+            enabled=True,
+            cosine_enabled=request.cosine_enabled,
+            cosine_threshold=request.cosine_threshold,
+            cosine_k=request.cosine_k,
+            cosine_weight=request.cosine_weight,
+            maxsim_enabled=request.maxsim_enabled,
+            maxsim_threshold=request.maxsim_threshold,
+            maxsim_k=request.maxsim_k,
+            maxsim_weight=request.maxsim_weight,
+            entity_enabled=request.entity_enabled,
+            entity_weight=request.entity_weight,
+            entity_max_group=request.entity_max_group,
+        )
+        return await graph_service.densify_preview(workspace_id, cfg, context_id=request.context_id)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Densify preview failed for workspace: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Densify preview failed",
         )
 
 

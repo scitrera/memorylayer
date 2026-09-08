@@ -1,5 +1,6 @@
 """Default workspace service implementation."""
 
+import re
 from datetime import UTC, datetime
 from logging import Logger
 
@@ -11,6 +12,23 @@ from ...models import Workspace
 from ...models.workspace import Context
 from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from .base import WorkspaceServicePluginBase
+
+# Ids that auto-creation is willing to materialise. Leading underscore is
+# allowed for the reserved workspaces (_default, _global, _global_user).
+#
+# This gates CREATION ONLY -- an existing workspace resolves no matter how it
+# is spelled, so tightening the rule never strands data already in the table.
+# The rule exists because auto-creation turns a caller's typo into a permanent
+# row: production picked up `/workspace` and `/sahara` (a path passed where an
+# id was expected) and `workspace:_global` (a caller that prefixed the id, and
+# whose real target `_global` was created 22ms later). None of those are
+# identifiers anyone chose; all three would have been rejected here.
+_WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+
+
+def is_creatable_workspace_id(workspace_id: str) -> bool:
+    """Whether ``workspace_id`` is well-formed enough to be auto-created."""
+    return bool(workspace_id) and _WORKSPACE_ID_RE.match(workspace_id) is not None
 
 
 class WorkspaceService:
@@ -66,15 +84,25 @@ class WorkspaceService:
         self.logger.debug("Getting workspace: %s", workspace_id)
         return await self._storage.get_workspace(workspace_id)
 
-    async def list_workspaces(self) -> list["Workspace"]:
+    async def list_workspaces(
+        self,
+        *,
+        tags: list[str] | None = None,
+        match: str = "all",
+    ) -> list["Workspace"]:
         """
-        List all workspaces.
+        List workspaces, optionally filtered by tag.
+
+        Args:
+            tags: Optional tag filter. When provided, only workspaces carrying the tag(s)
+                are returned.
+            match: 'all' requires every tag; 'any' requires at least one.
 
         Returns:
-            List of all workspaces
+            List of matching workspaces
         """
-        self.logger.debug("Listing workspaces")
-        return await self._storage.list_workspaces()
+        self.logger.debug("Listing workspaces (tags=%s, match=%s)", tags, match)
+        return await self._storage.list_workspaces(tags=tags, match=match)
 
     async def ensure_workspace(
         self,
@@ -95,6 +123,10 @@ class WorkspaceService:
 
         Returns:
             Workspace if found or created, None if not found and auto_create=False
+
+        Raises:
+            ValueError: If the workspace is missing and its id is too malformed
+                to create (see :func:`is_creatable_workspace_id`).
         """
         self.logger.debug("Ensuring workspace exists: %s", workspace_id)
 
@@ -106,6 +138,13 @@ class WorkspaceService:
         if not auto_create:
             self.logger.debug("Workspace not found and auto_create=False: %s", workspace_id)
             return None
+
+        # Refuse to mint a row for something that isn't an identifier. Raising
+        # (rather than quietly returning None) is deliberate: the caller is
+        # broken, and a silent no-op here would surface downstream as an opaque
+        # foreign-key 500 naming nothing about the workspace.
+        if not is_creatable_workspace_id(workspace_id):
+            raise ValueError(f"cannot auto-create workspace with malformed id: {workspace_id!r}")
 
         # Auto-create workspace
         self.logger.info("Auto-creating workspace: %s", workspace_id)
@@ -163,11 +202,10 @@ class WorkspaceService:
         if not existing:
             return False
 
-        if hasattr(self._storage, "delete_workspace"):
-            await self._storage.delete_workspace(workspace_id)
-        else:
+        deleted = await self._storage.delete_workspace(workspace_id)
+        if not deleted:
             self.logger.warning(
-                "Storage backend does not support delete_workspace; skipping for %s",
+                "Storage backend did not delete existing workspace: %s",
                 workspace_id,
             )
             return False
@@ -194,6 +232,7 @@ class WorkspaceService:
             workspace.id,
             name=workspace.name,
             settings=workspace.settings,
+            tags=workspace.tags,
         )
 
         if not updated:

@@ -38,7 +38,7 @@ from memorylayer_server.services.embedding.base import (
     EmbeddingProviderPluginBase,
     MultimodalEmbeddingProvider,
 )
-from scitrera_app_framework import Variables, get_logger
+from scitrera_app_framework import Variables, get_logger, ext_parse_bool
 
 from .._vllm_runner import VLLMSubprocessRunner
 
@@ -288,24 +288,54 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
         return self._parse_pooling_response(resp.json(), expected_count=len(texts))
 
     @staticmethod
-    def _image_to_data_url(image: str | bytes | Path) -> str:
+    def _sniff_image_mime(head: bytes) -> str:
+        """Detect the image MIME type from magic bytes (default image/png)."""
+        if head.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if head.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return "image/webp"
+        if head[:6] in (b"GIF87a", b"GIF89a"):
+            return "image/gif"
+        if head[:4] in (b"II*\x00", b"MM\x00*"):
+            return "image/tiff"
+        return "image/png"
+
+    @classmethod
+    def _bytes_to_data_url(cls, raw: bytes) -> str:
+        mime = cls._sniff_image_mime(raw[:16])
+        return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+    @classmethod
+    def _image_to_data_url(cls, image: str | bytes | Path) -> str:
         if isinstance(image, str):
             if image.startswith("data:image"):
                 return image
             if image.startswith(("http://", "https://")):
                 return image
-            p = Path(image)
-            if len(image) <= 500 or p.exists():
+            # Only short strings may be a filesystem path; long strings are
+            # base64. Probing Path.exists() on a long base64 string raises
+            # OSError ENAMETOOLONG (Errno 36), so restrict the path check to
+            # plausibly-path-length strings.
+            if len(image) <= 500:
                 try:
-                    raw = p.read_bytes()
-                    return f"data:image/jpeg;base64,{base64.b64encode(raw).decode('ascii')}"
+                    p = Path(image)
+                    if p.exists():
+                        return cls._bytes_to_data_url(p.read_bytes())
                 except (OSError, ValueError):
                     pass
-            return f"data:image/jpeg;base64,{image}"
+            # Raw base64: sniff the MIME from the decoded header (the declared
+            # type matters to strict consumers; lenient ones sniff anyway).
+            try:
+                mime = cls._sniff_image_mime(base64.b64decode(image[:24]))
+            except ValueError:  # binascii.Error subclasses ValueError
+                mime = "image/png"
+            return f"data:{mime};base64,{image}"
         if isinstance(image, bytes):
-            return f"data:image/jpeg;base64,{base64.b64encode(image).decode('ascii')}"
+            return cls._bytes_to_data_url(image)
         if isinstance(image, Path):
-            return f"data:image/jpeg;base64,{base64.b64encode(image.read_bytes()).decode('ascii')}"
+            return cls._bytes_to_data_url(image.read_bytes())
         raise TypeError(f"Unsupported image type: {type(image)!r}")
 
     async def _pooling_image(self, image: str | bytes | Path) -> list[list[float]]:
@@ -453,7 +483,7 @@ class VLLMMultiVectorProviderPlugin(EmbeddingProviderPluginBase):
             enforce_eager=v.environ(
                 MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER,
                 default=DEFAULT_ENFORCE_EAGER,
-                type_fn=lambda s: str(s).lower() in ("true", "1", "yes", "on"),
+                type_fn=ext_parse_bool,
             ),
             architectures=architectures,
             pool_factor=v.environ(

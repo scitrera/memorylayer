@@ -51,11 +51,19 @@ class PrometheusMetricsRoutePlugin(Plugin):
         return EXT_MULTI_API_ROUTERS
 
     def is_enabled(self, v: Variables) -> bool:
-        return v.environ(MEMORYLAYER_METRICS_SERVICE, default="noop") == "prometheus"
+        # MUST be False for a multi-extension router plugin: an enabled plugin
+        # becomes the single-extension winner for EXT_MULTI_API_ROUTERS and
+        # shadows every sibling router (embeddings, chat, score, transcription)
+        # via get_extension(). Gate enablement in is_multi_extension() instead.
+        return False
 
     def is_multi_extension(self, v: Variables) -> bool:
-        return True
+        # Contribute the /metrics router only when the active metrics backend is
+        # Prometheus; otherwise the framework omits this plugin entirely.
+        return v.environ(MEMORYLAYER_METRICS_SERVICE, default="noop") == "prometheus"
 
     def initialize(self, v: Variables, logger: logging.Logger) -> object | None:
+        # Enablement is already decided by is_multi_extension(); just contribute
+        # the router.
         logger.info("Registering Prometheus /metrics route on embed-server")
         return router

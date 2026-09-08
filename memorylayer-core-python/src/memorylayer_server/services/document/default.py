@@ -38,6 +38,7 @@ from .._constants import (
     EXT_STORAGE_BACKEND,
     EXT_TASK_SERVICE,
 )
+from ..ingest.knowledge_work import KNOWLEDGE_WORK_NORMALIZATION_KEY, normalize_connector_metadata
 from ..storage import StorageBackend
 from ..tasks import TaskHandlerPlugin, TaskSchedule, TaskService
 from .base import DocumentService, DocumentServicePluginBase
@@ -62,9 +63,13 @@ class DefaultDocumentService(DocumentService):
 
     @property
     def _max_file_size(self) -> int:
-        return self._v.get(
+        # Coerce to int: the value may have been loaded into Variables as a
+        # string (env vars are strings), which previously caused
+        # ``len(file_data) > max_size`` to raise TypeError (int > str).
+        return self._v.environ(
             MEMORYLAYER_DOCUMENT_MAX_FILE_SIZE,
             default=DEFAULT_MEMORYLAYER_DOCUMENT_MAX_FILE_SIZE,
+            type_fn=int,
         )
 
     async def upload_document(
@@ -531,6 +536,26 @@ class DocumentProcessTaskHandler(TaskHandlerPlugin):
         except Exception as e:
             logger.debug("ExtractionService not available: %s", e)
 
+        # Document/source metadata used to stop at the Document row. Normalize
+        # it once and propagate only the compact relation profile + audit record
+        # to derived memories (not credentials or the entire connector payload).
+        connector_metadata = {
+            **dict(doc.metadata or {}),
+            "filename": doc.filename,
+            "document_id": document_id,
+        }
+        connector_type = str(connector_metadata.get("connector_type") or "document")
+        normalized_document = normalize_connector_metadata(
+            connector_metadata,
+            connector_type=connector_type,
+            record_id=doc.source_vfs_ref or document_id,
+        ).metadata
+        knowledge_work_metadata = {
+            key: normalized_document[key]
+            for key in ("connector_type", "knowledge_work", KNOWLEDGE_WORK_NORMALIZATION_KEY)
+            if key in normalized_document
+        }
+
         for page_idx, (chunk, page) in enumerate(zip(chunks, pages)):
             # Update progress
             progress = int((page_idx + 1) / len(chunks) * 90)  # reserve last 10% for finalization
@@ -543,31 +568,41 @@ class DocumentProcessTaskHandler(TaskHandlerPlugin):
 
             if memory_service is not None:
                 try:
-                    facts = [content]
+                    # Keep fact dicts (not just content strings) so any resolved
+                    # event_time survives to the created memory.
+                    facts: list[dict] = [{"content": content}]
                     if extraction_service is not None:
                         try:
-                            fact_list = await extraction_service.decompose_to_facts(content)
+                            # Write-time temporal normalization: anchor relative
+                            # dates in the page to the document's creation time so
+                            # facts resolve to absolute dates and can surface an
+                            # event_time.
+                            fact_list = await extraction_service.decompose_to_facts(content, reference_time=doc.created_at)
                             if fact_list:
-                                facts = [f["content"] for f in fact_list if f.get("content")]
+                                facts = [f for f in fact_list if f.get("content")]
                         except Exception as e:
                             logger.debug("Fact decomposition failed for page %d: %s", page_idx, e)
 
                     for fact in facts:
-                        if not fact.strip():
+                        fact_content = fact.get("content", "")
+                        if not fact_content.strip():
                             continue
                         try:
                             remember_input = RememberInput(
-                                content=fact,
+                                content=fact_content,
                                 importance=ext_opts.importance,
                                 context_id=ext_opts.target_context_id,
                                 source_document_id=document_id,
                                 source_page_id=page_id,
+                                # Absent/None leaves event_time unset (no overwrite).
+                                event_time=fact.get("event_time"),
                                 metadata={
                                     "source": "document_ingestion",
                                     "document_id": document_id,
                                     "filename": doc.filename,
                                     "document_type": doc.document_type.value,
                                     "page_no": chunk.page_number,
+                                    **knowledge_work_metadata,
                                 },
                             )
                             memory = await memory_service.remember(workspace_id, remember_input)

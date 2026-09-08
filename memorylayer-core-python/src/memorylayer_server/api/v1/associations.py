@@ -25,6 +25,7 @@ from .schemas import (
     AssociationCreateRequest,
     AssociationListResponse,
     AssociationResponse,
+    AssociationUpdateRequest,
     ErrorResponse,
     GraphQueryResult,
     MemoryTraverseRequest,
@@ -213,6 +214,168 @@ async def get_associations(
     except Exception as e:
         logger.error("Failed to get associations for memory %s: %s", memory_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve associations")
+
+
+@router.patch(
+    "/memories/{memory_id}/associations/{association_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        404: {"model": ErrorResponse, "description": "Association not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def update_association(
+    http_request: Request,
+    memory_id: str,
+    association_id: str,
+    request: AssociationUpdateRequest,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    association_service: AssociationService = Depends(get_association_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> None:
+    """
+    Update an association's strength and/or metadata.
+
+    Re-typing an edge (changing its relationship) is not supported — delete and
+    recreate instead. ``memory_id`` scopes the URL to a memory's edge namespace;
+    the association is 404'd unless ``memory_id`` is one of its endpoints
+    (source_id or target_id), enforcing the REST ownership contract.
+    """
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(ctx, "associations", "write", workspace_id=ctx.workspace_id)
+
+        logger.info("Updating association: %s (memory: %s)", association_id, memory_id)
+
+        # Verify memory_id is an endpoint of this association (ownership check).
+        # get_associations is workspace-scoped so this also guards cross-workspace access.
+        owned = await association_service.storage.get_associations(
+            workspace_id=ctx.workspace_id,
+            memory_id=memory_id,
+            direction="both",
+        )
+        if not any(a.id == association_id for a in owned):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Association not found: {association_id}",
+            )
+
+        updated = await association_service.storage.update_association(
+            workspace_id=ctx.workspace_id,
+            association_id=association_id,
+            metadata=request.metadata,
+            strength=request.strength,
+        )
+
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Association not found: {association_id}")
+
+        logger.info("Updated association: %s", association_id)
+        try:
+            await audit_service.record(
+                AuditEvent(
+                    event_type="association",
+                    action="update",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="association",
+                    resource_id=association_id,
+                )
+            )
+        except Exception:
+            logger.debug("Audit record failed for association update")
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.warning("Invalid association update: %s", e)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to update association %s: %s", association_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update association")
+
+
+@router.delete(
+    "/memories/{memory_id}/associations/{association_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        404: {"model": ErrorResponse, "description": "Association not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def delete_association(
+    http_request: Request,
+    memory_id: str,
+    association_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    association_service: AssociationService = Depends(get_association_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> None:
+    """
+    Delete an association (graph edge) by ID.
+
+    ``memory_id`` scopes the URL to a memory's edge namespace; the association is
+    404'd unless ``memory_id`` is one of its endpoints (source_id or target_id),
+    enforcing the REST ownership contract.
+    """
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        await authz_service.require_authorization(ctx, "associations", "delete", workspace_id=ctx.workspace_id)
+
+        logger.info("Deleting association: %s (memory: %s)", association_id, memory_id)
+
+        # Verify memory_id is an endpoint of this association (ownership check).
+        # get_associations is workspace-scoped so this also guards cross-workspace access.
+        owned = await association_service.storage.get_associations(
+            workspace_id=ctx.workspace_id,
+            memory_id=memory_id,
+            direction="both",
+        )
+        if not any(a.id == association_id for a in owned):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Association not found: {association_id}",
+            )
+
+        deleted = await association_service.storage.delete_association(
+            workspace_id=ctx.workspace_id,
+            association_id=association_id,
+        )
+
+        if not deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Association not found: {association_id}")
+
+        logger.info("Deleted association: %s", association_id)
+        try:
+            await audit_service.record(
+                AuditEvent(
+                    event_type="association",
+                    action="delete",
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    resource_type="association",
+                    resource_id=association_id,
+                )
+            )
+        except Exception:
+            logger.debug("Audit record failed for association delete")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete association %s: %s", association_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete association")
 
 
 @router.post(

@@ -1,0 +1,59 @@
+# Single-vector embedding lane — Qwen3-VL-Embedding-2B on vLLM.
+#
+# Used by MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=vllm_sparkrun. Shipped inside
+# the package so the provider works from a plain `pip install` with no registry or
+# cluster configuration; override the path with
+# MEMORYLAYER_EMBEDDING_SPARKRUN_RECIPE to point at your own.
+#
+# The values here are DEFAULTS. The provider overrides host, port,
+# gpu_memory_utilization, max_model_len, dtype and tensor_parallel at launch from
+# the same MEMORYLAYER_EMBEDDING_VLLM_* env vars the vllm_subprocess provider uses,
+# so the two providers stay configured identically.
+#
+# `executor: local` is what makes this usable in-process: sparkrun setsid-launches
+# vllm natively rather than starting a container, so this works inside the
+# embed-server's own container with no docker socket.
+#
+# `--runner pooling --convert embed` are the flags that make vLLM serve pooled
+# embeddings rather than chat completions; they are the reason this is an embedding
+# recipe and must not be dropped.
+
+recipe_version: "2"
+model: Qwen/Qwen3-VL-Embedding-2B
+runtime: vllm
+executor: local
+container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest
+
+metadata:
+  description: memorylayer embed-server single-vector lane (Qwen3-VL-Embedding-2B, vLLM)
+
+defaults:
+  # Loopback: this process is the embed server's private child, not a cluster
+  # service. The provider passes 127.0.0.1 explicitly; this default matches so a
+  # bare `sparkrun run` of the file does not expose it either.
+  host: 127.0.0.1
+  port: 18000
+  dtype: auto
+  tensor_parallel: 1
+  pipeline_parallel: 1
+  gpu_memory_utilization: 0.25
+  max_model_len: 32768
+  max_num_batched_tokens: 8192
+  kv_cache_dtype: auto
+  runner: pooling
+  convert: embed
+
+command: |
+  vllm serve {model} \
+  --host {host} \
+  --port {port} \
+  --dtype {dtype} \
+  -tp {tensor_parallel} \
+  -pp {pipeline_parallel} \
+  --max-model-len {max_model_len} \
+  --max-num-batched-tokens {max_num_batched_tokens} \
+  --trust-remote-code \
+  --gpu-memory-utilization {gpu_memory_utilization} \
+  --kv-cache-dtype {kv_cache_dtype} \
+  --runner {runner} \
+  --convert {convert}

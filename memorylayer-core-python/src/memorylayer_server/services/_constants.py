@@ -151,14 +151,41 @@ EXT_DATA_PROVIDER_SERVICE = "memorylayer-data-provider-service"
 EXT_SKILLS_SERVICE = "memorylayer-skills-service"
 
 # ============================================
+# Internal typed-resource revision authority
+# ============================================
+EXT_VERSIONED_RESOURCE_SERVICE = "memorylayer-versioned-resource-service"
+
+# ============================================
 # Graph Analysis
 # ============================================
 EXT_GRAPH_ANALYSIS_SERVICE = "memorylayer-graph-analysis-service"
 
 # ============================================
+# Graph Query (recall/RAG-facing read seam; P2 Track A)
+# ============================================
+EXT_GRAPH_QUERY_SERVICE = "memorylayer-graph-query-service"
+
+# ============================================
 # Knowledgebase
 # ============================================
 EXT_KNOWLEDGEBASE_SERVICE = "memorylayer-knowledgebase-service"
+
+# ============================================
+# Entity Registry (canonical entity nodes + aliases + members)
+# ============================================
+EXT_ENTITY_REGISTRY_SERVICE = "memorylayer-entity-registry-service"
+# Entity Linker (canonical entity -> external KB, e.g. Wikidata)
+EXT_ENTITY_LINKER_SERVICE = "memorylayer-entity-linker-service"
+
+# ============================================
+# Representation (perspective assembly: what observer O understands about subject S)
+# ============================================
+EXT_REPRESENTATION_SERVICE = "memorylayer-representation-service"
+
+# ============================================
+# API Key Store (pluggable provider-API-key resolution; default reads env)
+# ============================================
+EXT_API_KEY_STORE = "memorylayer-api-key-store"
 
 # ============================================
 # Aether Service connection (shared gRPC client)

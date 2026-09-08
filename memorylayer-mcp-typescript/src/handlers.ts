@@ -32,7 +32,9 @@ export class MCPToolHandlers {
             type: args.type as MemoryType | undefined,
             subtype: args.subtype as MemorySubtype | undefined,
             importance: args.importance as number | undefined,
-            tags: args.tags as string[] | undefined
+            tags: args.tags as string[] | undefined,
+            metadata: args.metadata as Record<string, unknown> | undefined,
+            relations: args.relations as import("@scitrera/memorylayer-sdk").EntityRelationInput[] | undefined,
         });
 
         return JSON.stringify({
@@ -56,7 +58,10 @@ export class MCPToolHandlers {
             types: args.types as MemoryType[] | undefined,
             tags: args.tags as string[] | undefined,
             limit: args.limit as number | undefined,
-            min_relevance: args.min_relevance as number | undefined
+            min_relevance: args.min_relevance as number | undefined,
+            budget_tokens: args.budget_tokens as number | undefined,
+            include_confidence: args.include_confidence as boolean | undefined,
+            include_relations: args.include_relations as boolean | undefined,
         });
 
         const memoriesData = result.memories.map(memory => ({
@@ -75,7 +80,12 @@ export class MCPToolHandlers {
             memories: memoriesData,
             total_count: result.total_count,
             search_latency_ms: result.search_latency_ms,
-            mode_used: result.mode_used
+            mode_used: result.mode_used,
+            retrieval_confidence: result.retrieval_confidence,
+            confidence_reasons: result.confidence_reasons,
+            budget_summary: result.budget_summary,
+            generation_summary: result.generation_summary,
+            relation_paths: result.relation_paths,
         }, null, 2);
     }
 
@@ -415,6 +425,57 @@ export class MCPToolHandlers {
         }, null, 2);
     }
 
+    async handleMemorySessionCheckpoint(args: Record<string, unknown>): Promise<string> {
+        const session = this.requireServerSession();
+        const transcriptSegment = args.transcript_segment as string;
+        const contentHash = args.content_hash as string;
+        const idempotencyKey = args.idempotency_key as string;
+        if (!transcriptSegment || !contentHash || !idempotencyKey) {
+            throw new Error("transcript_segment, content_hash, and idempotency_key are required");
+        }
+        const checkpoint = await this.client.createCheckpoint(session.serverSessionId, {
+            transcript_segment: transcriptSegment,
+            content_hash: contentHash,
+            idempotency_key: idempotencyKey,
+            source_kind: args.source_kind as string | undefined,
+            source_sequence: args.source_sequence as number | undefined,
+            source_boundary: args.source_boundary as number | undefined,
+        });
+        return JSON.stringify({success: true, checkpoint}, null, 2);
+    }
+
+    async handleMemoryContextPack(args: Record<string, unknown>): Promise<string> {
+        const session = this.requireServerSession();
+        const pack = await this.client.getContextPack(session.serverSessionId, {
+            topic: args.topic as string | undefined,
+            entityIds: args.entity_ids as string[] | undefined,
+            entityNames: args.entity_names as string[] | undefined,
+            budgetTokens: args.budget_tokens as number | undefined,
+            sectionLimits: args.section_limits as import("@scitrera/memorylayer-sdk").ContextPackOptions["sectionLimits"],
+            includeDirectives: args.include_directives as boolean | undefined,
+            includeWorkingMemory: args.include_working_memory as boolean | undefined,
+            includeRecentActivity: args.include_recent_activity as boolean | undefined,
+            includeContradictions: args.include_contradictions as boolean | undefined,
+            includeSandboxSummary: args.include_sandbox_summary as boolean | undefined,
+            includeCheckpointRecovery: args.include_checkpoint_recovery as boolean | undefined,
+        });
+        return JSON.stringify({success: true, ...pack}, null, 2);
+    }
+
+    async handleMemoryContextDelta(args: Record<string, unknown>): Promise<string> {
+        const session = this.requireServerSession();
+        const cursor = args.cursor as string;
+        if (!cursor) {
+            throw new Error("cursor is required");
+        }
+        const delta = await this.client.getContextDelta(
+            session.serverSessionId,
+            cursor,
+            args.budget_tokens as number | undefined,
+        );
+        return JSON.stringify({success: true, ...delta}, null, 2);
+    }
+
     // ============================================================================
     // Context Environment Handlers
     // ============================================================================
@@ -423,6 +484,15 @@ export class MCPToolHandlers {
         if (!this.sessionManager.hasActiveSession) {
             throw new Error("No active session. Call memory_session_start first.");
         }
+    }
+
+    private requireServerSession(): {serverSessionId: string} {
+        this.ensureActiveSession();
+        const session = this.sessionManager.currentSession;
+        if (!session?.serverSessionId) {
+            throw new Error("The active session has no server-side session ID");
+        }
+        return {serverSessionId: session.serverSessionId};
     }
 
     async handleMemoryContextExec(args: Record<string, unknown>): Promise<string> {

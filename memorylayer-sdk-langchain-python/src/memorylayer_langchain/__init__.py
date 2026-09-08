@@ -6,7 +6,7 @@ from memorylayer import SyncMemoryLayerClient, sync_client
 from .chat_message_history import MemoryLayerChatMessageHistory
 from .memory import MemoryLayerConversationSummaryMemory, MemoryLayerMemory
 
-__version__ = "0.1.22"
+__version__ = "0.2.0"
 
 __all__ = [
     # LangChain Chat History (LCEL compatible)

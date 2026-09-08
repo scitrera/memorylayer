@@ -57,6 +57,9 @@ Set environment variables to customize:
 # Custom server URL
 export MEMORYLAYER_URL="http://your-server:61001"
 
+# Optional API key for secured MemoryLayer deployments
+export MEMORYLAYER_API_KEY="ml_..."
+
 # Custom workspace (default: auto-detected from git repo)
 export MEMORYLAYER_WORKSPACE_ID="my-project"
 
@@ -68,7 +71,7 @@ export MEMORYLAYER_SESSION_MODE="false"
 
 ### MCP Server
 
-The plugin configures the `@scitrera/memorylayer-mcp-server` which provides these tools:
+The plugin configures the `@scitrera/memorylayer-mcp-server` through `.mcp.json`. It forwards `MEMORYLAYER_URL`, `MEMORYLAYER_API_KEY`, and `MEMORYLAYER_WORKSPACE_ID` from the environment when present. The MCP server provides these tools:
 
 #### Core Memory Tools
 
@@ -123,8 +126,8 @@ Working memory persists within a session and survives context compaction. At ses
 
 | Hook | Trigger | Behavior |
 |------|---------|----------|
-| `PreCompact` | Before context compaction | **Critical** - Stores important information, checkpoints sandbox state, and commits working memory before context is lost |
-| `SessionStart` | Session begins | Loads context briefing, directives, and starts server-side session for workspace resolution |
+| `PreCompact` | Before context compaction | Durably uploads only new raw transcript bytes, then commits working memory and checkpoints sandbox state; failures are reported but do not block compaction |
+| `SessionStart` | Session begins | Starts the server session and loads one bounded context pack; older servers use the briefing/recall compatibility path |
 | `Stop` | Session ends | Commits working memory to long-term storage and ends the server session |
 | `PreToolUse` | Before Task/Edit/Write | Injects recalled context relevant to the operation (query-aware dedup) |
 | `PostToolUse` | After Bash/Edit/Write/Task | Captures outcomes (commit summaries, file changes, new file creation, agent results) |
@@ -149,7 +152,7 @@ With MemoryLayer:
      ↓ context window full
 [PreCompact hook fires]
      ↓
-[Claude stores key information to MemoryLayer]
+[Command hook stores the exact new transcript segment before derived indexing]
      ↓
 [COMPACTION - history truncated]
      ↓
@@ -188,6 +191,10 @@ You can always ask Claude directly:
 - **0.7-0.8** - Bug fixes, architecture decisions
 - **0.5-0.6** - General knowledge, minor features
 - **0.3-0.4** - Temporary notes
+
+## Codex
+
+A matching Codex plugin now lives at `../memorylayer-codex-plugin`. It reuses the same `memorylayer-mcp` command and environment variables, with Codex-specific guidance delivered as a skill instead of Claude Code hooks.
 
 ## Troubleshooting
 

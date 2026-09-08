@@ -1,0 +1,73 @@
+{
+  "bridges": [
+    {
+      "relationship_type": "leads_to",
+      "strength": 0.6
+    },
+    {
+      "relationship_type": "leads_to",
+      "strength": 0.6
+    }
+  ],
+  "central_nodes": [
+    {
+      "betweenness": 0.6,
+      "degree": 2
+    },
+    {
+      "betweenness": 0.6,
+      "degree": 2
+    },
+    {
+      "betweenness": 0.4,
+      "degree": 2
+    },
+    {
+      "betweenness": 0.4,
+      "degree": 2
+    },
+    {
+      "betweenness": 0.0,
+      "degree": 1
+    },
+    {
+      "betweenness": 0.0,
+      "degree": 1
+    }
+  ],
+  "communities": [
+    {
+      "central_node_count": 2,
+      "cohesion_score": 1.0,
+      "label": null,
+      "size": 2
+    },
+    {
+      "central_node_count": 2,
+      "cohesion_score": 1.0,
+      "label": null,
+      "size": 2
+    },
+    {
+      "central_node_count": 2,
+      "cohesion_score": 1.0,
+      "label": null,
+      "size": 2
+    }
+  ],
+  "snapshot": {
+    "context_id": null,
+    "edge_count": 5,
+    "includes_rpg": false,
+    "node_count": 6
+  },
+  "stats": {
+    "avg_degree": 1.67,
+    "community_count": 3,
+    "density": 0.333333,
+    "edge_count": 5,
+    "god_node_count": 0,
+    "max_degree": 2,
+    "node_count": 6
+  }
+}

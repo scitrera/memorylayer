@@ -20,6 +20,8 @@ export interface HookInput {
   session_id?: string;
   /** Transcript context (recent messages) */
   transcript?: TranscriptMessage[];
+  /** Claude Code JSONL transcript path, available to compaction hooks. */
+  transcript_path?: string;
   /** For tool hooks: the tool being used */
   tool_name?: string;
   /** For tool hooks: tool input arguments */
@@ -81,4 +83,6 @@ export interface HookState {
   currentTopic?: string;
   /** User's current prompt text for intent detection */
   currentPrompt?: string;
+  /** Last durably acknowledged transcript byte boundary per server session. */
+  checkpointBoundaries?: Record<string, { transcriptPath: string; boundary: number }>;
 }

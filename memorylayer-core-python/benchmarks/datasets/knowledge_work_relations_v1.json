@@ -1,0 +1,165 @@
+{
+  "name": "MemoryLayer General Knowledge-Work Relations",
+  "version": "1.0.0",
+  "description": "Curated metadata-acquisition and evidence-retrieval cases spanning delivery, operations, policy, research, product, consulting, and organizational work.",
+  "ontology_basis": [
+    "https://www.w3.org/TR/prov-o/",
+    "https://www.w3.org/TR/vocab-org/",
+    "https://www.dublincore.org/specifications/dublin-core/dcmi-terms/",
+    "https://schema.org/Action",
+    "https://schema.org/Role",
+    "https://www.w3.org/TR/activitystreams-core/",
+    "https://www.opmw.org/model/p-plan/",
+    "https://docs.oasis-open.org/oslc-domains/cm/v3.0/cs01/part2-change-mgt-vocab/cm-v3.0-cs01-part2-change-mgt-vocab.html",
+    "https://www.w3.org/TR/owl-time/"
+  ],
+  "records": [
+    {
+      "id": "delivery-charter",
+      "domain": "software_delivery",
+      "content": "Delivery register PM-204 establishes the accountable migration program and its customer-identity scope.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Phoenix Migration", "type": "project", "aliases": ["PM-204"]}, "owner": "Alice Chen", "organization": {"name": "Platform Group", "type": "org"}, "about": "Customer Identity"}},
+      "gold_relations": [["Alice Chen", "Phoenix Migration", "owns"], ["Phoenix Migration", "Platform Group", "part_of"], ["Phoenix Migration", "Customer Identity", "about"]]
+    },
+    {
+      "id": "customer-backfill",
+      "domain": "software_delivery",
+      "content": "Work item BF-17 covers the historical identifier backfill after the security control is accepted.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Customer Backfill", "type": "work_item", "aliases": ["BF-17"]}, "assignee": "Bob Singh", "project": "Phoenix Migration", "depends_on": "Security Sign-off"}},
+      "gold_relations": [["Bob Singh", "Customer Backfill", "responsible_for"], ["Customer Backfill", "Phoenix Migration", "part_of"], ["Customer Backfill", "Security Sign-off", "depends_on"]]
+    },
+    {
+      "id": "incident-handbook",
+      "domain": "operations",
+      "content": "The third edition consolidates escalation, communications, and recovery practices for service incidents.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Incident Response Handbook V3", "type": "artifact"}, "author": "Aisha Rahman", "contributors": ["Mateo Silva", "Lena Ortiz"], "supersedes": {"name": "Incident Response Handbook V2", "type": "artifact"}}},
+      "gold_relations": [["Aisha Rahman", "Incident Response Handbook V3", "authored"], ["Mateo Silva", "Incident Response Handbook V3", "contributed_to"], ["Lena Ortiz", "Incident Response Handbook V3", "contributed_to"], ["Incident Response Handbook V3", "Incident Response Handbook V2", "supersedes"]]
+    },
+    {
+      "id": "retention-policy",
+      "domain": "policy_compliance",
+      "content": "Policy record RP-9 captures the accepted lifecycle rules and the analysis used to justify them.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Data Retention Policy", "type": "artifact", "aliases": ["RP-9"]}, "reviewer": "Tenzin Wang", "approver": "Priya Nair", "based_on": "Regulatory Analysis", "about": "Data Retention"}},
+      "gold_relations": [["Tenzin Wang", "Data Retention Policy", "reviewed"], ["Priya Nair", "Data Retention Policy", "approved"], ["Data Retention Policy", "Regulatory Analysis", "based_on"], ["Data Retention Policy", "Data Retention", "about"]]
+    },
+    {
+      "id": "interview-synthesis",
+      "domain": "product_research",
+      "content": "Research output HZ-R4 synthesizes twelve moderated sessions into themes for the next discovery cycle.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Interview Synthesis", "type": "artifact", "aliases": ["HZ-R4"]}, "author": "Naomi Brooks", "project": "Horizon Project", "based_on": "Interview Notes Set A"}},
+      "gold_relations": [["Naomi Brooks", "Interview Synthesis", "authored"], ["Interview Synthesis", "Horizon Project", "part_of"], ["Interview Synthesis", "Interview Notes Set A", "based_on"]]
+    },
+    {
+      "id": "production-cutover",
+      "domain": "operations",
+      "content": "Release gate CO-88 remains pending until the two prerequisite controls clear; the change freeze is the current constraint.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Production Cutover", "type": "work_item", "aliases": ["CO-88"]}, "owner": {"name": "DevOps Team", "type": "org"}, "depends_on": ["Security Sign-off", "Capacity Review"], "blocked_by": "Change Freeze"}},
+      "gold_relations": [["DevOps Team", "Production Cutover", "owns"], ["Production Cutover", "Security Sign-off", "depends_on"], ["Production Cutover", "Capacity Review", "depends_on"], ["Change Freeze", "Production Cutover", "blocks"]]
+    },
+    {
+      "id": "partner-launch",
+      "domain": "business_operations",
+      "content": "Alliance deliverable PL-31 is queued behind contract review in the current launch plan.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Partner Launch", "type": "work_item", "aliases": ["PL-31"]}, "assignee": "Jordan Kim", "blocked_by": "Legal Review", "project": "Alliance Program"}},
+      "gold_relations": [["Jordan Kim", "Partner Launch", "responsible_for"], ["Legal Review", "Partner Launch", "blocks"], ["Partner Launch", "Alliance Program", "part_of"]]
+    },
+    {
+      "id": "cache-decision",
+      "domain": "architecture",
+      "content": "Architecture decision AD-14 adopts the bounded cache strategy after comparing measured checkout workloads.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Cache Strategy Decision", "type": "decision", "aliases": ["AD-14"]}, "decision_maker": "Noah Williams", "based_on": "Checkout Performance Report", "affects": "Checkout Service"}},
+      "gold_relations": [["Noah Williams", "Cache Strategy Decision", "decided"], ["Cache Strategy Decision", "Checkout Performance Report", "based_on"], ["Cache Strategy Decision", "Checkout Service", "affects"]]
+    },
+    {
+      "id": "capacity-decision",
+      "domain": "architecture",
+      "content": "Capacity decision CD-6 sets the next scaling threshold from the latest controlled load measurements.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Capacity Decision", "type": "decision", "aliases": ["CD-6"]}, "decision_maker": "Samira Patel", "supported_by": "Load Test Results", "affects": "API Gateway"}},
+      "gold_relations": [["Samira Patel", "Capacity Decision", "decided"], ["Load Test Results", "Capacity Decision", "supports"], ["Capacity Decision", "API Gateway", "affects"]]
+    },
+    {
+      "id": "adoption-assumption",
+      "domain": "product_research",
+      "content": "Hypothesis AH-3 remains mixed: the pilot signal is favorable, while the field evidence challenges the expected adoption rate.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Adoption Assumption", "type": "concept", "aliases": ["AH-3"]}, "supported_by": "Pilot Survey", "relations": [{"source": {"name": "Field Study", "type": "artifact"}, "relationship": "contradicts", "target": "$subject"}]}},
+      "gold_relations": [["Pilot Survey", "Adoption Assumption", "supports"], ["Field Study", "Adoption Assumption", "contradicts"]]
+    },
+    {
+      "id": "executive-brief",
+      "domain": "management",
+      "content": "The leadership summary EB-12 consolidates the two operating inputs used for quarterly planning.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Executive Brief", "type": "artifact", "aliases": ["EB-12"]}, "authors": ["Mei Tan"], "references": ["Capacity Study", "Risk Register"]}},
+      "gold_relations": [["Mei Tan", "Executive Brief", "authored"], ["Executive Brief", "Capacity Study", "references"], ["Executive Brief", "Risk Register", "references"]]
+    },
+    {
+      "id": "failover-runbook",
+      "domain": "operations",
+      "content": "Runbook edition RB-3 updates the operational sequence for regional recovery and retires the prior edition.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Failover Runbook V3", "type": "artifact", "aliases": ["RB-3"]}, "author": "Omar Haddad", "supersedes": "Failover Runbook V2", "about": "Regional Failover"}},
+      "gold_relations": [["Omar Haddad", "Failover Runbook V3", "authored"], ["Failover Runbook V3", "Failover Runbook V2", "supersedes"], ["Failover Runbook V3", "Regional Failover", "about"]]
+    },
+    {
+      "id": "team-contribution",
+      "domain": "organizational_work",
+      "content": "The staff profile records an ongoing team affiliation and a material contribution to the shared component library.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Riley Morgan", "type": "person"}, "member_of": "Experience Group", "relations": [{"source": "$subject", "relationship": "contributed_to", "target": {"name": "Design System", "type": "project"}}]}},
+      "gold_relations": [["Riley Morgan", "Experience Group", "member_of"], ["Riley Morgan", "Design System", "contributed_to"]]
+    },
+    {
+      "id": "incident-action",
+      "domain": "incident_management",
+      "content": "Corrective action IA-52 follows the incident review and changes payment-service retry behavior.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Retry Remediation", "type": "work_item", "aliases": ["IA-52"]}, "owner": {"name": "SRE Rotation", "type": "org"}, "assignee": "Jules Martin", "depends_on": "Payment Postmortem", "affects": "Payment Service"}},
+      "gold_relations": [["SRE Rotation", "Retry Remediation", "owns"], ["Jules Martin", "Retry Remediation", "responsible_for"], ["Retry Remediation", "Payment Postmortem", "depends_on"], ["Retry Remediation", "Payment Service", "affects"]]
+    },
+    {
+      "id": "forecast-model",
+      "domain": "analytics",
+      "content": "Model artifact FM-8 uses the governed quarterly dataset and belongs to the finance modernization workstream.",
+      "metadata": {"knowledge_work": {"subject": {"name": "Revenue Forecast Model", "type": "artifact", "aliases": ["FM-8"]}, "author": "Elena García", "contributor": "Victor Huang", "based_on": "Quarterly Revenue Dataset", "project": "Finance Modernization"}},
+      "gold_relations": [["Elena García", "Revenue Forecast Model", "authored"], ["Victor Huang", "Revenue Forecast Model", "contributed_to"], ["Revenue Forecast Model", "Quarterly Revenue Dataset", "based_on"], ["Revenue Forecast Model", "Finance Modernization", "part_of"]]
+    },
+    {"id": "control-writing", "domain": "control", "content": "Clear technical writing starts with the reader's decision and removes details that do not support it.", "metadata": {}},
+    {"id": "control-estimation", "domain": "control", "content": "Forecast ranges should state assumptions, uncertainty, and the date on which the estimate was prepared.", "metadata": {}},
+    {"id": "control-research", "domain": "control", "content": "Interview synthesis groups observations into themes while retaining links to the original evidence.", "metadata": {}},
+    {"id": "control-incident", "domain": "control", "content": "Incident reviews work best when they separate contributing conditions from corrective actions.", "metadata": {}},
+    {"id": "control-planning", "domain": "control", "content": "Quarterly planning balances committed delivery, operational health, and exploratory investments.", "metadata": {}}
+  ],
+  "queries": [
+    {"id": "q01", "family": "responsibility", "query": "Who owns Phoenix Migration?", "relevant": ["delivery-charter"]},
+    {"id": "q02", "family": "structure", "query": "What organization is Phoenix Migration part of?", "relevant": ["delivery-charter"]},
+    {"id": "q03", "family": "topic", "query": "What is Phoenix Migration about?", "relevant": ["delivery-charter"]},
+    {"id": "q04", "family": "responsibility", "query": "Who is assigned to Customer Backfill?", "relevant": ["customer-backfill"]},
+    {"id": "q05", "family": "workflow", "query": "What does Customer Backfill depend on?", "relevant": ["customer-backfill"]},
+    {"id": "q06", "family": "provenance", "query": "Who authored Incident Response Handbook V3?", "relevant": ["incident-handbook"]},
+    {"id": "q07", "family": "contribution", "query": "Who contributed to Incident Response Handbook V3?", "relevant": ["incident-handbook"]},
+    {"id": "q08", "family": "provenance", "query": "What superseded Incident Response Handbook V2?", "relevant": ["incident-handbook"]},
+    {"id": "q09", "family": "governance", "query": "Who reviewed Data Retention Policy?", "relevant": ["retention-policy"]},
+    {"id": "q10", "family": "governance", "query": "Who approved Data Retention Policy?", "relevant": ["retention-policy"]},
+    {"id": "q11", "family": "evidence", "query": "What is Data Retention Policy based on?", "relevant": ["retention-policy"]},
+    {"id": "q12", "family": "structure", "query": "What project is Interview Synthesis part of?", "relevant": ["interview-synthesis"]},
+    {"id": "q13", "family": "workflow", "query": "What does Production Cutover depend on?", "relevant": ["production-cutover"]},
+    {"id": "q14", "family": "workflow", "query": "What is blocked by Change Freeze?", "relevant": ["production-cutover"]},
+    {"id": "q15", "family": "workflow", "query": "What is blocked by Legal Review?", "relevant": ["partner-launch"]},
+    {"id": "q16", "family": "responsibility", "query": "Who is responsible for Partner Launch?", "relevant": ["partner-launch"]},
+    {"id": "q17", "family": "decision", "query": "Who decided Cache Strategy Decision?", "relevant": ["cache-decision"]},
+    {"id": "q18", "family": "impact", "query": "What does Cache Strategy Decision affect?", "relevant": ["cache-decision"]},
+    {"id": "q19", "family": "decision", "query": "Who decided Capacity Decision?", "relevant": ["capacity-decision"]},
+    {"id": "q20", "family": "evidence", "query": "What supports Capacity Decision?", "relevant": ["capacity-decision"]},
+    {"id": "q21", "family": "evidence", "query": "What contradicts Adoption Assumption?", "relevant": ["adoption-assumption"]},
+    {"id": "q22", "family": "provenance", "query": "What does Executive Brief reference?", "relevant": ["executive-brief"]},
+    {"id": "q23", "family": "provenance", "query": "What superseded Failover Runbook V2?", "relevant": ["failover-runbook"]},
+    {"id": "q24", "family": "topic", "query": "What is Failover Runbook V3 about?", "relevant": ["failover-runbook"]},
+    {"id": "q25", "family": "organization", "query": "Who is a member of Experience Group?", "relevant": ["team-contribution"]},
+    {"id": "q26", "family": "contribution", "query": "Who contributed to Design System?", "relevant": ["team-contribution"]},
+    {"id": "q27", "family": "responsibility", "query": "Who owns Retry Remediation?", "relevant": ["incident-action"]},
+    {"id": "q28", "family": "impact", "query": "What does Retry Remediation affect?", "relevant": ["incident-action"]},
+    {"id": "q29", "family": "provenance", "query": "Who authored Revenue Forecast Model?", "relevant": ["forecast-model"]},
+    {"id": "q30", "family": "evidence", "query": "What is Revenue Forecast Model based on?", "relevant": ["forecast-model"]},
+    {"id": "c01", "family": "generic_control", "query": "How should technical writing be made clearer?", "relevant": ["control-writing"]},
+    {"id": "c02", "family": "generic_control", "query": "What should a forecast range disclose?", "relevant": ["control-estimation"]},
+    {"id": "c03", "family": "generic_control", "query": "How are interview observations synthesized?", "relevant": ["control-research"]},
+    {"id": "c04", "family": "generic_control", "query": "What makes an incident review useful?", "relevant": ["control-incident"]},
+    {"id": "c05", "family": "generic_control", "query": "What considerations belong in quarterly planning?", "relevant": ["control-planning"]}
+  ]
+}

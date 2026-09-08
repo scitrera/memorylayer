@@ -1,12 +1,14 @@
 import hashlib
+import time
 from logging import Logger
 from pathlib import Path
 from typing import Any
 
 from scitrera_app_framework import Variables as Variables
-from scitrera_app_framework import get_logger
+from scitrera_app_framework import get_extension, get_logger
 
 from ...utils import cosine_similarity as _cosine_similarity
+from .._constants import EXT_METRICS_SERVICE
 from ..cache import EXT_CACHE_SERVICE
 from .base import (
     EXT_EMBEDDING_PROVIDER,
@@ -31,6 +33,10 @@ class EmbeddingService:
         self.cache = cache
         self.logger = get_logger(v, name=self.__class__.__name__)
         self._is_multimodal = isinstance(provider, MultimodalEmbeddingProvider)
+        try:
+            self.metrics = get_extension(EXT_METRICS_SERVICE, v) if v is not None else None
+        except Exception:
+            self.metrics = None
 
         self.logger.info(
             "Initialized EmbeddingService with provider: %s, dimensions: %s, multimodal: %s",
@@ -38,6 +44,52 @@ class EmbeddingService:
             provider.dimensions,
             self._is_multimodal,
         )
+
+    def _record_model_call(
+        self,
+        modality: str,
+        outcome: str,
+        item_count: int,
+        elapsed_seconds: float,
+    ) -> None:
+        """Record provider work separately from generative model calls."""
+        if self.metrics is None:
+            return
+        labels = {"modality": modality, "outcome": outcome}
+        try:
+            self.metrics.counter("memorylayer_embedding_calls_total", labels=labels)
+            self.metrics.counter(
+                "memorylayer_embedding_inputs_total",
+                item_count,
+                labels=labels,
+            )
+            self.metrics.histogram(
+                "memorylayer_embedding_latency_seconds",
+                elapsed_seconds,
+                labels=labels,
+            )
+        except Exception:
+            self.logger.debug("Embedding metric emission failed", exc_info=True)
+
+    async def _provider_call(self, awaitable, *, modality: str, item_count: int):
+        started = time.monotonic()
+        try:
+            result = await awaitable
+        except Exception:
+            self._record_model_call(
+                modality,
+                "failed",
+                item_count,
+                time.monotonic() - started,
+            )
+            raise
+        self._record_model_call(
+            modality,
+            "completed",
+            item_count,
+            time.monotonic() - started,
+        )
+        return result
 
     @property
     def is_multimodal(self) -> bool:
@@ -58,7 +110,11 @@ class EmbeddingService:
                 return cached
 
         # Generate embedding
-        embedding = await self.provider.embed(text)
+        embedding = await self._provider_call(
+            self.provider.embed(text),
+            modality="text",
+            item_count=1,
+        )
 
         # Cache result
         if self.cache:
@@ -80,7 +136,11 @@ class EmbeddingService:
             )
 
         provider: MultimodalEmbeddingProvider = self.provider
-        return await provider.embed_image(image)
+        return await self._provider_call(
+            provider.embed_image(image),
+            modality="image",
+            item_count=1,
+        )
 
     async def embed_multimodal(self, text: str | None = None, image: str | bytes | Path | None = None) -> list[float]:
         """
@@ -94,7 +154,11 @@ class EmbeddingService:
             return await self.embed(text)
 
         provider: MultimodalEmbeddingProvider = self.provider
-        return await provider.embed_multimodal(text, image)
+        return await self._provider_call(
+            provider.embed_multimodal(text, image),
+            modality="multimodal",
+            item_count=1,
+        )
 
     async def embed_input(self, input: EmbeddingInput) -> list[float]:
         """Generate embedding for EmbeddingInput (convenience method)."""
@@ -102,7 +166,11 @@ class EmbeddingService:
             return await self.embed(input.text)
         elif self._is_multimodal:
             provider: MultimodalEmbeddingProvider = self.provider
-            return await provider.embed_input(input)
+            return await self._provider_call(
+                provider.embed_input(input),
+                modality=input.embedding_type.value,
+                item_count=1,
+            )
         else:
             raise ValueError("Multimodal input requires a multimodal provider")
 
@@ -116,7 +184,11 @@ class EmbeddingService:
         if not valid_texts:
             raise ValueError("No valid texts to embed")
 
-        return await self.provider.embed_batch(valid_texts)
+        return await self._provider_call(
+            self.provider.embed_batch(valid_texts),
+            modality="text_batch",
+            item_count=len(valid_texts),
+        )
 
     @property
     def dimensions(self) -> int:

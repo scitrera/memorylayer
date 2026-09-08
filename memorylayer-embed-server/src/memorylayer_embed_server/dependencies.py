@@ -48,6 +48,15 @@ from .config import (
     DEFAULT_EMBED_SERVER_MULTI_VECTOR_PROVIDER,
     DEFAULT_EMBED_SERVER_SINGLE_VECTOR_PROVIDER,
     DEFAULT_EMBED_SERVER_TRANSCRIPTION_ENABLED,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_ENABLED,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_MAX_TOKENS,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_MODEL,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_CMD,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_GPU_MEM_UTIL,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_MAX_CONCURRENT,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_OVERSUBSCRIBE,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_PORT,
+    DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_STARTUP_TIMEOUT_SEC,
     DEFAULT_EMBED_SERVER_USE_MOCK_PROVIDERS,
     DEFAULT_EMBED_SERVER_USE_MULTI_FOR_SINGLE,
     EMBED_SERVER_DEEPSEEK_OCR_ENABLED,
@@ -80,6 +89,18 @@ from .config import (
     EMBED_SERVER_MULTI_VECTOR_PROVIDER,
     EMBED_SERVER_SINGLE_VECTOR_PROVIDER,
     EMBED_SERVER_TRANSCRIPTION_ENABLED,
+    EMBED_SERVER_UNLIMITED_OCR_ENABLED,
+    EMBED_SERVER_UNLIMITED_OCR_MAX_TOKENS,
+    EMBED_SERVER_UNLIMITED_OCR_MODEL,
+    EMBED_SERVER_UNLIMITED_OCR_NGRAM_SIZE,
+    EMBED_SERVER_UNLIMITED_OCR_PROMPT,
+    EMBED_SERVER_UNLIMITED_OCR_VLLM_CMD,
+    EMBED_SERVER_UNLIMITED_OCR_VLLM_GPU_MEM_UTIL,
+    EMBED_SERVER_UNLIMITED_OCR_VLLM_MAX_CONCURRENT,
+    EMBED_SERVER_UNLIMITED_OCR_VLLM_OVERSUBSCRIBE,
+    EMBED_SERVER_UNLIMITED_OCR_VLLM_PORT,
+    EMBED_SERVER_UNLIMITED_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+    EMBED_SERVER_UNLIMITED_OCR_WINDOW_SIZE,
     EMBED_SERVER_USE_MOCK_PROVIDERS,
     EMBED_SERVER_USE_MULTI_FOR_SINGLE,
 )
@@ -236,6 +257,14 @@ def _setup_transcription_cascade(v: Variables, logger: Logger):
             providers.append(deepseek_provider)
     else:
         logger.info("DeepSeek-OCR-2 provider disabled by MEMORYLAYER_EMBED_DEEPSEEK_OCR_ENABLED=false")
+
+    # Unlimited-OCR (local, ahead of the cloud fallback)
+    if v.environ(EMBED_SERVER_UNLIMITED_OCR_ENABLED, default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_ENABLED, type_fn=ext_parse_bool):
+        unlimited_provider = _init_unlimited_ocr_provider(v, logger)
+        if unlimited_provider is not None:
+            providers.append(unlimited_provider)
+    else:
+        logger.info("Unlimited-OCR provider disabled by MEMORYLAYER_EMBED_UNLIMITED_OCR_ENABLED=false")
 
     # Gemini Flash (fallback - external API)
     if v.environ(EMBED_SERVER_GEMINI_ENABLED, default=DEFAULT_EMBED_SERVER_GEMINI_ENABLED, type_fn=ext_parse_bool):
@@ -406,6 +435,45 @@ def _init_single_vector_provider(v: Variables, logger: Logger, kind: str):
             logger.warning("Failed to initialize Google embedding provider: %s", e)
         return None
 
+    if kind in ("vllm_sparkrun", "sparkrun"):
+        try:
+            from memorylayer_embed_server.services.embedding.vllm_sparkrun import (
+                VLLMSparkrunEmbeddingProviderPlugin,
+            )
+
+            provider = VLLMSparkrunEmbeddingProviderPlugin().initialize(v, logger)
+            logger.info("Single-vector (vLLM via sparkrun, local executor) provider configured")
+            return provider
+        except ImportError as e:
+            logger.error(
+                "sparkrun provider unavailable: %s. Install it with: "
+                'pip install "memorylayer-embed-server[sparkrun]"',
+                e,
+            )
+        except Exception as e:
+            logger.error("Failed to initialize sparkrun vLLM embedding provider: %s", e)
+        return None
+
+    if kind in ("sentence_transformers", "sentence-transformers", "local"):
+        try:
+            from memorylayer_embed_server.services.embedding.sentence_transformers import (
+                SentenceTransformersEmbeddingProviderPlugin,
+            )
+
+            provider = SentenceTransformersEmbeddingProviderPlugin().initialize(v, logger)
+            logger.info("Single-vector (sentence-transformers, local/CPU) provider configured")
+            return provider
+        except ImportError as e:
+            # This is the default provider, so a missing extra is the most likely
+            # first-run failure: name the exact install rather than a traceback.
+            logger.error(
+                'sentence-transformers provider unavailable: %s. Install it with: pip install "memorylayer-embed-server[local]"',
+                e,
+            )
+        except Exception as e:
+            logger.error("Failed to initialize sentence-transformers embedding provider: %s", e)
+        return None
+
     if kind == "mock":
         from .services.embedding.mock_providers import MockSingleVectorProvider
 
@@ -415,7 +483,7 @@ def _init_single_vector_provider(v: Variables, logger: Logger, kind: str):
     logger.warning(
         "Unknown EMBED_SERVER_SINGLE_VECTOR_PROVIDER value: %r — "
         "no single-vector provider will be configured. Valid values: "
-        "vllm, vllm_subprocess, openai, google, colpali, mock.",
+        "sentence_transformers, vllm, vllm_subprocess, vllm_sparkrun, openai, google, colpali, mock.",
         kind,
     )
     return None
@@ -616,6 +684,74 @@ def _init_deepseek_ocr_provider(v: Variables, logger: Logger):
         transport,
     )
     return None
+
+
+def _init_unlimited_ocr_provider(v: Variables, logger: Logger):
+    """Construct the Unlimited-OCR transcription provider.
+
+    vLLM-subprocess only — there is no ``hf`` transport, because the model's
+    serving contract (arch-specific logits processor, fixed prompt recipe,
+    ``skip_special_tokens=False``) is expressed in ``vllm serve`` flags and
+    per-request ``vllm_xargs``.
+    """
+    try:
+        from .services.embedding.vllm_subprocess import (
+            _parse_max_concurrent_env,
+            _parse_oversubscribe_factor_env,
+        )
+        from .services.transcription.vllm_transcription import (
+            UNLIMITED_OCR_NGRAM_SIZE,
+            UNLIMITED_OCR_PROMPT,
+            UNLIMITED_OCR_WINDOW_SIZE,
+            build_unlimited_ocr_vllm_provider,
+        )
+
+        provider = build_unlimited_ocr_vllm_provider(
+            v=v,
+            logger=logger,
+            model_name=v.environ(EMBED_SERVER_UNLIMITED_OCR_MODEL, default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_MODEL),
+            max_tokens=v.environ(
+                EMBED_SERVER_UNLIMITED_OCR_MAX_TOKENS,
+                default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_MAX_TOKENS,
+                type_fn=int,
+            ),
+            port=v.environ(
+                EMBED_SERVER_UNLIMITED_OCR_VLLM_PORT,
+                default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_PORT,
+                type_fn=int,
+            ),
+            gpu_memory_utilization=v.environ(
+                EMBED_SERVER_UNLIMITED_OCR_VLLM_GPU_MEM_UTIL,
+                default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_GPU_MEM_UTIL,
+                type_fn=float,
+            ),
+            startup_timeout_sec=v.environ(
+                EMBED_SERVER_UNLIMITED_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+                default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_STARTUP_TIMEOUT_SEC,
+                type_fn=float,
+            ),
+            cmd=v.environ(EMBED_SERVER_UNLIMITED_OCR_VLLM_CMD, default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_CMD),
+            max_concurrent=_parse_max_concurrent_env(
+                v.environ(
+                    EMBED_SERVER_UNLIMITED_OCR_VLLM_MAX_CONCURRENT,
+                    default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_MAX_CONCURRENT,
+                )
+            ),
+            oversubscribe_factor=_parse_oversubscribe_factor_env(
+                v.environ(
+                    EMBED_SERVER_UNLIMITED_OCR_VLLM_OVERSUBSCRIBE,
+                    default=DEFAULT_EMBED_SERVER_UNLIMITED_OCR_VLLM_OVERSUBSCRIBE,
+                )
+            ),
+            prompt=v.environ(EMBED_SERVER_UNLIMITED_OCR_PROMPT, default=UNLIMITED_OCR_PROMPT),
+            ngram_size=v.environ(EMBED_SERVER_UNLIMITED_OCR_NGRAM_SIZE, default=UNLIMITED_OCR_NGRAM_SIZE, type_fn=int),
+            window_size=v.environ(EMBED_SERVER_UNLIMITED_OCR_WINDOW_SIZE, default=UNLIMITED_OCR_WINDOW_SIZE, type_fn=int),
+        )
+        logger.info("Unlimited-OCR provider configured (transport=vllm_subprocess)")
+        return provider
+    except ImportError as e:
+        logger.warning("Unlimited-OCR vllm-subprocess provider unavailable: %s", e)
+        return None
 
 
 def _setup_llm_service(v: Variables, logger: Logger):

@@ -328,6 +328,65 @@ class TestRecencyBoost:
         assert result_slow[0].boosted_score == pytest.approx(0.707, abs=0.01)
         assert result_slow[0].boosted_score > result_default[0].boosted_score
 
+    def test_recency_keyed_on_created_at_not_updated_at(self):
+        """Recency must key on created_at (effective event time), not updated_at.
+
+        Regression for the recall feedback loop: increment_access bumps
+        updated_at on every recall, so an OLD memory that was just accessed
+        would (under the old updated_at-keyed logic) look fresh and outrank a
+        genuinely newer memory. Here mem_old has an old created_at but a
+        just-now updated_at; mem_new has a recent created_at. The newer-by-
+        creation memory must win.
+        """
+        service = object.__new__(MemoryService)
+
+        now = datetime.now(UTC)
+
+        old_recently_accessed = create_test_memory(
+            "mem_old", boosted_score=0.8, updated_at=now, content="Old but just recalled"
+        )
+        # Force an OLD created_at while keeping the recall-bumped updated_at = now.
+        old_recently_accessed.created_at = now - timedelta(days=60)
+
+        genuinely_newer = create_test_memory(
+            "mem_new", boosted_score=0.8, updated_at=now - timedelta(days=1), content="Genuinely newer"
+        )
+        genuinely_newer.created_at = now - timedelta(days=1)
+
+        memories = [old_recently_accessed, genuinely_newer]
+
+        result = service.apply_recency_boost(
+            memories=memories,
+            recency_weight=0.5,
+            half_life_hours=DEFAULT_RECENCY_HALF_LIFE_HOURS,
+        )
+
+        # The genuinely-newer (by created_at) memory must rank first; the old
+        # memory's recall-bumped updated_at must NOT inflate its recency.
+        assert result[0].id == "mem_new"
+        assert result[1].id == "mem_old"
+        assert result[0].boosted_score > result[1].boosted_score
+
+    def test_recency_keyed_on_event_time_when_present(self):
+        """When event_time is set it takes precedence over created_at for recency."""
+        service = object.__new__(MemoryService)
+
+        now = datetime.now(UTC)
+
+        # created_at recent, but event_time is old -> should decay as old.
+        mem = create_test_memory("mem_evt", boosted_score=1.0, updated_at=now, content="Old event")
+        mem.created_at = now
+        mem.event_time = now - timedelta(hours=168.0)  # exactly one half-life
+
+        result = service.apply_recency_boost(
+            memories=[mem],
+            recency_weight=1.0,
+            half_life_hours=168.0,
+        )
+
+        # age = one half-life via event_time -> recency_factor 0.5 -> score 0.5
+        assert result[0].boosted_score == pytest.approx(0.5, abs=0.01)
+
     def test_preserves_other_memory_fields(self):
         """
         Test that apply_recency_boost only modifies boosted_score.

@@ -37,6 +37,14 @@ class LLMMessage:
     tool_call_id: str | None = None
     # Legacy ``role=function`` name field; rarely needed in modern usage.
     name: str | None = None
+    # Optional attached images for multimodal (vision) requests. Each entry is
+    # either a raw base64-encoded image (assumed PNG) or a full data URI
+    # (``data:image/...;base64,...``). When set, OpenAI-compatible providers
+    # serialize the message ``content`` as the multimodal content-block list
+    # (text block + one ``image_url`` block per image). Providers that do not
+    # support vision ignore this field. Left None for text-only messages so the
+    # existing wire shape is byte-identical.
+    images: list[str] | None = None
 
 
 @dataclass
@@ -78,6 +86,12 @@ class LLMRequest:
     # Provider-specific escape hatch. Caller owns the shape — these kwargs
     # are merged into the provider's SDK call directly.
     extra_body: dict | None = None
+    # Per-request HTTP headers to stamp on the outgoing LLM call (OpenAI-compatible
+    # providers only). Used to carry caller-asserted attribution metadata
+    # (e.g. ``X-Scitrera-Task-Id``) to the MLflow AI Gateway. Merged with the
+    # provider's static default headers; per-request values win on key collision.
+    # Providers without a base_url (anthropic/google) ignore this field.
+    extra_headers: dict[str, str] | None = None
 
 
 @dataclass

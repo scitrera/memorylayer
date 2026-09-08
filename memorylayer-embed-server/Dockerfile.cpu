@@ -1,0 +1,115 @@
+# CPU build of the MemoryLayer Embed Server.
+#
+# Same server, same API, same entrypoint as the CUDA build — it just runs the
+# providers that do not need a GPU:
+#
+#   single-vector : sentence-transformers (all-MiniLM-L6-v2, 384-d) — the server's
+#                   own default provider
+#   multi-vector  : ColPali / ModernVBERT, which runs on CPU (colpali-engine
+#                   auto-selects cpu when CUDA is absent and loads in float32)
+#
+# Deliberately NOT included: `vllm` (GPU-only) and `ocr` (a second large
+# transformers stack). Use the -cuda13 tag for those.
+#
+# This exists because the CUDA image cannot run on a laptop, which left a first-time
+# user with no way to self-host real embeddings — only cloud providers, or the
+# `hash` provider, which is lexical rather than semantic.
+#
+# Published as the UNSUFFIXED tag of the same repository the CUDA build uses:
+#   scitrera/memorylayer-embed-server:<version>            <- this image
+#   scitrera/memorylayer-embed-server:<version>-cuda13     <- GPU build
+
+# ── Stage 0: pull the prebuilt proxy-sidecar binary from upstream ────
+# Kept in parity with the CUDA build so the two images are drop-in swappable:
+# the same entrypoint honours EMBED_SERVER_RUN_SIDECAR either way.
+ARG AETHER_VERSION=latest
+FROM ghcr.io/scitrera/aether:${AETHER_VERSION} AS aether-image
+
+# ── Stage 1: build the venv ──────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+# Empty AETHER_CLIENT_VERSION installs the latest scitrera-aether-client from
+# PyPI; supply a concrete version (e.g. ``0.2.0``) to pin.
+ARG AETHER_CLIENT_VERSION=""
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# uv, for its --torch-backend flag
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN python3 -m venv /opt/memorylayer-embed
+
+# Source packages, relative to the oss/ build context.
+COPY memorylayer-core-python /src/memorylayer-core-python
+COPY memorylayer-embed-server /src/memorylayer-embed-server
+
+# --torch-backend=cpu matters: torch's default PyPI wheels for linux/amd64 bundle
+# CUDA runtime libraries, which would add gigabytes to an image that cannot use
+# them. core-python[all] is pure Python (embeddings/llm/context/documents).
+RUN set -eu; \
+    if [ -n "${AETHER_CLIENT_VERSION}" ]; then \
+        AETHER_PKG="scitrera-aether-client==${AETHER_CLIENT_VERSION}"; \
+    else \
+        AETHER_PKG="scitrera-aether-client"; \
+    fi; \
+    uv pip install --python /opt/memorylayer-embed/bin/python --torch-backend=cpu \
+        "${AETHER_PKG}" \
+        "/src/memorylayer-core-python[all]" \
+        "/src/memorylayer-embed-server[local,colpali,google,observability]"
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 65532 memorylayer && \
+    useradd --uid 65532 --gid memorylayer --create-home memorylayer && \
+    # Pre-create the cache tree so a mounted HF cache volume lands inside an
+    # existing memorylayer-owned .cache rather than a root-owned one synthesized
+    # by docker — otherwise the model download hits EPERM on first run.
+    mkdir -p /home/memorylayer/.cache/huggingface && \
+    chown -R memorylayer:memorylayer /home/memorylayer && \
+    chmod 0755 /home/memorylayer/.cache
+
+COPY --from=builder /opt/memorylayer-embed /opt/memorylayer-embed
+ENV PATH="/opt/memorylayer-embed/bin:$PATH" \
+    VIRTUAL_ENV="/opt/memorylayer-embed"
+
+COPY --from=aether-image /usr/local/bin/proxy-sidecar /usr/local/bin/proxy-sidecar
+
+COPY --chown=memorylayer:memorylayer memorylayer-embed-server/configs/proxy-sidecar.default.yaml /etc/aether-sidecar.yaml
+COPY --chown=memorylayer:memorylayer --chmod=0755 memorylayer-embed-server/scripts/entrypoint.sh /usr/local/bin/embed-server-entrypoint.sh
+
+WORKDIR /app
+USER memorylayer
+
+# The multi-vector default is vllm_subprocess, which needs a GPU. Point it at the
+# in-process ColPali provider and pin both model devices to CPU, so this image is
+# correct out of the box rather than only after the operator finds three env vars.
+ENV MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER=colpali_inprocess \
+    MEMORYLAYER_EMBEDDING_DEVICE=cpu \
+    MEMORYLAYER_EMBEDDING_ST_DEVICE=cpu
+
+EXPOSE 61051
+
+# start-period is generous: the first run downloads model weights (~90 MB for
+# MiniLM, ~250 MB for ColPali) before the server can answer.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
+    CMD curl -f http://localhost:61051/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/embed-server-entrypoint.sh"]

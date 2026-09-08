@@ -6,6 +6,8 @@ from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
 from ...models.llm import LLMMessage, LLMRequest, LLMResponse, LLMRole, LLMStreamChunk
+from ..api_key_store import resolve_api_key_ref
+from .attribution import task_attribution_headers
 from .base import LLMProvider
 
 DEFAULT_LLM_OPENAI_MODEL = "gpt-5-nano"
@@ -28,6 +30,17 @@ def _message_to_openai_dict(msg: LLMMessage) -> dict:
         # OpenAI accepts content=null on assistant messages that only
         # request tool calls; sending "" is also accepted.
         out["content"] = msg.content if msg.content else None
+    elif getattr(msg, "images", None):
+        # Multimodal (vision) message: serialize as the OpenAI content-block
+        # list — a text block followed by one ``image_url`` block per image.
+        # Each image is either a raw base64 string (assumed PNG) or an already
+        # formed ``data:`` URI. Used by the image-backed fact-decomposition
+        # path (scanned/OCR-free document pages) against vision-capable models.
+        blocks: list[dict] = [{"type": "text", "text": msg.content or ""}]
+        for img in msg.images:
+            uri = img if img.startswith("data:") else f"data:image/png;base64,{img}"
+            blocks.append({"type": "image_url", "image_url": {"url": uri}})
+        out["content"] = blocks
     else:
         out["content"] = msg.content or ""
     if msg.tool_call_id is not None:
@@ -75,36 +88,98 @@ class OpenAILLMProvider(LLMProvider):
     OpenAI-compatible endpoint by configuring the base URL.
     """
 
+    # Default key name resolved from the API key store when no literal
+    # ``api_key`` is given and no per-profile override is configured.
+    DEFAULT_API_KEY_NAME = "OPENAI_API_KEY"
+
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         base_url: str = None,
         model: str = DEFAULT_LLM_OPENAI_MODEL,
         default_max_tokens: int | None = None,
         default_temperature: float | None = None,
+        api_key_name: str | None = None,
+        api_key_store=None,
+        default_extra_body: dict | None = None,
+        default_reasoning_effort: str | None = None,
+        default_headers: dict[str, str] | None = None,
+        stamp_identity: bool = False,
         v: Variables = None,
     ):
-        self.api_key = api_key
+        # ``api_key`` (literal) wins and skips the store; otherwise resolve the
+        # key by name through the store on each use (picks up rotations).
+        self.api_key, self._key_ref = resolve_api_key_ref(
+            api_key=api_key,
+            api_key_name=api_key_name,
+            api_key_store=api_key_store,
+            default_name=self.DEFAULT_API_KEY_NAME,
+        )
         self.base_url = base_url
         self.model = model
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
+        # Provider-level extra_body merged into every request (per-request
+        # extra_body wins on key conflicts). Used e.g. to send
+        # {"enable_thinking": false} to a reasoning model for the whole profile.
+        self.default_extra_body = default_extra_body or None
+        # Provider-level reasoning_effort default (per-request wins). "none"
+        # turns off thinking for reasoning models like Fireworks qwen3 (the
+        # hosted endpoint rejects enable_thinking/chat_template_kwargs, but
+        # honors reasoning_effort).
+        self.default_reasoning_effort = default_reasoning_effort or None
+        # Whether this endpoint may receive caller-asserted identity headers.
+        # Decided by the registry from the host allowlist (see
+        # attribution.host_allows_identity) because only the registry knows the
+        # configured policy. Defaults to False so a provider constructed directly
+        # — in a test, a script, or future code — cannot leak identity by omission.
+        self.stamp_identity = bool(stamp_identity)
+        # Static per-client HTTP headers (e.g. caller-asserted attribution:
+        # X-Scitrera-Source / X-Scitrera-Tenant) installed on the AsyncOpenAI
+        # client and sent on every request. Per-request headers (from
+        # request.extra_headers / the ambient task attribution) are merged on
+        # top at call time — see _build_kwargs.
+        #
+        # Held behind the same gate as the task header: passing headers without
+        # permission to stamp is a caller error, so they are dropped rather than
+        # quietly sent.
+        self.default_headers = (default_headers or None) if self.stamp_identity else None
         self._client = None
+        self._client_key = None
         self.logger = get_logger(v, name=self.__class__.__name__)
         self.logger.info("Initialized OpenAILLMProvider: base_url=%s, model=%s", base_url, model)
 
-    def _get_client(self):
-        """Lazy-load OpenAI async client."""
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
+    def _build_client(self, api_key):
+        """Construct an OpenAI async client for ``api_key``."""
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("openai package not installed. Install with: pip install openai")
+        client_kwargs: dict = {"api_key": api_key, "base_url": self.base_url}
+        if self.default_headers:
+            client_kwargs["default_headers"] = self.default_headers
+        return AsyncOpenAI(**client_kwargs)
 
-                self._client = AsyncOpenAI(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                )
-            except ImportError:
-                raise ImportError("openai package not installed. Install with: pip install openai")
+    def _get_client(self):
+        """Lazy-load OpenAI async client from the static key (no store)."""
+        if self._client is None:
+            self._client = self._build_client(self.api_key)
+            self._client_key = self.api_key
+        return self._client
+
+    async def _ensure_client(self):
+        """Return a client built with the currently-resolved key.
+
+        Static key path returns the cached client. When a key store is bound,
+        the key is resolved per call and the client is rebuilt only when the
+        resolved key changes (supports rotation).
+        """
+        if self._key_ref is None:
+            return self._get_client()
+        key = await self._key_ref.resolve()
+        if self._client is None or key != self._client_key:
+            self._client = self._build_client(key)
+            self._client_key = key
         return self._client
 
     def _build_kwargs(self, request: LLMRequest, *, stream: bool) -> dict:
@@ -129,15 +204,35 @@ class OpenAILLMProvider(LLMProvider):
             kwargs["tool_choice"] = request.tool_choice
         if request.response_format is not None:
             kwargs["response_format"] = request.response_format
-        if request.reasoning_effort is not None:
-            kwargs["reasoning_effort"] = request.reasoning_effort
-        if request.extra_body is not None:
-            kwargs["extra_body"] = request.extra_body
+        effective_reasoning = request.reasoning_effort if request.reasoning_effort is not None else self.default_reasoning_effort
+        if effective_reasoning is not None:
+            kwargs["reasoning_effort"] = effective_reasoning
+        # Merge provider-level default extra_body with any per-request extra_body
+        # (request keys win). Lets a profile disable thinking globally while a
+        # specific call can still override.
+        if self.default_extra_body is not None or request.extra_body is not None:
+            kwargs["extra_body"] = {**(self.default_extra_body or {}), **(request.extra_body or {})}
+        # Per-request attribution headers: the ambient task header
+        # (X-Scitrera-Task-Id, set while a task handler runs) merged with any
+        # explicit request.extra_headers (explicit request keys win). Passed as
+        # ``extra_headers`` so the OpenAI SDK sends them on top of the client's
+        # static default_headers (X-Scitrera-Source / X-Scitrera-Tenant). Only
+        # set when non-empty so the wire shape is unchanged for plain calls.
+        #
+        # The task header is gated on the SAME allowlist decision as the static
+        # ones: it is an internal identifier, and gating only the static set would
+        # still hand every public provider a running trace of our task ids.
+        # request.extra_headers is NOT gated — that is an explicit per-call choice
+        # by the caller, not ambient identity this module asserts.
+        ambient = task_attribution_headers() if self.stamp_identity else {}
+        extra_headers = {**ambient, **(request.extra_headers or {})}
+        if extra_headers:
+            kwargs["extra_headers"] = extra_headers
         return kwargs
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Generate completion using OpenAI API."""
-        client = self._get_client()
+        client = await self._ensure_client()
         kwargs = self._build_kwargs(request, stream=False)
         self.logger.debug(
             "LLM request: model=%s, messages=%d, tools=%s",
@@ -169,7 +264,7 @@ class OpenAILLMProvider(LLMProvider):
 
     async def complete_stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
         """Generate streaming completion using OpenAI API."""
-        client = self._get_client()
+        client = await self._ensure_client()
         kwargs = self._build_kwargs(request, stream=True)
 
         stream = await client.chat.completions.create(**kwargs)

@@ -3,6 +3,8 @@
 import re
 
 from ...models.graph_analysis import Bridge, CentralNode, Community, GraphStats
+from .linkcheck import LinkIndex
+from .mermaid import build_community_flowchart
 
 
 class ObsidianRenderer:
@@ -23,6 +25,7 @@ class ObsidianRenderer:
         communities: list[Community],
         god_nodes: list[CentralNode],
         node_titles: dict[str, str] | None = None,
+        link_index: LinkIndex | None = None,
     ) -> str:
         """Render the workspace index article.
 
@@ -32,12 +35,22 @@ class ObsidianRenderer:
             communities: List of detected communities
             god_nodes: Central nodes with high degree/betweenness
             node_titles: Optional mapping of memory_id -> display title for god nodes
+            link_index: Articles this run produced; entries without one render as
+                plain text rather than as a dangling link
 
         Returns:
             Markdown string for ``index.md``
         """
         node_titles = node_titles or {}
         lines: list[str] = []
+
+        # OKF v0.1: the bundle-root index is the ONE place an index may carry
+        # frontmatter, and only to declare the format version (§11). This makes the
+        # exported vault a self-describing, conformant Open Knowledge Format bundle.
+        lines.append("---")
+        lines.append('okf_version: "0.1"')
+        lines.append("---")
+        lines.append("")
 
         lines.append(f"# {workspace_name}")
         lines.append("")
@@ -64,8 +77,7 @@ class ObsidianRenderer:
             lines.append("")
             for community in communities:
                 label = community.label or f"Community {community.id}"
-                slug = f"community-{community.id}"
-                link = self.wikilink(f"communities/{slug}", label)
+                link = self.community_link(link_index, community.id, label)
                 lines.append(f"- {link} — {community.size} memories")
             lines.append("")
 
@@ -77,8 +89,7 @@ class ObsidianRenderer:
             lines.append("")
             for node in god_nodes:
                 title = node_titles.get(node.memory_id, node.memory_id[:16])
-                slug = self.slugify(title)
-                link = self.wikilink(f"entities/{slug}", title)
+                link = self.entity_link(link_index, node.memory_id, title)
                 lines.append(f"- {link} (degree: {node.degree}, community: {node.community_id})")
             lines.append("")
 
@@ -91,6 +102,7 @@ class ObsidianRenderer:
         members: list[dict],
         bridges: list[Bridge],
         source_docs: list[str] | None = None,
+        link_index: LinkIndex | None = None,
     ) -> str:
         """Render a community article.
 
@@ -123,10 +135,19 @@ class ObsidianRenderer:
         if members:
             lines.append("## Key Memories")
             lines.append("")
-            for mem in members[:10]:
-                content_preview = (mem.get("content") or "")[:120].replace("\n", " ")
+            # Numbered to match the [m<n>] references in the Summary (skip empties +
+            # number consecutively, exactly as the summary's member block does).
+            shown = 0
+            for mem in members:
+                content = (mem.get("content") or "").strip()
+                if not content:
+                    continue
+                shown += 1
+                if shown > 10:
+                    break
                 mem_type = mem.get("type", "memory")
-                lines.append(f"- **[{mem_type}]** {content_preview}")
+                content_preview = content[:120].replace("\n", " ")
+                lines.append(f"- **[m{shown}]** _[{mem_type}]_ {content_preview}")
             lines.append("")
 
         # Cross-community bridges
@@ -134,14 +155,26 @@ class ObsidianRenderer:
             lines.append("## Connections to Other Communities")
             lines.append("")
             seen_communities: set[int] = set()
+            neighbours: list[tuple[int, str, str, float]] = []
             for bridge in bridges:
                 other_id = bridge.target_community_id if bridge.source_community_id == community.id else bridge.source_community_id
                 if other_id not in seen_communities:
                     seen_communities.add(other_id)
-                    other_slug = f"community-{other_id}"
-                    link = self.wikilink(f"communities/{other_slug}", f"Community {other_id}")
+                    other_label = f"Community {other_id}"
+                    link = self.community_link(link_index, other_id, other_label)
                     lines.append(f"- {link} via `{bridge.relationship_type}` (strength: {bridge.strength:.2f})")
+                    neighbours.append(
+                        (other_id, other_label, bridge.relationship_type, bridge.strength)
+                    )
             lines.append("")
+
+            # The bullets above are the complete record; this shows its shape. Omitted
+            # entirely if the assembled diagram does not validate -- a broken fence
+            # renders as an error block, which is worse than no picture.
+            diagram = build_community_flowchart(community.id, label, neighbours)
+            if diagram:
+                lines.append(diagram)
+                lines.append("")
 
         # Source documents
         if source_docs:
@@ -161,6 +194,7 @@ class ObsidianRenderer:
         connections: list[dict],
         community: Community | None,
         source_memories: list[dict],
+        link_index: LinkIndex | None = None,
     ) -> str:
         """Render an entity deep-dive article.
 
@@ -182,8 +216,9 @@ class ObsidianRenderer:
         lines.append(f"**Entity ID:** `{entity_id}`")
         if community is not None:
             community_label = community.label or f"Community {community.id}"
-            community_slug = f"community-{community.id}"
-            lines.append(f"**Community:** {self.wikilink(f'communities/{community_slug}', community_label)}")
+            lines.append(
+                f"**Community:** {self.community_link(link_index, community.id, community_label)}"
+            )
         lines.append("")
 
         # Entity insights
@@ -209,21 +244,29 @@ class ObsidianRenderer:
                 lines.append(f"### {rel.replace('_', ' ').title()}")
                 lines.append("")
                 for conn in conns[:10]:
-                    target_display = conn.get("target_title") or conn.get("target_id", "")[:16]
-                    target_slug = self.slugify(target_display)
+                    target_id = conn.get("target_id", "")
+                    target_display = conn.get("target_title") or target_id[:16]
                     strength = conn.get("strength", 0.0)
-                    link = self.wikilink(f"entities/{target_slug}", target_display)
+                    link = self.entity_link(link_index, target_id, target_display)
                     lines.append(f"- {link} (strength: {strength:.2f})")
                 lines.append("")
 
-        # Source memories
+        # Source memories — numbered to match the [m<n>] references in the summary
+        # (skip empties + number consecutively, exactly as the member block does).
         if source_memories:
             lines.append("## Source Memories")
             lines.append("")
-            for mem in source_memories[:10]:
-                content_preview = (mem.get("content") or "")[:200].replace("\n", " ")
+            shown = 0
+            for mem in source_memories:
+                content = (mem.get("content") or "").strip()
+                if not content:
+                    continue
+                shown += 1
+                if shown > 10:
+                    break
                 mem_type = mem.get("type", "memory")
-                lines.append(f"- **[{mem_type}]** {content_preview}")
+                content_preview = content[:200].replace("\n", " ")
+                lines.append(f"- **[m{shown}]** _[{mem_type}]_ {content_preview}")
             lines.append("")
 
         return "\n".join(lines)
@@ -251,6 +294,31 @@ class ObsidianRenderer:
         slug = slug.strip("-")
         return slug or "unknown"
 
+    def maybe_wikilink(self, target: str | None, display: str) -> str:
+        """A wikilink when ``target`` resolves, otherwise plain display text.
+
+        The renderer knows a reference exists (a bridge, an association) but not
+        whether an ARTICLE was produced for it — capped runs and filtered
+        communities mean many referenced things have no page. Emitting a link
+        anyway produces a dangling reference, so an unresolved target degrades to
+        text: the relationship is still shown, it just isn't clickable.
+        """
+        if not target:
+            return display
+        return self.wikilink(target, display)
+
+    def community_link(self, link_index: LinkIndex | None, community_id: int, display: str) -> str:
+        """Link to a community article if this run produced one."""
+        return self.maybe_wikilink(
+            link_index.community_path(community_id) if link_index else None, display
+        )
+
+    def entity_link(self, link_index: LinkIndex | None, key: str | None, display: str) -> str:
+        """Link to an entity article if this run produced one for ``key``."""
+        return self.maybe_wikilink(
+            link_index.entity_path(key) if link_index else None, display
+        )
+
     def wikilink(self, target: str, display: str | None = None) -> str:
         """Format an Obsidian wikilink.
 
@@ -264,3 +332,44 @@ class ObsidianRenderer:
         if display and display != target:
             return f"[[{target}|{display}]]"
         return f"[[{target}]]"
+
+    def render_frontmatter(self, fields: dict) -> str:
+        """Render a leading YAML frontmatter block (Obsidian properties).
+
+        ``fields`` values may be scalars (str/int/float/bool) or lists of scalars;
+        ``None`` values and empty lists are skipped. Returns ``""`` when there is
+        nothing to render (so callers can unconditionally prepend it). Keys are
+        emitted in insertion order.
+        """
+        if not fields:
+            return ""
+        lines = ["---"]
+        for key, value in fields.items():
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                items = [self._yaml_scalar(v) for v in value if v is not None]
+                if not items:
+                    continue
+                lines.append(f"{key}: [{', '.join(items)}]")
+            else:
+                lines.append(f"{key}: {self._yaml_scalar(value)}")
+        if len(lines) == 1:  # only the opening '---' — nothing emitted
+            return ""
+        lines.append("---")
+        lines.append("")
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _yaml_scalar(value) -> str:
+        """Format a scalar for YAML, quoting strings that need it."""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return str(value)
+        s = str(value)
+        # Quote when the string carries YAML-significant characters or leading/
+        # trailing space; escape embedded double quotes.
+        if s == "" or s != s.strip() or any(c in s for c in ':#[]{},&*!|>\'"%@`') or s[0] in "-?":
+            return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        return s

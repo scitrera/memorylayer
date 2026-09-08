@@ -174,3 +174,4 @@ def test_oss_known_subtypes_has_skill():
 
     assert "skill" in OSS_KNOWN_SUBTYPES["*"]
     assert "skill_reference" in OSS_KNOWN_SUBTYPES["*"]
+    assert "skill_addendum" in OSS_KNOWN_SUBTYPES["*"]

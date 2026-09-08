@@ -36,7 +36,7 @@ from memorylayer_server.services.embedding.base import (
     EmbeddingProviderPluginBase,
     MultimodalEmbeddingProvider,
 )
-from scitrera_app_framework import Variables, get_logger
+from scitrera_app_framework import Variables, get_logger, ext_parse_bool
 
 from .._vllm_runner import VLLMSubprocessRunner
 
@@ -100,7 +100,17 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
         cmd: str = DEFAULT_VLLM_SUBPROCESS_CMD,
         max_concurrent: int | None = None,
         oversubscribe_factor: float = 1.0,
+        runner: "VLLMSubprocessRunner | None" = None,
     ):
+        """
+        Args:
+            runner: Process-lifecycle backend. Defaults to spawning ``vllm serve``
+                ourselves. Everything this class does above the process — the
+                OpenAI-compatible client, batching, image handling, dimension
+                truncation — is backend-agnostic, so an alternative launcher
+                (see ``_sparkrun_runner``) is injected here rather than by
+                duplicating the provider.
+        """
         super().__init__(v, output_dimensions=output_dimensions)
         self.model_name = model_name
         self.dtype = dtype
@@ -116,7 +126,7 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
 
         self.logger = get_logger(v, name=self.__class__.__name__)
 
-        self._runner = VLLMSubprocessRunner(
+        self._runner = runner or VLLMSubprocessRunner(
             role="embedding",
             model_name=model_name,
             host=host,
@@ -394,7 +404,7 @@ class VLLMSubprocessEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
             enforce_eager=v.environ(
                 MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER,
                 default=DEFAULT_ENFORCE_EAGER,
-                type_fn=lambda s: str(s).lower() in ("true", "1", "yes", "on"),
+                type_fn=ext_parse_bool,
             ),
             host=v.environ(
                 MEMORYLAYER_EMBEDDING_VLLM_SUBPROCESS_HOST,

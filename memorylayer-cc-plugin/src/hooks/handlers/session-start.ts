@@ -5,7 +5,7 @@
 
 import type { Memory } from "@scitrera/memorylayer-mcp-server";
 import type {HookInput, HookOutput} from "../types.js";
-import {getClient, checkHealth} from "../client.js";
+import {getClient} from "../client.js";
 import {formatSessionStart} from "../formatters.js";
 import {markRecallDone} from "../state.js";
 
@@ -52,19 +52,30 @@ async function checkSandboxState(client: ReturnType<typeof getClient>): Promise<
  * Handle SessionStart event
  */
 export async function handleSessionStart(input: HookInput): Promise<HookOutput> {
-    // Check if server is reachable
-    const healthy = await checkHealth();
-    if (!healthy) {
-        return {
-            success: true,
-            additionalContext: "MemoryLayer server not reachable. Memory features unavailable this session.",
-        };
-    }
-
     try {
         const client = getClient();
 
-        // Run briefing, directive recall, and sandbox check in parallel
+        const topic = extractTopic(input);
+        const sessionId = client.getSessionId();
+        if (sessionId) {
+            try {
+                const pack = await client.getContextPack(sessionId, {
+                    topic,
+                    budgetTokens: 2048,
+                    includeSandboxSummary: true,
+                    includeCheckpointRecovery: true,
+                });
+                if (topic) markRecallDone(topic);
+                return {
+                    success: true,
+                    additionalContext: `${pack.rendered}\n\nMemoryLayer context cursor: ${pack.cursor}`,
+                };
+            } catch (error) {
+                console.error("[session-start] context pack unavailable; using compatibility retrieval:", error instanceof Error ? error.message : error);
+            }
+        }
+
+        // Compatibility path for servers that do not yet expose context packs.
         const [briefingResult, directiveResult, sandboxResult] = await Promise.allSettled([
             client.getBriefing({ limit: 10, includeMemories: false }),
             client.recall({
@@ -83,7 +94,6 @@ export async function handleSessionStart(input: HookInput): Promise<HookOutput> 
         const sandboxState = sandboxResult.status === "fulfilled" ? sandboxResult.value : null;
 
         // If there's a topic in the transcript, recall for it too
-        const topic = extractTopic(input);
         let topicRecall = null;
 
         if (topic) {

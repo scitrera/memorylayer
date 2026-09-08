@@ -41,6 +41,9 @@ class CentralNode(BaseModel):
     """A node with high centrality in the association graph ('god node')."""
 
     memory_id: str
+    label: str | None = Field(
+        None, description="Short human-readable snippet (memory abstract/content) for display"
+    )
     degree: int = Field(0, description="Number of direct connections")
     betweenness: float = Field(0.0, description="Betweenness centrality score")
     community_id: int = Field(-1, description="Community this node belongs to")

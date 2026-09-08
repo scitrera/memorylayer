@@ -45,12 +45,36 @@ def serve(host: str, port: int):
     # get FastAPI app instance
     app = fastapi_app_factory(v)
 
+    # Bound uvicorn's graceful-shutdown wait (default = infinite, which prints
+    # "Waiting for background tasks to complete" and hangs until the k8s
+    # termination grace SIGKILLs the pod -> exit 137). Keep this UNDER the pod's
+    # terminationGracePeriodSeconds (30s) so shutdown always completes cleanly.
+    shutdown_grace_s = v.environ("MEMORYLAYER_SHUTDOWN_GRACE_S", default=20, type_fn=int)
+
     click.echo(f"Starting memorylayer.ai server on {host}:{port}")
+    # Collapse k8s probe access lines into a periodic rollup. Probes otherwise
+    # monopolise the access log (measured: 596 of 600 lines), which hid the
+    # callers during a live incident. Must go through log_config -- uvicorn
+    # runs dictConfig at startup and would discard a pre-installed filter.
+    # 0 disables the summary and drops probe lines silently.
+    from memorylayer_server.access_log import (
+        DEFAULT_PROBE_ROLLUP_SECONDS,
+        build_uvicorn_log_config,
+    )
+
+    probe_rollup_s = v.environ(
+        "MEMORYLAYER_ACCESS_LOG_PROBE_ROLLUP_S",
+        default=DEFAULT_PROBE_ROLLUP_SECONDS,
+        type_fn=int,
+    )
+
     uvicorn.run(
         app,
         host=host,
         port=port,
         reload=False,
+        timeout_graceful_shutdown=shutdown_grace_s,
+        log_config=build_uvicorn_log_config(probe_rollup_s),
     )
 
 

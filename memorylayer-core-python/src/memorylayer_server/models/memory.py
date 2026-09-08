@@ -4,11 +4,16 @@ Memory domain models for MemoryLayer.ai.
 Defines cognitive types, domain subtypes, and core memory data structures.
 """
 
+import re
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator
+
+from .context_pack import BudgetSummary
+from .entity_relation import EntityRelationInput, EntityRelationPath, EntityRelationWriteResult
+from .generation import GenerationSummary
 
 
 class MemoryType(str, Enum):
@@ -42,6 +47,10 @@ class MemorySubtype(str, Enum):
     # v3 additions for entity attribution and inference
     INFERENCE = "inference"  # Derived insight/conclusion from patterns across memories
 
+    # Fact channel: LLM-extracted (subject, relation, object) triples stored as
+    # their own retrievable memories, RRF-fused with the raw-turn pool at recall.
+    FACT = "fact"  # Atomic extracted fact (own retrieval channel; see MemoryService._fuse_fact_results)
+
 
 # OSS-known memory subtypes, grouped by memory type. The "*" key means
 # "applies to any memory type" -- the OSS subtypes are flat (any subtype
@@ -68,11 +77,32 @@ OSS_KNOWN_SUBTYPES: dict[str, set[str]] = {
         "event",
         "directive",
         "inference",
+        "fact",
         "skill",
         "skill_reference",
+        "skill_addendum",
         "mcp_server",
     },
 }
+
+
+class MemoryScope(str, Enum):
+    """Storage scope for a remembered memory.
+
+    WORKSPACE (default): the memory lives in the caller's workspace — today's
+    behavior, unchanged.
+
+    USER: the memory is routed to the user-scoped global workspace
+    (config.GLOBAL_USER_WORKSPACE_ID, "_global_user"), partitioned by the
+    writer's user_id, so it follows the user across their workspaces without
+    leaking across users. A user_id is REQUIRED for USER scope because the
+    cross-user read boundary is the forced user_id filter on the recall
+    fan-out; a USER-scope write with no user_id is rejected rather than stored
+    as an unfilterable global row.
+    """
+
+    WORKSPACE = "workspace"
+    USER = "user"
 
 
 class RecallMode(str, Enum):
@@ -81,6 +111,7 @@ class RecallMode(str, Enum):
     RAG = "rag"  # Fast vector similarity search
     LLM = "llm"  # Deep semantic retrieval with query rewriting
     HYBRID = "hybrid"  # Combine both strategies
+    AGENTIC = "agentic"  # Iterative LLM-controlled EXPAND/RE_QUERY/STOP loop (enterprise)
 
 
 class SearchTolerance(str, Enum):
@@ -116,6 +147,32 @@ class SourceType(str, Enum):
     PAGE = "page"  # Document page
     THREAD = "thread"  # Chat history decomposition
     DATASET = "dataset"  # Dataset profiling/summarization
+    EMAIL = "email"  # Email message ingestion (cross-source: prefix-less,
+    # observer_id-anchored on the sender like docs; recipients available for
+    # subject/mention extraction)
+
+
+# OSS-known source types. The email source adapter (and any future producer)
+# stamps ``metadata['source']`` with one of these values so downstream consumers
+# (coverage/attribution scoring, cross-source assembly) can read the producing
+# source straight off the memory. Kept as a set of the enum's string values so
+# membership checks are cheap and stable across backends.
+KNOWN_SOURCE_TYPES: frozenset[str] = frozenset(st.value for st in SourceType)
+
+_MEMORY_LOGICAL_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+
+
+def validate_memory_logical_key(value: str | None) -> str | None:
+    """Validate the stable key used by conditional refinement operations."""
+
+    if value is None:
+        return None
+    value = value.strip()
+    if not _MEMORY_LOGICAL_KEY_RE.fullmatch(value):
+        raise ValueError(
+            "Memory logical_key must be 1-200 characters using letters, digits, '.', '_', '/', or '-'"
+        )
+    return value
 
 
 class Memory(BaseModel):
@@ -125,9 +182,17 @@ class Memory(BaseModel):
 
     # Identity
     id: str = Field(..., description="Unique memory identifier")
+    logical_key: str | None = Field(
+        None,
+        description="Stable workspace/owner-scoped key for conditional refinement",
+    )
     workspace_id: str = Field(..., description="Workspace this memory belongs to")
     tenant_id: str = Field(..., description="Tenant this memory belongs to")
-    context_id: str = Field("_default", description="Context for logical grouping (default: _default)")
+    # context_id is RESERVED / unused as a retrieval filter today and the DB
+    # column is nullable (FK→contexts ON DELETE SET NULL). Write paths persist
+    # NULL for the "_default" sentinel, so this must be Optional — a non-optional
+    # str rejects the NULL on read-back (pydantic string_type error).
+    context_id: str | None = Field(None, description="Context for logical grouping; reserved/unused as a filter, usually NULL")
     user_id: str | None = Field(None, description="Optional user scope")
 
     # Entity attribution (v3) - "who remembers what about whom"
@@ -144,6 +209,10 @@ class Memory(BaseModel):
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0, affects retention/ranking)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
+    refinement_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Client-authored semantic metadata protected by the resource ETag",
+    )
 
     # v2 additions for hierarchical memory
     abstract: str | None = Field(None, description="Brief summary/abstract of memory content")
@@ -169,10 +238,21 @@ class Memory(BaseModel):
     status: MemoryStatus = Field(MemoryStatus.ACTIVE, description="Memory lifecycle status")
     pinned: bool = Field(False, description="Pinned memories are exempt from decay and archival")
 
+    # Semantic resource revisioning. Embeddings, recall/access projections,
+    # importance decay, and ordinary operational metadata deliberately do not
+    # participate in this compare-and-swap token.
+    revision: int = Field(0, ge=0, description="Authoritative semantic revision")
+    etag: str = Field("", description="Opaque semantic compare-and-swap token")
+
     # Locality-aware ranking metadata (populated during recall)
     source_scope: str | None = Field(None, description="Scope of memory source (same_context, same_workspace, global_workspace, other)")
     relevance_score: float | None = Field(None, description="Base relevance score from vector similarity")
     boosted_score: float | None = Field(None, description="Relevance score after locality boost applied")
+
+    # Evidence contract (populated during recall): which retrieval signals
+    # surfaced this memory — any of "vector", "keyword", "alias", "backlink".
+    # Lets agents see *why* a memory was recalled, not just that it was.
+    match_signals: list[str] | None = Field(None, description="Retrieval signals that matched this memory during recall")
 
     # Trust scoring (populated during recall)
     trust_score: float | None = Field(None, ge=0.0, le=1.0, description="Composite trust score (0.0-1.0)")
@@ -183,9 +263,24 @@ class Memory(BaseModel):
     staleness_warning: str | None = Field(None, description="Staleness tier: none, mild, moderate, severe")
     age_days: float | None = Field(None, description="Age of memory in days since creation")
 
+    # Temporal: when the memory's content is *about* (event time), distinct from
+    # created_at (= when it was recorded). Powers the timeline index and temporal
+    # recall; falls back to created_at when unset (see MemoryService timeline ops).
+    event_time: datetime | None = Field(None, description="When the memory's content is about (event time), distinct from created_at")
+
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Last update timestamp")
+    deleted_at: datetime | None = Field(None, description="Durable soft-deletion timestamp")
+    relation_write_result: EntityRelationWriteResult | None = Field(
+        None,
+        description="Result of typed structural relation ingestion for this write",
+    )
+
+    @field_validator("logical_key")
+    @classmethod
+    def validate_logical_key(cls, value: str | None) -> str | None:
+        return validate_memory_logical_key(value)
 
     @field_validator("content")
     @classmethod
@@ -211,11 +306,43 @@ class RememberInput(BaseModel):
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Memory importance (0.0-1.0)")
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
+    refinement_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Client-authored semantic metadata protected by the resource ETag",
+    )
     associations: list[str] = Field(default_factory=list, description="Memory IDs to associate with")
+    relations: list[EntityRelationInput] = Field(
+        default_factory=list,
+        description="Typed structural entity relations evidenced by this memory",
+    )
 
     # Optional overrides (usually auto-computed)
     context_id: str | None = Field(None, description="Target context (default: _default)")
+    tenant_id: str | None = Field(None, description="Resolved tenant authority")
     user_id: str | None = Field(None, description="User scope override")
+    logical_key: str | None = Field(
+        None,
+        description="Stable workspace/owner-scoped key for conditional refinement",
+    )
+    pinned: bool = Field(False, description="Pin the memory against retention decay")
+    session_id: str | None = Field(None, description="Session that produced this memory")
+    source_memory_id: str | None = Field(None, description="Raw parent memory for a deterministic segment")
+
+    # Storage scope (TRI-STATE — Slice 2):
+    #   * None  (UNSET, default): the caller expressed no preference. The memory
+    #     is ELIGIBLE for the subtype map (PREFERENCE/DIRECTIVE) and, when the
+    #     autoclassify knob is on, the preference-vs-episodic classifier. If
+    #     neither promotes it, it falls back to WORKSPACE (today's behavior).
+    #   * WORKSPACE: an EXPLICIT request to stay workspace-local. Bypasses the
+    #     subtype map and the classifier (explicit caller intent always wins).
+    #   * USER: an EXPLICIT request to route into the user-scoped global
+    #     workspace (_global_user) so it follows the writer's user_id across
+    #     workspaces. Requires a user_id. Bypasses the classifier.
+    # See MemoryScope and MemoryService._route_user_scope().
+    scope: MemoryScope | None = Field(
+        None,
+        description="Storage scope: None=unset (eligible for auto-routing), WORKSPACE=workspace-local, USER=user-global",
+    )
 
     # Entity attribution (v3)
     observer_id: str | None = Field(None, description="Entity doing the observing/remembering")
@@ -226,6 +353,62 @@ class RememberInput(BaseModel):
     source_page_id: str | None = Field(None, description="Source page ID for provenance tracking")
     source_dataset_id: str | None = Field(None, description="Source dataset ID for provenance tracking")
     source_thread_id: str | None = Field(None, description="Source thread ID for provenance tracking")
+
+    # Temporal: when the content is about, if different from now (event time)
+    event_time: datetime | None = Field(None, description="When the memory's content is about (event time); distinct from creation time")
+
+    @field_validator("logical_key")
+    @classmethod
+    def validate_logical_key(cls, value: str | None) -> str | None:
+        return validate_memory_logical_key(value)
+
+
+class MemoryReplaceInput(BaseModel):
+    """Complete semantic document for a conditional memory replacement."""
+
+    content: str = Field(..., min_length=1)
+    type: MemoryType
+    subtype: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    refinement_metadata: dict[str, Any] = Field(default_factory=dict)
+    pinned: bool = False
+
+    @field_validator("content")
+    @classmethod
+    def content_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Memory content cannot be empty")
+        return value.strip()
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str]) -> list[str]:
+        return sorted(set(tag.lower().strip() for tag in value if tag.strip()))
+
+
+class MemoryMutation(BaseModel):
+    """One atomic native-memory semantic mutation."""
+
+    action: Literal["create", "replace", "delete", "restore"]
+    memory: Memory
+    operation_id: str
+    request_hash: str
+    expected_etag: str
+
+
+class MemoryMutationResult(BaseModel):
+    memory: Memory
+    replayed: bool = False
+
+
+class MemoryRevision(BaseModel):
+    """Immutable accepted semantic memory revision."""
+
+    memory: Memory
+    sequence: int
+    action: Literal["create", "replace", "delete", "restore"]
+    operation_id: str
+    request_hash: str
 
 
 class RecallInput(BaseModel):
@@ -267,9 +450,14 @@ class RecallInput(BaseModel):
     traverse_depth: int | None = Field(None, ge=0, le=5, description="Multi-hop graph traversal depth (None = server default)")
     max_expansion: int | None = Field(None, ge=1, le=500, description="Max memories discovered via graph expansion (None = server default)")
 
-    # Time range filters
+    # Time range filters (by creation time)
     created_after: datetime | None = Field(None, description="Filter memories created after this time")
     created_before: datetime | None = Field(None, description="Filter memories created before this time")
+
+    # Temporal filters/ordering (by effective event time = event_time or created_at)
+    event_after: datetime | None = Field(None, description="Keep memories whose effective event time is >= this")
+    event_before: datetime | None = Field(None, description="Keep memories whose effective event time is <= this")
+    time_order: str | None = Field(None, description="Order results by effective event time: 'asc' or 'desc' (None = by relevance)")
 
     # LLM mode options
     context: list[dict[str, str]] = Field(default_factory=list, description="Recent conversation context for query rewriting (LLM mode)")
@@ -285,6 +473,9 @@ class RecallInput(BaseModel):
 
     # Trajectory tracing
     trace: bool = Field(False, description="Enable trajectory logging for this recall")
+    budget_tokens: int | None = Field(None, ge=1, description="Hard estimated-token budget for returned memory content")
+    include_confidence: bool = Field(True, description="Include deterministic retrieval-confidence metadata")
+    include_relations: bool = Field(True, description="Allow bounded typed-relation retrieval when enabled by the server")
 
 
 class RecallResult(BaseModel):
@@ -315,6 +506,15 @@ class RecallResult(BaseModel):
 
     # Freshness metadata
     freshness_metadata: dict | None = Field(None, description="Aggregate freshness statistics for returned memories")
+
+    # Query intent routing (rule-based, no LLM): labels that classified this query
+    query_intent: list[str] | None = Field(None, description="Classified query intent labels used for retrieval routing")
+    retrieval_confidence: Literal["strong", "moderate", "weak"] = "weak"
+    confidence_reasons: list[str] = Field(default_factory=list)
+    budget_summary: BudgetSummary | None = None
+    generation_summary: GenerationSummary | None = None
+    relation_paths: list[EntityRelationPath] = Field(default_factory=list)
+    relation_write_result: EntityRelationWriteResult | None = None
 
 
 class ReflectInput(BaseModel):

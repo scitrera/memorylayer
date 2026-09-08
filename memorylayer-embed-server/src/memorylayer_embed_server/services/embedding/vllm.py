@@ -5,7 +5,7 @@ from pathlib import Path
 
 from memorylayer_server.config import MEMORYLAYER_EMBEDDING_DIMENSIONS, MEMORYLAYER_EMBEDDING_MODEL
 from memorylayer_server.services.embedding.base import EmbeddingProviderPluginBase, MultimodalEmbeddingProvider
-from scitrera_app_framework import Variables as Variables
+from scitrera_app_framework import Variables as Variables, ext_parse_bool
 
 # Provider name as string (enum lives in OSS; enterprise uses string directly)
 PROVIDER_NAME_VLLM = "vllm"
@@ -244,6 +244,6 @@ class VLLMEmbeddingProviderPlugin(EmbeddingProviderPluginBase):
             enforce_eager=v.environ(
                 MEMORYLAYER_EMBEDDING_VLLM_ENFORCE_EAGER,
                 default=DEFAULT_ENFORCE_EAGER,
-                type_fn=lambda s: str(s).lower() in ("true", "1", "yes", "on"),
+                type_fn=ext_parse_bool,
             ),
         )

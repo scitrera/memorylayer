@@ -129,6 +129,22 @@ export function updateSessionInfo(workspaceId: string, sessionId?: string): void
   writeHookState(state);
 }
 
+/** Return the last durably acknowledged byte boundary for this transcript. */
+export function getCheckpointBoundary(sessionId: string, transcriptPath: string): number {
+  const entry = readHookState().checkpointBoundaries?.[sessionId];
+  return entry?.transcriptPath === transcriptPath ? entry.boundary : 0;
+}
+
+/** Advance a transcript boundary only after the server acknowledges raw capture. */
+export function acknowledgeCheckpointBoundary(sessionId: string, transcriptPath: string, boundary: number): void {
+  const state = readHookState();
+  const boundaries = state.checkpointBoundaries ?? {};
+  boundaries[sessionId] = { transcriptPath, boundary };
+  const retained = Object.entries(boundaries).slice(-50);
+  state.checkpointBoundaries = Object.fromEntries(retained);
+  writeHookState(state);
+}
+
 /**
  * Get current workspace ID from state
  */

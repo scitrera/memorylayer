@@ -1,6 +1,6 @@
 {
   "name": "@scitrera/memorylayer-opencode-plugin",
-  "version": "0.1.22",
+  "version": "0.2.0",
   "description": "OpenCode plugin for MemoryLayer.ai - persistent memory hooks and context injection",
   "type": "module",
   "main": "dist/src/index.js",
@@ -15,7 +15,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/scitrera/memorylayer",
-    "directory": "oss/memorylayer-opencode-plugin"
+    "directory": "memorylayer-opencode-plugin"
   },
   "homepage": "https://memorylayer.ai",
   "keywords": [
@@ -48,5 +48,9 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "files": [
+    "dist/",
+    "src/commands/"
+  ]
 }

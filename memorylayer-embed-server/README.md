@@ -7,27 +7,37 @@ The main `memorylayer-server` core no longer ships any in-process embedding mode
 ## Installation
 
 ```bash
-# Core install (no GPU dependencies)
+# Local / CPU: sentence-transformers single-vector embeddings (the default provider)
+pip install "memorylayer-embed-server[local]"
+
+# Core install (server skeleton only — no embedding backend)
 pip install memorylayer-embed-server
 
 # GPU bundle: OCR + vLLM + ColPali
 pip install "memorylayer-embed-server[gpu]"
 
-# Everything: GPU + Google embeddings + observability
+# Everything: local + GPU + Google embeddings + observability
 pip install "memorylayer-embed-server[all]"
 ```
+
+The default single-vector provider is `sentence_transformers`, which needs the
+`local` extra. A bare `pip install memorylayer-embed-server` gives you the server
+skeleton with no embedding backend; it starts, but logs an error naming the extra
+to install. Pick a different backend with
+`MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` (see [Configuration](#configuration)).
 
 Optional extras:
 
 | Extra | Purpose |
 |-------|---------|
+| `local` | **Default single-vector backend** — sentence-transformers on CPU (`all-MiniLM-L6-v2`, 384-d) — `sentence-transformers`, `torch` |
 | `ocr` | OCR via Transformers (GLM-OCR, etc.) — `transformers`, `torch`, `accelerate` |
 | `vllm` | High-throughput vLLM-served text models |
 | `colpali` | ColPali / late-interaction visual embedding |
 | `google` | Google GenAI embedding/transcription proxy |
 | `observability` | Prometheus `/metrics` + OpenTelemetry tracing |
 | `gpu` | `ocr + vllm + colpali` |
-| `all` | `gpu + google + observability` |
+| `all` | `local + gpu + google + observability` |
 | `dev` | pytest + ruff |
 
 Visual-tokenizer (Qwen3.5) lives in the proprietary `memorylayer-embed-server-enterprise` package; install that separately if you need it.
@@ -83,7 +93,11 @@ Global flag `-v` / `--verbose` enables debug logging.
 |----------|---------|-------------|
 | `MEMORYLAYER_EMBED_SERVER_HOST` | `127.0.0.1` | Bind address |
 | `MEMORYLAYER_EMBED_SERVER_PORT` | `61051` | Listening port |
-| `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` | `vllm` | `vllm` (in-process), `vllm_subprocess`, `openai`, `google`, `colpali`, `mock` |
+| `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` | `sentence_transformers` | `sentence_transformers` (local/CPU, 384-d), `vllm_subprocess` (GPU, 2048-d), `vllm` (in-process), `openai`, `google`, `colpali`, `mock`. **Changing this changes the vector dimension — see [Embedding dimensions](#embedding-dimensions).** |
+| `MEMORYLAYER_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Single-vector model for the active provider |
+| `MEMORYLAYER_EMBEDDING_DIMENSIONS` | `384` | Vector width. Must match the model — see [Embedding dimensions](#embedding-dimensions) |
+| `MEMORYLAYER_EMBEDDING_ST_DEVICE` | _(auto)_ | `cpu`, `cuda`, `mps`… for the sentence-transformers provider. Pin to `cpu` to leave the GPU for ColPali |
+| `MEMORYLAYER_EMBEDDING_ST_BATCH_SIZE` | `32` | Encode batch size for the sentence-transformers provider |
 | `MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER` | `vllm_subprocess` | `colpali_inprocess` (in-process colpali-engine) or `vllm_subprocess` (out-of-process vLLM) |
 | `MEMORYLAYER_EMBED_MODEL_TEXT` | _(provider default)_ | Override the default text-embedding model |
 | `MEMORYLAYER_EMBEDDING_COLPALI_MODEL` | `ModernVBERT/colmodernvbert` | Multi-vector model. The vLLM path auto-upgrades the unloadable LoRA-adapter checkpoint to `colmodernvbert-merged`. |
@@ -94,14 +108,72 @@ Global flag `-v` / `--verbose` enables debug logging.
 
 Refer to the provider modules under `src/memorylayer_embed_server/` for the full list of model-specific environment variables.
 
+### Embedding dimensions
+
+**Pick a single-vector model before you ingest anything, and treat it as a
+long-lived decision.** The vector width it produces is written into every stored
+memory in `memorylayer-server`, so it is a property of your *data*, not just of
+this server's configuration.
+
+| Provider | Default model | Dimensions |
+|----------|---------------|------------|
+| `sentence_transformers` (default) | `sentence-transformers/all-MiniLM-L6-v2` | **384** |
+| `vllm_subprocess` / `vllm` | `Qwen/Qwen3-VL-Embedding-2B` | **2048** |
+| `openai` | `text-embedding-3-small` | 1536 |
+| `google` | `gemini-embedding-001` | 768 |
+
+Set `MEMORYLAYER_EMBEDDING_DIMENSIONS` on **both** this server and the main
+`memorylayer-server` to match whichever model you run. The provider verifies the
+value against the loaded model at startup and warns if they disagree (the model
+wins — writing a wrong-width vector is worse than a noisy log).
+
+**Why it matters more than a normal setting.** Two memories embedded at different
+widths cannot be compared, and nothing in the storage schema prevents you from
+mixing them:
+
+- On SQLite with `sqlite-vec` (the default), `vec_distance_cosine()` raises on a
+  width mismatch and **the whole query returns nothing** — not just the offending
+  row. A handful of wrong-width memories break recall for the entire workspace.
+- Without the `sqlite-vec` extension, the pure-Python fallback scores mismatched
+  vectors as `0.0`, so the older memories **silently stop matching**.
+
+Changing dimensions therefore needs **no schema migration** (the column is a plain
+`BLOB`), but it does require **re-embedding existing memories** — or starting a
+fresh workspace. Same-width is not enough either: swapping between two different
+384-d models produces vectors that compare without error but mean nothing to each
+other, which is the quiet version of the same bug.
+
 ### Multi-vector serving back-ends
 
 The multi-vector / ColPali path has two interchangeable back-ends. Both speak the same wire shape on `/v1/embeddings/multi`, `/v1/embeddings/images`, and `/v1/score`:
 
-- **`colpali_inprocess` (default)** — colpali-engine via HF transformers, in the embed-server process. Lightweight; loads the small `ModernVBERT/colmodernvbert` LoRA adapter (~250 MB). Best for tests and tiny deployments.
-- **`vllm_subprocess` (production default)** — out-of-process `vllm serve --runner pooling` for batched, paged-attention throughput. Spawns one child process per multi-vec model; default model is `ModernVBERT/colmodernvbert-merged` (~1 GB unquantized) routed through the `ColModernVBertForRetrieval` arch class.
+- **`vllm_subprocess` (default)** — out-of-process `vllm serve --runner pooling` for batched, paged-attention throughput. Spawns one child process per multi-vec model; default model is `ModernVBERT/colmodernvbert-merged` (~1 GB unquantized) routed through the `ColModernVBertForRetrieval` arch class. **Needs a GPU.**
+- **`colpali_inprocess`** — colpali-engine via HF transformers, in the embed-server process. Lightweight; loads the small `ModernVBERT/colmodernvbert` LoRA adapter (~250 MB). Best for tests and tiny deployments. **Runs on CPU** (auto-selects `cpu` when CUDA is absent, `float32` there), so this is the multi-vector back-end for a GPU-free box.
 
 Both back-ends honor `MEMORYLAYER_EMBEDDING_COLPALI_POOL_FACTOR`; queries and documents must use the same factor or MaxSim geometry breaks.
+
+Because the multi-vector default needs a GPU, a CPU-only deployment must opt
+into the in-process back-end explicitly — the single- and multi-vector sides are
+selected independently:
+
+```bash
+MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=sentence_transformers  # (default) MiniLM on CPU
+MEMORYLAYER_EMBED_MULTI_VECTOR_PROVIDER=colpali_inprocess       # ColPali on CPU
+MEMORYLAYER_EMBEDDING_ST_DEVICE=cpu      # sentence-transformers device
+MEMORYLAYER_EMBEDDING_DEVICE=cpu         # ColPali device (separate knob)
+```
+
+GPU remains strongly preferred for multi-vector: on CPU a page-image
+multivector takes several seconds, which is fine for dev and ad-hoc queries but
+impractical for bulk document ingestion.
+
+### LLM hosting (optional, OpenAI-compatible)
+
+When `MEMORYLAYER_EMBED_LLM_ENABLED=true`, the server hosts one or more
+`vllm serve` chat profiles and exposes `POST /v1/chat/completions`,
+`POST /v1/completions`, and `GET /v1/models`. Profiles are declared via
+`MEMORYLAYER_EMBED_LLM_PROFILES` and configured with per-profile env vars
+`MEMORYLAYER_EMBED_LLM_PROFILE_<NAME>_*` (see `config.py` for the full list).
 
 ## Docker
 

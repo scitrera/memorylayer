@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import time
+from collections.abc import Callable
 from logging import Logger
 
 from scitrera_app_framework import Variables, get_logger
@@ -40,6 +41,7 @@ from .base import (
     TranscriptionAttempt,
     TranscriptionProvider,
     clean_transcription_output,
+    strip_grounding_tokens,
 )
 
 # Defaults shared across both vLLM-served OCR profiles. Operators override
@@ -54,6 +56,16 @@ DEFAULT_VLLM_OCR_DTYPE = "bfloat16"
 DEFAULT_VLLM_OCR_GPU_MEMORY_UTIL = 0.15
 DEFAULT_VLLM_OCR_STARTUP_TIMEOUT_SEC = 600.0
 DEFAULT_VLLM_OCR_CMD = "vllm"
+
+# Unlimited-OCR is trained for one prompt recipe and returns empty output for
+# anything else. The literal "<image>" prefix is part of the contract, not a
+# formatting accident — see build_unlimited_ocr_vllm_provider.
+UNLIMITED_OCR_PROMPT = "<image>document parsing."
+# Per-request arguments for the model's n-gram logits processor, from the
+# upstream card. window_size 128 is the single-image setting; multi-page /
+# PDF input wants 1024.
+UNLIMITED_OCR_NGRAM_SIZE = 35
+UNLIMITED_OCR_WINDOW_SIZE = 128
 
 
 class VLLMTranscriptionProvider(TranscriptionProvider):
@@ -74,6 +86,25 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         Model-specific ``vllm serve`` flags — e.g. ``--logits_processors``,
         ``--speculative-config.method``, ``--no-enable-prefix-caching``.
         Appended verbatim to the runner argv.
+    prompt_override
+        Exact user text to send instead of the generic
+        ``"<system prompt>\\n\\nPlease transcribe …"`` phrasing. Set this for
+        models trained against one fixed prompt recipe (Unlimited-OCR), where
+        anything else degrades or empties the output. When set, the caller's
+        ``system_prompt`` is ignored.
+    text_first
+        Put the text block ahead of the image block in the user message.
+        Needed when the prompt itself carries the ``<image>`` placeholder and
+        its position in the sequence is load-bearing. Default (``False``)
+        keeps the image-then-text order the chat-templated models expect.
+    extra_body
+        Non-OpenAI request fields forwarded verbatim to the vLLM server —
+        e.g. ``skip_special_tokens`` and per-request ``vllm_xargs`` for a
+        custom logits processor.
+    postprocess
+        Applied to the raw completion text before the shared cleaning pass.
+        Use it to unwrap model-specific markup (grounding tokens) that the
+        generic cleaner knows nothing about.
     """
 
     PROVIDER_NAME: str = "vllm-transcription"  # overridden per-instance
@@ -96,6 +127,10 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         cmd: str = DEFAULT_VLLM_OCR_CMD,
         max_concurrent: int | None = None,
         oversubscribe_factor: float = 1.0,
+        prompt_override: str | None = None,
+        text_first: bool = False,
+        extra_body: dict | None = None,
+        postprocess: Callable[[str], str] | None = None,
     ):
         super().__init__(v)
         # Make PROVIDER_NAME instance-level so cascade attribution lines up
@@ -105,6 +140,10 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         self.default_max_tokens = max_tokens
         self.host = host
         self.port = int(port)
+        self.prompt_override = prompt_override
+        self.text_first = text_first
+        self.extra_body = dict(extra_body) if extra_body else None
+        self.postprocess = postprocess
         self.logger = get_logger(v, name=f"{self.__class__.__name__}[{provider_name}]")
 
         self._runner = VLLMSubprocessRunner(
@@ -192,6 +231,9 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         not every model's chat_template handles the ``system`` role
         identically (DeepSeek-OCR-2 in particular uses a custom template
         with grounding tokens). One user message is the universal shape.
+
+        Providers configured with a ``prompt_override`` ignore the caller's
+        system prompt entirely — see the constructor docs.
         """
         max_tokens = max_tokens or self.default_max_tokens
         start_time = time.monotonic()
@@ -204,20 +246,26 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         try:
             client = await self._ensure_started()
             data_url = self._image_to_data_url(image_data)
-            user_text = (
-                f"{system_prompt}\n\nPlease transcribe the document in the image to markdown."
-                if system_prompt
-                else "Please transcribe the document in the image to markdown."
-            )
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                        {"type": "text", "text": user_text},
-                    ],
-                }
-            ]
+            if self.prompt_override is not None:
+                if system_prompt:
+                    self.logger.debug(
+                        "%s ignores the caller system prompt; using its fixed prompt recipe",
+                        self.PROVIDER_NAME,
+                    )
+                user_text = self.prompt_override
+            elif system_prompt:
+                user_text = f"{system_prompt}\n\nPlease transcribe the document in the image to markdown."
+            else:
+                user_text = "Please transcribe the document in the image to markdown."
+
+            text_part = {"type": "text", "text": user_text}
+            image_part = {"type": "image_url", "image_url": {"url": data_url}}
+            parts = [text_part, image_part] if self.text_first else [image_part, text_part]
+            messages = [{"role": "user", "content": parts}]
+
+            request_kwargs = {}
+            if self.extra_body:
+                request_kwargs["extra_body"] = self.extra_body
 
             async with self._runner.concurrency_slot():
                 response = await client.chat.completions.create(
@@ -225,6 +273,7 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=0.0,
+                    **request_kwargs,
                 )
 
             choice = response.choices[0]
@@ -252,6 +301,8 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
                     attempt.tokens_out,
                 )
             else:
+                if self.postprocess is not None:
+                    raw_content = self.postprocess(raw_content)
                 content = clean_transcription_output(raw_content)
                 if content:
                     attempt.content = content
@@ -385,4 +436,90 @@ def build_deepseek_ocr_vllm_provider(
         cmd=cmd,
         max_concurrent=max_concurrent,
         oversubscribe_factor=oversubscribe_factor,
+    )
+
+
+def build_unlimited_ocr_vllm_provider(
+    *,
+    v: Variables,
+    logger: Logger,
+    model_name: str,
+    max_tokens: int,
+    port: int,
+    gpu_memory_utilization: float,
+    startup_timeout_sec: float,
+    cmd: str,
+    enforce_eager: bool = True,
+    max_concurrent: int | None = None,
+    oversubscribe_factor: float = 1.0,
+    prompt: str = UNLIMITED_OCR_PROMPT,
+    ngram_size: int = UNLIMITED_OCR_NGRAM_SIZE,
+    window_size: int = UNLIMITED_OCR_WINDOW_SIZE,
+) -> VLLMTranscriptionProvider:
+    """Baidu Unlimited-OCR via vLLM, wired to its mandated serving recipe.
+
+    Unlimited-OCR is DeepSeek-OCR lineage (same *gundam* SAM-ViT-B + CLIP-L
+    DeepEncoder vision stack) and inherits its n-gram logits processor, so the
+    server flags mirror ``build_deepseek_ocr_vllm_provider``::
+
+        vllm serve baidu/Unlimited-OCR \\
+          --trust-remote-code \\
+          --logits_processors vllm.model_executor.models.unlimited_ocr:NGramPerReqLogitsProcessor \\
+          --no-enable-prefix-caching \\
+          --mm-processor-cache-gb 0
+
+    The model ships **no chat template** and is trained against one exact
+    prompt/decode recipe. Deviating from any part of it yields empty or
+    looping output, so all four pieces are pinned here rather than left to
+    the caller:
+
+    * the user text is exactly ``"<image>document parsing."`` — the literal
+      ``<image>`` placeholder leads the prompt, which is why the text block is
+      sent ahead of the image block (``text_first=True``);
+    * ``skip_special_tokens=False``, because the grounding markup the model
+      emits is made of special tokens and dropping them at decode time leaves
+      an empty string;
+    * ``ngram_size`` / ``window_size`` ride along as ``vllm_xargs`` for the
+      logits processor. Raise ``window_size`` to 1024 for multi-page input,
+      which falls back to non-crop (base) mode;
+    * the raw transcript is grounded markup — ``<|ref|>text<|/ref|>`` spans
+      followed by ``<|det|>`` coordinate boxes — so ``strip_grounding_tokens``
+      unwraps it back to markdown before the shared cleaning pass.
+
+    ``--trust-remote-code`` is always added by VLLMSubprocessRunner.
+    ``enforce_eager`` defaults to ``True`` — same reasoning as
+    ``build_glm_ocr_vllm_provider``.
+    """
+    del logger  # included for symmetry with the sibling builders
+    extra_args = [
+        "--logits_processors",
+        "vllm.model_executor.models.unlimited_ocr:NGramPerReqLogitsProcessor",
+        "--no-enable-prefix-caching",
+        "--mm-processor-cache-gb",
+        "0",
+        # Same transient-peak problem as DeepSeek-OCR-2: vLLM's multimodal
+        # profiling pass runs a forward at max feature size, which on a shared
+        # GPU overshoots the utilization budget during engine init.
+        "--skip-mm-profiling",
+    ]
+    return VLLMTranscriptionProvider(
+        v=v,
+        provider_name="unlimited-ocr",
+        model_name=model_name,
+        port=port,
+        max_tokens=max_tokens,
+        gpu_memory_utilization=gpu_memory_utilization,
+        enforce_eager=enforce_eager,
+        extra_args=extra_args,
+        startup_timeout_sec=startup_timeout_sec,
+        cmd=cmd,
+        max_concurrent=max_concurrent,
+        oversubscribe_factor=oversubscribe_factor,
+        prompt_override=prompt,
+        text_first=True,
+        extra_body={
+            "skip_special_tokens": False,
+            "vllm_xargs": {"ngram_size": int(ngram_size), "window_size": int(window_size)},
+        },
+        postprocess=strip_grounding_tokens,
     )

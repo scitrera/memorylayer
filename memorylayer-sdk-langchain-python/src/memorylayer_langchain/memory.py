@@ -3,10 +3,10 @@
 import logging
 from typing import Any
 
-import httpx
 from langchain_classic.base_memory import BaseMemory
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from memorylayer import SyncMemoryLayerClient
+from memorylayer.exceptions import MemoryLayerError
 from pydantic import ConfigDict
 
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ class MemoryLayerMemory(BaseMemory):
                 tolerance=SearchTolerance.LOOSE,
             )
             return len(result.memories)
-        except httpx.HTTPStatusError:
+        except MemoryLayerError:
             return 0
 
     def _get_memories(self) -> list[Any]:
@@ -170,7 +170,7 @@ class MemoryLayerMemory(BaseMemory):
 
             return memories
 
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to retrieve memories: {e}")
             return []
 
@@ -325,7 +325,7 @@ class MemoryLayerMemory(BaseMemory):
                     "message_index": message_index,
                 },
             )
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to store memory: {e}")
             raise
 
@@ -342,13 +342,13 @@ class MemoryLayerMemory(BaseMemory):
             for memory in memories:
                 try:
                     self._client.forget(memory.id)
-                except httpx.HTTPStatusError as e:
+                except MemoryLayerError as e:
                     logger.warning(f"Failed to delete memory {memory.id}: {e}")
 
             # Reset message counter
             self._message_count = 0
 
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to clear memories: {e}")
             raise
 
@@ -486,7 +486,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
                 tolerance=SearchTolerance.LOOSE,
             )
             return len(result.memories)
-        except httpx.HTTPStatusError:
+        except MemoryLayerError:
             return 0
 
     def _get_summary_query(self) -> str:
@@ -512,7 +512,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
             # Extract the reflection from the response (note: SDK uses 'reflection', not 'synthesis')
             return result.reflection
 
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to get reflection: {e}")
             return ""
 
@@ -638,7 +638,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
                     "message_index": message_index,
                 },
             )
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to store memory: {e}")
             raise
 
@@ -663,7 +663,7 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
 
             return memories
 
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to retrieve memories: {e}")
             return []
 
@@ -680,12 +680,12 @@ class MemoryLayerConversationSummaryMemory(BaseMemory):
             for memory in memories:
                 try:
                     self._client.forget(memory.id)
-                except httpx.HTTPStatusError as e:
+                except MemoryLayerError as e:
                     logger.warning(f"Failed to delete memory {memory.id}: {e}")
 
             # Reset message counter
             self._message_count = 0
 
-        except httpx.HTTPStatusError as e:
+        except MemoryLayerError as e:
             logger.error(f"Failed to clear memories: {e}")
             raise

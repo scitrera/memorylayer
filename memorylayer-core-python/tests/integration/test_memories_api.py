@@ -78,6 +78,144 @@ class TestMemoryCreate:
         assert response.status_code == 422
 
 
+class TestVersionedSemanticMemory:
+    def test_conditional_lifecycle_history_and_telemetry_independence(
+        self,
+        test_client: TestClient,
+        workspace_headers: dict[str, str],
+    ) -> None:
+        create_headers = {
+            **workspace_headers,
+            "Idempotency-Key": "memory-create-1",
+            "If-None-Match": "*",
+        }
+        create_payload = {
+            "logical_key": "preferences/backend-language",
+            "content": "Prefer Python for backend services.",
+            "type": "semantic",
+            "subtype": "preference",
+            "tags": ["Backend", "Preference"],
+            "metadata": {"source": "user-instruction"},
+            "refinement_metadata": {"confidence": "explicit"},
+            "pinned": True,
+        }
+        created = test_client.post(
+            "/v1/memories", json=create_payload, headers=create_headers
+        )
+        assert created.status_code == 201, created.text
+        first = created.json()["memory"]
+        assert first["logical_key"] == "preferences/backend-language"
+        assert first["revision"] == 1
+        assert first["etag"] == created.headers["etag"]
+        assert created.json()["replayed"] is False
+
+        replay = test_client.post(
+            "/v1/memories", json=create_payload, headers=create_headers
+        )
+        assert replay.status_code == 201, replay.text
+        assert replay.json()["replayed"] is True
+        assert replay.json()["memory"]["id"] == first["id"]
+
+        decayed = test_client.post(
+            f"/v1/memories/{first['id']}/decay",
+            json={"decay_rate": 0.1},
+            headers=workspace_headers,
+        )
+        assert decayed.status_code == 200, decayed.text
+        assert decayed.json()["memory"]["etag"] == first["etag"]
+        assert decayed.json()["memory"]["revision"] == 1
+
+        replacement = {
+            "content": "Prefer Go for backend services.",
+            "type": "semantic",
+            "subtype": "preference",
+            "tags": ["backend", "preference"],
+            "refinement_metadata": {"confidence": "revised"},
+            "pinned": True,
+        }
+        replaced = test_client.put(
+            f"/v1/memories/{first['id']}/semantic",
+            json=replacement,
+            headers={
+                **workspace_headers,
+                "Idempotency-Key": "memory-replace-1",
+                "If-Match": first["etag"],
+            },
+        )
+        assert replaced.status_code == 200, replaced.text
+        second = replaced.json()["memory"]
+        assert second["revision"] == 2
+        assert second["etag"] != first["etag"]
+        assert second["metadata"]["source"] == "user-instruction"
+
+        stale = test_client.put(
+            f"/v1/memories/{first['id']}/semantic",
+            json={**replacement, "content": "Stale writer"},
+            headers={
+                **workspace_headers,
+                "Idempotency-Key": "memory-replace-stale",
+                "If-Match": first["etag"],
+            },
+        )
+        assert stale.status_code == 412
+
+        history = test_client.get(
+            f"/v1/memories/{first['id']}/revisions",
+            params={"limit": 1},
+            headers=workspace_headers,
+        )
+        assert history.status_code == 200, history.text
+        assert history.json()["revisions"][0]["action"] == "replace"
+        assert history.json()["next_page_token"]
+
+        deleted = test_client.post(
+            f"/v1/memories/{first['id']}/delete",
+            headers={
+                **workspace_headers,
+                "Idempotency-Key": "memory-delete-1",
+                "If-Match": second["etag"],
+            },
+        )
+        assert deleted.status_code == 200, deleted.text
+        tombstone = deleted.json()["memory"]
+        assert tombstone["revision"] == 3
+        assert tombstone["deleted_at"] is not None
+
+        duplicate = test_client.post(
+            "/v1/memories",
+            json={
+                **create_payload,
+                "content": "Attempt to take the tombstoned key.",
+            },
+            headers={
+                **workspace_headers,
+                "Idempotency-Key": "memory-create-duplicate",
+                "If-None-Match": "*",
+            },
+        )
+        assert duplicate.status_code == 409
+
+        fetched = test_client.get(
+            f"/v1/memories/{first['id']}",
+            params={"include_deleted": "true"},
+            headers=workspace_headers,
+        )
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.headers["etag"] == tombstone["etag"]
+
+        restored = test_client.post(
+            f"/v1/memories/{first['id']}/restore",
+            headers={
+                **workspace_headers,
+                "Idempotency-Key": "memory-restore-1",
+                "If-Match": tombstone["etag"],
+            },
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["memory"]["revision"] == 4
+        assert restored.json()["memory"]["deleted_at"] is None
+
+
 class TestMemoryRecall:
     """Tests for POST /v1/memories/recall endpoint."""
 
@@ -253,6 +391,84 @@ class TestMemoryDelete:
 
         # Should return 404 for non-existent memory
         assert response.status_code == 404
+
+
+class TestMemoryDeleteCrossWorkspace:
+    """Regression: delete must resolve the memory's ACTUAL workspace, not the
+    caller's X-Workspace-ID. A memory created in workspace A must be deletable
+    even when the delete request carries a different workspace header (mirrors
+    real cases where memories live in non-default workspaces, e.g. USER scope /
+    _global_user). Previously these silently 404'd.
+    """
+
+    def test_delete_resolves_memory_workspace(self, test_client: TestClient) -> None:
+        """Single-endpoint delete succeeds across workspaces."""
+        create = test_client.post(
+            "/v1/memories",
+            json={"content": "Cross-workspace single delete"},
+            headers={"X-Workspace-ID": "xws_create_a"},
+        )
+        assert create.status_code == 201
+        memory_id = create.json()["memory"]["id"]
+
+        # Delete with a DIFFERENT workspace header.
+        response = test_client.delete(
+            f"/v1/memories/{memory_id}",
+            headers={"X-Workspace-ID": "xws_other_b"},
+        )
+        assert response.status_code == 204
+
+    def test_delete_genuinely_missing_returns_404(self, test_client: TestClient) -> None:
+        """A genuinely-missing id still returns 404 (not conflated with success)."""
+        response = test_client.delete(
+            "/v1/memories/mem_does_not_exist_xyz",
+            headers={"X-Workspace-ID": "xws_other_b"},
+        )
+        assert response.status_code == 404
+
+    def test_batch_delete_resolves_memory_workspace(self, test_client: TestClient) -> None:
+        """Batch delete succeeds across workspaces."""
+        create = test_client.post(
+            "/v1/memories",
+            json={"content": "Cross-workspace batch delete"},
+            headers={"X-Workspace-ID": "xws_create_c"},
+        )
+        assert create.status_code == 201
+        memory_id = create.json()["memory"]["id"]
+
+        response = test_client.post(
+            "/v1/memories/batch",
+            json={"operations": [{"op": "delete", "memory_id": memory_id, "hard": False}]},
+            headers={"X-Workspace-ID": "xws_other_d"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["successful"] == 1
+        assert body["results"][0]["status"] == "success"
+
+    def test_batch_update_resolves_memory_workspace(self, test_client: TestClient) -> None:
+        """Batch update succeeds across workspaces."""
+        create = test_client.post(
+            "/v1/memories",
+            json={"content": "Cross-workspace batch update"},
+            headers={"X-Workspace-ID": "xws_create_e"},
+        )
+        assert create.status_code == 201
+        memory_id = create.json()["memory"]["id"]
+
+        response = test_client.post(
+            "/v1/memories/batch",
+            json={
+                "operations": [
+                    {"op": "update", "memory_id": memory_id, "importance": 0.42}
+                ]
+            },
+            headers={"X-Workspace-ID": "xws_other_f"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["successful"] == 1
+        assert body["results"][0]["status"] == "success"
 
 
 class TestMemoryDecay:
@@ -1563,3 +1779,274 @@ class TestGraphTraversal:
         assert data["total_paths"] >= 0
         # Should have at least the start node
         assert memories[0] in data["unique_nodes"]
+
+
+class TestMemoryRecallTemporalAndOffset:
+    """Tests for the recall surface fields exposed in Phase 2.1.
+
+    Asserts ``event_after`` / ``event_before`` (temporal window) and ``offset``
+    reach the service and actually filter/paginate results. Each test uses an
+    isolated workspace so seeded memories do not collide with other suites.
+    """
+
+    def test_recall_event_window_filters(self, test_client: TestClient) -> None:
+        import uuid
+        from datetime import UTC, datetime, timedelta
+
+        headers = {"X-Workspace-ID": f"recall_temporal_{uuid.uuid4().hex[:8]}"}
+        for i in range(3):
+            resp = test_client.post(
+                "/v1/memories",
+                json={"content": f"temporal memory entry number {i} about pizza toppings"},
+                headers=headers,
+            )
+            assert resp.status_code == 201
+
+        now = datetime.now(UTC)
+
+        # event_before in the past (window ending before any memory existed) =>
+        # the temporal post-filter drops every candidate from the returned set.
+        # (total_count reflects the pre-filter candidate pool, so assert on the
+        # returned ``memories`` which is what the temporal filter actually shapes.)
+        closed_past = test_client.post(
+            "/v1/memories/recall",
+            json={
+                "query": "pizza toppings",
+                "event_before": (now - timedelta(days=365)).isoformat(),
+            },
+            headers=headers,
+        )
+        assert closed_past.status_code == 200
+        assert closed_past.json()["memories"] == []
+
+        # event_after well in the past => effective time (== created_at) is within
+        # the window, so seeded memories survive the filter.
+        open_window = test_client.post(
+            "/v1/memories/recall",
+            json={
+                "query": "pizza toppings",
+                "event_after": (now - timedelta(days=1)).isoformat(),
+            },
+            headers=headers,
+        )
+        assert open_window.status_code == 200
+        assert len(open_window.json()["memories"]) >= 1
+
+    def test_recall_offset_reaches_storage(self, test_client: TestClient) -> None:
+        import uuid
+
+        headers = {"X-Workspace-ID": f"recall_offset_{uuid.uuid4().hex[:8]}"}
+        for i in range(3):
+            resp = test_client.post(
+                "/v1/memories",
+                json={"content": f"offset pagination memory {i} about hiking trails"},
+                headers=headers,
+            )
+            assert resp.status_code == 201
+
+        # offset=0 returns hits; a large offset past the candidate pool returns
+        # fewer/zero — proving the offset threads to storage.search_memories.
+        base = test_client.post(
+            "/v1/memories/recall",
+            json={"query": "hiking trails", "mode": "rag", "limit": 5, "offset": 0, "min_relevance": 0.0},
+            headers=headers,
+        )
+        past_end = test_client.post(
+            "/v1/memories/recall",
+            json={"query": "hiking trails", "mode": "rag", "limit": 5, "offset": 100, "min_relevance": 0.0},
+            headers=headers,
+        )
+        assert base.status_code == 200
+        assert past_end.status_code == 200
+        assert len(base.json()["memories"]) >= 1
+        assert past_end.json()["memories"] == []
+
+    def test_recall_accepts_global_scope_fields(self, test_client: TestClient, workspace_headers: dict[str, str]) -> None:
+        """The newly exposed include_global / include_global_user / time_order
+        fields are accepted by the schema and threaded to the service."""
+        resp = test_client.post(
+            "/v1/memories/recall",
+            json={
+                "query": "anything",
+                "include_global": False,
+                "include_global_user": False,
+                "time_order": "desc",
+            },
+            headers=workspace_headers,
+        )
+        assert resp.status_code == 200
+
+
+class TestMemoryList:
+    """Tests for GET /v1/memories (Phase 2.2 browse endpoint)."""
+
+    def test_list_pagination_and_order(self, test_client: TestClient) -> None:
+        import uuid
+
+        headers = {"X-Workspace-ID": f"list_ws_{uuid.uuid4().hex[:8]}"}
+        created = []
+        for i in range(5):
+            resp = test_client.post(
+                "/v1/memories",
+                json={"content": f"list browse memory {i}"},
+                headers=headers,
+            )
+            assert resp.status_code == 201
+            created.append(resp.json()["memory"]["id"])
+
+        # Full list: newest-first (created_at desc) => reverse of creation order.
+        full = test_client.get("/v1/memories", params={"limit": 50}, headers=headers)
+        assert full.status_code == 200
+        ids = [m["id"] for m in full.json()["memories"]]
+        assert set(created).issubset(set(ids))
+        assert ids[: len(created)] == list(reversed(created))
+
+        # Pagination: page1 + page2 cover distinct ids.
+        page1 = test_client.get("/v1/memories", params={"limit": 2, "offset": 0}, headers=headers)
+        page2 = test_client.get("/v1/memories", params={"limit": 2, "offset": 2}, headers=headers)
+        ids1 = [m["id"] for m in page1.json()["memories"]]
+        ids2 = [m["id"] for m in page2.json()["memories"]]
+        assert len(ids1) == 2
+        assert len(ids2) == 2
+        assert set(ids1).isdisjoint(set(ids2))
+
+    def test_list_type_filter(self, test_client: TestClient) -> None:
+        import uuid
+
+        headers = {"X-Workspace-ID": f"list_type_{uuid.uuid4().hex[:8]}"}
+        test_client.post(
+            "/v1/memories",
+            json={"content": "an episodic event happened yesterday", "type": "episodic"},
+            headers=headers,
+        )
+        test_client.post(
+            "/v1/memories",
+            json={"content": "a semantic fact about the world", "type": "semantic"},
+            headers=headers,
+        )
+
+        resp = test_client.get("/v1/memories", params={"type": "episodic", "limit": 50}, headers=headers)
+        assert resp.status_code == 200
+        memories = resp.json()["memories"]
+        assert len(memories) >= 1
+        assert all(m["type"] == "episodic" for m in memories)
+
+    def test_list_subtype_filter(self, test_client: TestClient) -> None:
+        import uuid
+
+        headers = {"X-Workspace-ID": f"list_subtype_{uuid.uuid4().hex[:8]}"}
+        test_client.post(
+            "/v1/memories",
+            json={"content": "user prefers tabs", "type": "semantic", "subtype": "preference"},
+            headers=headers,
+        )
+        test_client.post(
+            "/v1/memories",
+            json={"content": "unrelated note", "type": "semantic", "subtype": "note"},
+            headers=headers,
+        )
+
+        resp = test_client.get("/v1/memories", params={"subtype": "preference", "limit": 50}, headers=headers)
+        assert resp.status_code == 200
+        memories = resp.json()["memories"]
+        assert len(memories) >= 1
+        assert all(m["subtype"] == "preference" for m in memories)
+
+
+class TestAssociationUpdateDelete:
+    """Tests for PATCH/DELETE association endpoints (Phase 2.3a)."""
+
+    def _make_pair_and_assoc(self, test_client: TestClient, headers: dict[str, str]) -> tuple[str, str, str]:
+        r1 = test_client.post("/v1/memories", json={"content": "assoc src memory"}, headers=headers)
+        r2 = test_client.post("/v1/memories", json={"content": "assoc tgt memory"}, headers=headers)
+        src = r1.json()["memory"]["id"]
+        tgt = r2.json()["memory"]["id"]
+        a = test_client.post(
+            f"/v1/memories/{src}/associate",
+            json={"target_id": tgt, "relationship": "related_to", "strength": 0.4},
+            headers=headers,
+        )
+        assert a.status_code == 201
+        return src, tgt, a.json()["association"]["id"]
+
+    def test_update_association_strength_and_metadata(self, test_client: TestClient) -> None:
+        import uuid
+
+        headers = {"X-Workspace-ID": f"assoc_upd_{uuid.uuid4().hex[:8]}"}
+        src, _tgt, assoc_id = self._make_pair_and_assoc(test_client, headers)
+
+        upd = test_client.patch(
+            f"/v1/memories/{src}/associations/{assoc_id}",
+            json={"strength": 0.95, "metadata": {"note": "stronger"}},
+            headers=headers,
+        )
+        assert upd.status_code == 204
+
+        # Verify via list-associations that strength changed.
+        listed = test_client.get(f"/v1/memories/{src}/associations", headers=headers)
+        assert listed.status_code == 200
+        match = [a for a in listed.json()["associations"] if a["id"] == assoc_id]
+        assert match and abs(match[0]["strength"] - 0.95) < 1e-6
+
+    def test_update_association_not_found(self, test_client: TestClient) -> None:
+        import uuid
+
+        headers = {"X-Workspace-ID": f"assoc_upd404_{uuid.uuid4().hex[:8]}"}
+        src, _tgt, _assoc_id = self._make_pair_and_assoc(test_client, headers)
+        resp = test_client.patch(
+            f"/v1/memories/{src}/associations/does-not-exist",
+            json={"strength": 0.5},
+            headers=headers,
+        )
+        assert resp.status_code == 404
+
+    def test_delete_association(self, test_client: TestClient) -> None:
+        import uuid
+
+        headers = {"X-Workspace-ID": f"assoc_del_{uuid.uuid4().hex[:8]}"}
+        src, _tgt, assoc_id = self._make_pair_and_assoc(test_client, headers)
+
+        deleted = test_client.delete(f"/v1/memories/{src}/associations/{assoc_id}", headers=headers)
+        assert deleted.status_code == 204
+
+        listed = test_client.get(f"/v1/memories/{src}/associations", headers=headers)
+        assert listed.status_code == 200
+        assert all(a["id"] != assoc_id for a in listed.json()["associations"])
+
+        # Second delete => 404 (already gone).
+        again = test_client.delete(f"/v1/memories/{src}/associations/{assoc_id}", headers=headers)
+        assert again.status_code == 404
+
+    def test_patch_mismatched_memory_id_returns_404(self, test_client: TestClient) -> None:
+        """PATCH with a memory_id that is not an endpoint of the association must return 404.
+
+        This enforces the REST ownership contract: the URL implies the association
+        belongs to the memory; using an unrelated memory_id must not succeed.
+        """
+        import uuid
+
+        headers = {"X-Workspace-ID": f"assoc_mismatch_{uuid.uuid4().hex[:8]}"}
+        # Create two independent pairs: A-B and C-D.
+        r_a = test_client.post("/v1/memories", json={"content": "memory A"}, headers=headers)
+        r_b = test_client.post("/v1/memories", json={"content": "memory B"}, headers=headers)
+        r_c = test_client.post("/v1/memories", json={"content": "memory C"}, headers=headers)
+        mem_a = r_a.json()["memory"]["id"]
+        mem_b = r_b.json()["memory"]["id"]
+        mem_c = r_c.json()["memory"]["id"]
+
+        # Association belongs to A-B.
+        a_resp = test_client.post(
+            f"/v1/memories/{mem_a}/associate",
+            json={"target_id": mem_b, "relationship": "related_to", "strength": 0.5},
+            headers=headers,
+        )
+        assert a_resp.status_code == 201
+        assoc_id = a_resp.json()["association"]["id"]
+
+        # PATCH using C as memory_id (C is not an endpoint of the association).
+        resp = test_client.patch(
+            f"/v1/memories/{mem_c}/associations/{assoc_id}",
+            json={"strength": 0.9},
+            headers=headers,
+        )
+        assert resp.status_code == 404

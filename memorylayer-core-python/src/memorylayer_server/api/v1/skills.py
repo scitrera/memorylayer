@@ -10,7 +10,12 @@ Endpoints:
 - GET    /v1/skills/{id}/files/{path} - Stream a single file
 - PUT    /v1/skills/{id}         - Update manifest fields
 - PUT    /v1/skills/{id}/files/{path} - Upsert one file
-- DELETE /v1/skills/{id}         - Delete skill (cascades to files)
+- DELETE /v1/skills/{id}/files/{path} - Delete one file (idempotent)
+- PUT    /v1/skills/{id}/manifest - Conditionally replace the full manifest
+- GET    /v1/skills/{id}/revisions - List immutable manifest revisions
+- POST   /v1/skills/{id}/delete  - Conditionally tombstone a skill
+- POST   /v1/skills/{id}/restore - Conditionally restore a skill
+- DELETE /v1/skills/{id}         - Tombstone a skill (retains files for restore)
 - POST   /v1/skills/resolve      - Resolve skill by name (precedence) or query (vector search)
 - POST   /v1/skills/{id}/sync    - Reconcile mirrored skill via hash comparison
 - GET    /v1/skills/{id}/bundle  - Stream skill bundle as NDJSON or tar.gz
@@ -31,15 +36,24 @@ from scitrera_app_framework import Plugin, Variables
 from memorylayer_server.lifecycle.fastapi import get_logger
 
 from ...models.memory import MemoryType, RecallInput
-from ...models.skill import Skill, SkillCreateInput, SkillUpdateInput
+from ...models.skill import Skill, SkillCreateInput, SkillReplaceInput, SkillRevision, SkillUpdateInput
+from ...models.versioned_resource import VersionedResourcePreconditionFailedError
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
 from ...services.memory import MemoryService
 from ...services.skills import SkillsService
+from ...services.skills.addenda import (
+    SKILL_ADDENDUM_ACCEPTED_STATUS,
+    SKILL_ADDENDUM_SUBTYPE,
+    compose_skill_with_addenda,
+    compose_skills_with_addenda,
+)
 from ...services.skills.frontmatter import render_skill_md
 from ...services.skills.resolution import RequestContext, SkillsResolutionService
 from ...services.skills.sync import compute_sync_action
 from .. import EXT_MULTI_API_ROUTERS
+from ._versioned_resource import raise_api_error as _shared_raise_api_error
+from ._versioned_resource import required_header as _required_header
 from .deps import get_auth_service, get_authz_service, get_memory_service, get_skills_resolution_service, get_skills_service
 from .schemas import ErrorResponse
 
@@ -58,6 +72,18 @@ class SkillFileInfo(BaseModel):
 
 class SkillResponse(BaseModel):
     skill: Skill
+    replayed: bool = False
+
+
+class SkillRevisionResponse(BaseModel):
+    skill: Skill
+    action: str
+    operation_id: str
+
+
+class SkillRevisionListResponse(BaseModel):
+    revisions: list[SkillRevisionResponse]
+    next_page_token: str | None = None
 
 
 class SkillListResponse(BaseModel):
@@ -79,6 +105,7 @@ class SkillResolveRequest(BaseModel):
     query: str | None = Field(None, description="Intent query — runs vector recall against skill memories")
     scope_hint: str | None = Field(None, description="Restrict resolution to a single scope: 'user', 'workspace', or 'global'")
     workspace_id: str | None = Field(None, description="Workspace to resolve against; defaults to the authenticated context's workspace.")
+    include_addenda: bool = Field(False, description="Attach accepted skill_addendum memories to returned skill bodies")
 
 
 class SkillResolveResponse(BaseModel):
@@ -102,6 +129,7 @@ class SkillResolveResponse(BaseModel):
 )
 async def create_skill(
     http_request: Request,
+    response: Response,
     request: SkillCreateInput,
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
@@ -114,12 +142,49 @@ async def create_skill(
         workspace_id = request.workspace_id or ctx.workspace_id
         await authz_service.require_authorization(ctx, "skills", "write", workspace_id=workspace_id)
 
+        # `user_id` is the user-PRIVATE owner (scope), NOT authorship. It must stay
+        # NULL for shared workspace/global skills — a non-null user_id makes the skill
+        # user-private and drops it from the `_global` union (which filters
+        # `user_id IS NULL`), so it vanishes from every workspace listing. Take it
+        # ONLY from the explicit request field; never fall back to the caller's
+        # identity (that conflation is what hid tenant-shared seeded skills).
+        # Authorship is recorded separately as provenance in metadata.
+        actor = getattr(ctx, "user_id", None)
+        if actor:
+            request.metadata = {**(request.metadata or {}), "created_by": actor, "updated_by": actor}
+
+        operation_id = http_request.headers.get("Idempotency-Key", "").strip()
+        expected = http_request.headers.get("If-None-Match", "").strip()
+        if operation_id or expected:
+            operation_id = _required_header(http_request, "Idempotency-Key")
+            expected = _required_header(http_request, "If-None-Match")
+            if expected != "*":
+                raise VersionedResourcePreconditionFailedError(
+                    "create requires If-None-Match: *"
+                )
+            if request.files:
+                raise ValueError(
+                    "conditional manifest create does not accept bundle files; "
+                    "upload child files after the manifest is committed"
+                )
+            result = await skills_service.create_skill_versioned(
+                input=request,
+                workspace_id=workspace_id,
+                tenant_id=getattr(ctx, "tenant_id", ""),
+                user_id=request.user_id,
+                operation_id=operation_id,
+                expected_etag=expected,
+            )
+            response.headers["ETag"] = result.skill.etag
+            return SkillResponse(skill=result.skill, replayed=result.replayed)
+
         skill = await skills_service.create_skill(
             input=request,
             workspace_id=workspace_id,
             tenant_id=getattr(ctx, "tenant_id", ""),
-            user_id=request.user_id or getattr(ctx, "user_id", None),
+            user_id=request.user_id,
         )
+        response.headers["ETag"] = skill.etag
         return SkillResponse(skill=skill)
 
     except HTTPException:
@@ -127,8 +192,7 @@ async def create_skill(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error("Failed to create skill: %s", e, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create skill")
+        _raise_api_error(e, "create skill")
 
 
 @router.get(
@@ -145,12 +209,15 @@ async def list_skills(
     name: str | None = Query(None),
     enabled: bool | None = Query(None),
     include_shadowed: bool = Query(False, description="Return all skills including shadowed duplicates"),
+    include_addenda: bool = Query(False, description="Attach accepted skill_addendum memories to returned skill bodies"),
+    include_global: bool = Query(True, description="Union tenant-shared _global skills into the workspace listing"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
     resolution_service: SkillsResolutionService = Depends(get_skills_resolution_service),
+    memory_service: MemoryService = Depends(get_memory_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> SkillListResponse:
     """List skills for a workspace."""
@@ -165,6 +232,7 @@ async def list_skills(
             enabled=enabled,
             limit=limit,
             offset=offset,
+            include_global=include_global,
         )
 
         if not include_shadowed:
@@ -174,6 +242,9 @@ async def list_skills(
                 tenant_id=getattr(ctx, "tenant_id", ""),
             )
             skills = resolution_service.apply_shadowing(skills, resolution_ctx)
+
+        if include_addenda:
+            skills = await compose_skills_with_addenda(memory_service.storage, skills)
 
         return SkillListResponse(skills=skills, total_count=len(skills))
 
@@ -223,6 +294,8 @@ async def resolve_skill(
 
         if request.name:
             skill = await resolution_service.resolve(request.name, resolution_ctx, scope_hint=request.scope_hint)
+            if skill and request.include_addenda:
+                skill = await compose_skill_with_addenda(memory_service.storage, skill)
             return SkillResolveResponse(skill=skill)
 
         # query-based: recall procedural memories with subtype=skill, look up skill records
@@ -231,19 +304,23 @@ async def resolve_skill(
             input=RecallInput(
                 query=request.query,
                 types=[MemoryType.PROCEDURAL],
-                subtypes=["skill"],
+                subtypes=["skill", SKILL_ADDENDUM_SUBTYPE],
                 limit=10,
             ),
         )
         candidates = []
         seen_ids: set[str] = set()
         for mem in recall_result.memories:
+            if mem.subtype == SKILL_ADDENDUM_SUBTYPE and mem.metadata.get("status") != SKILL_ADDENDUM_ACCEPTED_STATUS:
+                continue
             skill_id = mem.metadata.get("skill_id")
             if skill_id and skill_id not in seen_ids:
                 seen_ids.add(skill_id)
                 skill = await skills_service.get_skill(workspace_id, skill_id)
                 if skill:
                     candidates.append(skill)
+        if request.include_addenda:
+            candidates = await compose_skills_with_addenda(memory_service.storage, candidates)
         return SkillResolveResponse(skill=candidates[0] if candidates else None, candidates=candidates)
 
     except HTTPException:
@@ -251,6 +328,54 @@ async def resolve_skill(
     except Exception as e:
         logger.error("Failed to resolve skill: %s", e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to resolve skill")
+
+
+@router.get(
+    "/{skill_id}/revisions",
+    response_model=SkillRevisionListResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+    },
+)
+async def list_skill_revisions(
+    http_request: Request,
+    skill_id: str,
+    workspace_id: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    page_token: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    skills_service: SkillsService = Depends(get_skills_service),
+) -> SkillRevisionListResponse:
+    """List immutable native skill-manifest revisions newest first."""
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(
+            ctx, "skills", "read", workspace_id=workspace_id
+        )
+        revisions, next_token = await skills_service.list_revision_page(
+            ctx.tenant_id,
+            workspace_id,
+            skill_id,
+            limit=limit,
+            page_token=page_token,
+        )
+        if not revisions and await skills_service.get_skill(
+            workspace_id, skill_id, include_deleted=True
+        ) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Skill {skill_id} not found",
+            )
+        return SkillRevisionListResponse(
+            revisions=[_to_revision(item) for item in revisions],
+            next_page_token=next_token,
+        )
+    except Exception as exc:
+        _raise_api_error(exc, "list skill revisions")
 
 
 @router.get(
@@ -264,8 +389,10 @@ async def resolve_skill(
 )
 async def get_skill(
     http_request: Request,
+    response: Response,
     skill_id: str,
     workspace_id: str | None = Query(None),
+    include_deleted: bool = Query(False),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
@@ -277,9 +404,14 @@ async def get_skill(
         workspace_id = workspace_id or ctx.workspace_id
         await authz_service.require_authorization(ctx, "skills", "read", workspace_id=workspace_id)
 
-        skill = await skills_service.get_skill(workspace_id, skill_id)
+        skill = await skills_service.get_skill(
+            workspace_id,
+            skill_id,
+            include_deleted=include_deleted,
+        )
         if not skill:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill {skill_id} not found")
+        response.headers["ETag"] = skill.etag
         return SkillResponse(skill=skill)
 
     except HTTPException:
@@ -302,9 +434,11 @@ async def get_skill_manifest(
     http_request: Request,
     skill_id: str,
     workspace_id: str | None = Query(None),
+    include_addenda: bool = Query(False, description="Attach accepted skill_addendum memories to the rendered manifest"),
     auth_service: AuthenticationService = Depends(get_auth_service),
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
+    memory_service: MemoryService = Depends(get_memory_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> Response:
     """Render the full SKILL.md text for a skill."""
@@ -316,6 +450,8 @@ async def get_skill_manifest(
         skill = await skills_service.get_skill(workspace_id, skill_id)
         if not skill:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill {skill_id} not found")
+        if include_addenda:
+            skill = await compose_skill_with_addenda(memory_service.storage, skill)
 
         frontmatter: dict[str, Any] = {"name": skill.name, "description": skill.description, "version": skill.version}
         if skill.license:
@@ -335,6 +471,49 @@ async def get_skill_manifest(
     except Exception as e:
         logger.error("Failed to render manifest for skill %s: %s", skill_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to render manifest")
+
+
+@router.put(
+    "/{skill_id}/manifest",
+    response_model=SkillResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        412: {"model": ErrorResponse},
+        428: {"model": ErrorResponse},
+    },
+)
+async def replace_skill_manifest(
+    http_request: Request,
+    response: Response,
+    skill_id: str,
+    request: SkillReplaceInput,
+    workspace_id: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    skills_service: SkillsService = Depends(get_skills_service),
+) -> SkillResponse:
+    """Conditionally replace a skill's complete semantic manifest."""
+    try:
+        operation_id = _required_header(http_request, "Idempotency-Key")
+        expected = _required_header(http_request, "If-Match")
+        ctx = await auth_service.build_context(http_request, request)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(
+            ctx, "skills", "write", workspace_id=workspace_id
+        )
+        result = await skills_service.replace_skill_versioned(
+            workspace_id,
+            skill_id,
+            request,
+            tenant_id=ctx.tenant_id,
+            operation_id=operation_id,
+            expected_etag=expected,
+        )
+        response.headers["ETag"] = result.skill.etag
+        return SkillResponse(skill=result.skill, replayed=result.replayed)
+    except Exception as exc:
+        _raise_api_error(exc, "replace skill manifest")
 
 
 @router.get(
@@ -480,8 +659,13 @@ async def get_skill_file(
     authz_service: AuthorizationService = Depends(get_authz_service),
     skills_service: SkillsService = Depends(get_skills_service),
     logger: logging.Logger = Depends(get_logger),
-) -> StreamingResponse:
-    """Stream a single file from a skill bundle."""
+) -> Response:
+    """Return a single file from a skill bundle.
+
+    Uses a BUFFERED Response (Content-Length) rather than StreamingResponse: the
+    file content is already fully in memory, and chunked/streamed responses do not
+    survive the Aether ProxyHttp relay (the body arrives empty), whereas a
+    Content-Length response does. Buffering is both correct here and relay-safe."""
     try:
         ctx = await auth_service.build_context(http_request, None)
         workspace_id = workspace_id or ctx.workspace_id
@@ -496,7 +680,8 @@ async def get_skill_file(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"File {file_path} not found")
 
         media_type = sf.mime_type or "application/octet-stream"
-        return StreamingResponse(iter([sf.content]), media_type=media_type)
+        content = sf.content if isinstance(sf.content, bytes) else sf.content.encode()
+        return Response(content=content, media_type=media_type)
 
     except HTTPException:
         raise
@@ -602,6 +787,136 @@ async def upsert_skill_file(
 
 
 @router.delete(
+    "/{skill_id}/files/{file_path:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+    },
+)
+async def delete_skill_file(
+    http_request: Request,
+    skill_id: str,
+    file_path: str,
+    workspace_id: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    skills_service: SkillsService = Depends(get_skills_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> None:
+    """Delete a single file from a skill bundle.
+
+    Mirrors the PUT upsert route's auth/ACL/workspace scoping. The skill-file
+    store removes the file and the skill's ``bundle_hash`` is recomputed so the
+    record stays consistent (handled by ``SkillsService.delete_file``). Deleting
+    a path that is already absent is idempotent (returns 204) — this lets the
+    SDK's ``save()`` reconcile loop prune dropped manifest files without racing.
+    A missing *skill* still 404s, matching the other skill-file routes.
+    """
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(ctx, "skills", "write", workspace_id=workspace_id)
+
+        skill = await skills_service.get_skill(workspace_id, skill_id)
+        if not skill:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill {skill_id} not found")
+
+        # delete_file recomputes bundle_hash and cleans reference memories;
+        # absent files return False, which we treat as idempotent success.
+        await skills_service.delete_file(skill_id=skill_id, path=file_path, workspace_id=workspace_id)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete file %s for skill %s: %s", file_path, skill_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete skill file")
+
+
+@router.post(
+    "/{skill_id}/delete",
+    response_model=SkillResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        412: {"model": ErrorResponse},
+        428: {"model": ErrorResponse},
+    },
+)
+async def delete_skill_manifest(
+    http_request: Request,
+    response: Response,
+    skill_id: str,
+    workspace_id: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    skills_service: SkillsService = Depends(get_skills_service),
+) -> SkillResponse:
+    """Conditionally write a durable skill-manifest tombstone."""
+    try:
+        operation_id = _required_header(http_request, "Idempotency-Key")
+        expected = _required_header(http_request, "If-Match")
+        ctx = await auth_service.build_context(http_request, None)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(
+            ctx, "skills", "write", workspace_id=workspace_id
+        )
+        result = await skills_service.delete_skill_versioned(
+            workspace_id,
+            skill_id,
+            tenant_id=ctx.tenant_id,
+            operation_id=operation_id,
+            expected_etag=expected,
+        )
+        response.headers["ETag"] = result.skill.etag
+        return SkillResponse(skill=result.skill, replayed=result.replayed)
+    except Exception as exc:
+        _raise_api_error(exc, "delete skill manifest")
+
+
+@router.post(
+    "/{skill_id}/restore",
+    response_model=SkillResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        412: {"model": ErrorResponse},
+        428: {"model": ErrorResponse},
+    },
+)
+async def restore_skill_manifest(
+    http_request: Request,
+    response: Response,
+    skill_id: str,
+    workspace_id: str | None = Query(None),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    skills_service: SkillsService = Depends(get_skills_service),
+) -> SkillResponse:
+    """Conditionally reactivate a native skill tombstone."""
+    try:
+        operation_id = _required_header(http_request, "Idempotency-Key")
+        expected = _required_header(http_request, "If-Match")
+        ctx = await auth_service.build_context(http_request, None)
+        workspace_id = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(
+            ctx, "skills", "write", workspace_id=workspace_id
+        )
+        result = await skills_service.restore_skill_versioned(
+            workspace_id,
+            skill_id,
+            tenant_id=ctx.tenant_id,
+            operation_id=operation_id,
+            expected_etag=expected,
+        )
+        response.headers["ETag"] = result.skill.etag
+        return SkillResponse(skill=result.skill, replayed=result.replayed)
+    except Exception as exc:
+        _raise_api_error(exc, "restore skill manifest")
+
+
+@router.delete(
     "/{skill_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
@@ -619,7 +934,7 @@ async def delete_skill(
     skills_service: SkillsService = Depends(get_skills_service),
     logger: logging.Logger = Depends(get_logger),
 ) -> None:
-    """Delete a skill and all its files."""
+    """Legacy unconditional delete, implemented as a durable tombstone."""
     try:
         ctx = await auth_service.build_context(http_request, None)
         workspace_id = workspace_id or ctx.workspace_id
@@ -695,6 +1010,18 @@ async def sync_skill(
     except Exception as e:
         logger.error("Failed to sync skill %s: %s", skill_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to sync skill")
+
+
+def _to_revision(revision: SkillRevision) -> SkillRevisionResponse:
+    return SkillRevisionResponse(
+        skill=revision.skill,
+        action=revision.action,
+        operation_id=revision.operation_id,
+    )
+
+
+def _raise_api_error(exc: Exception, operation: str) -> None:
+    _shared_raise_api_error(exc, operation, __name__)
 
 
 class SkillsAPIPlugin(Plugin):

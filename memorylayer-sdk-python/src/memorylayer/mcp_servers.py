@@ -88,27 +88,6 @@ class McpServersAPI:
         data = await self._client._request("GET", f"/mcp-servers/{server_id}", authority=authority)
         return McpServerModel(**data["mcp_server"])
 
-    async def get_by_name(
-        self,
-        name: str,
-        user_id: str | None = None,
-        workspace_id: str | None = None,
-        authority: AuthorityContext | None = None,
-    ) -> McpServerModel | None:
-        """Get an MCP server by name; returns None if not found."""
-        params: dict[str, Any] = {"name": name}
-        ws_id = self._ws(workspace_id)
-        if ws_id:
-            params["workspace_id"] = ws_id
-        if user_id is not None:
-            params["user_id"] = user_id
-
-        try:
-            data = await self._client._request("GET", "/mcp-servers/by-name", params=params, authority=authority)
-            return McpServerModel(**data["mcp_server"])
-        except Exception:
-            return None
-
     async def create(
         self,
         name: str,
@@ -340,26 +319,6 @@ class SyncMcpServersAPI:
         """Get an MCP server by ID."""
         data = self._client._request("GET", f"/mcp-servers/{server_id}")
         return McpServerModel(**data["mcp_server"])
-
-    def get_by_name(
-        self,
-        name: str,
-        user_id: str | None = None,
-        workspace_id: str | None = None,
-    ) -> McpServerModel | None:
-        """Get an MCP server by name; returns None if not found."""
-        params: dict[str, Any] = {"name": name}
-        ws_id = self._ws(workspace_id)
-        if ws_id:
-            params["workspace_id"] = ws_id
-        if user_id is not None:
-            params["user_id"] = user_id
-
-        try:
-            data = self._client._request("GET", "/mcp-servers/by-name", params=params)
-            return McpServerModel(**data["mcp_server"])
-        except Exception:
-            return None
 
     def create(
         self,

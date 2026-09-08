@@ -19,13 +19,26 @@ from datetime import UTC, datetime
 from scitrera_app_framework import get_logger
 from scitrera_app_framework.api import Variables
 
-from ...config import DEFAULT_TENANT_ID
+from ...config import (
+    DEFAULT_TENANT_ID,
+    MEMORYLAYER_FACT_DECOMPOSITION_MAX_TOKENS,
+    DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_MAX_TOKENS,
+    MEMORYLAYER_FACT_DECOMPOSITION_REASONING_EFFORT,
+    DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_REASONING_EFFORT,
+    MEMORYLAYER_MEMORY_EXTRACTION_MAX_TOKENS,
+    DEFAULT_MEMORYLAYER_MEMORY_EXTRACTION_MAX_TOKENS,
+    MEMORYLAYER_MEMORY_CLASSIFY_MAX_TOKENS,
+    DEFAULT_MEMORYLAYER_MEMORY_CLASSIFY_MAX_TOKENS,
+    MEMORYLAYER_CUE_ANCHOR_MAX_TOKENS,
+    DEFAULT_MEMORYLAYER_CUE_ANCHOR_MAX_TOKENS,
+)
 from ...models.llm import LLMMessage, LLMRequest, LLMRole
+from ...models.generation import GenerationActivity
 from ...models.memory import Memory, MemorySubtype, MemoryType
 from ...utils import compute_content_hash, generate_id
 from ..deduplication import EXT_DEDUPLICATION_SERVICE, DeduplicationAction, DeduplicationService
 from ..embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
-from ..llm import EXT_LLM_SERVICE, LLMService
+from ..llm import EXT_LLM_SERVICE, LLMNotConfiguredError, LLMService
 from ..storage import EXT_STORAGE_BACKEND, StorageBackend
 from .base import (
     CATEGORY_MAPPING,
@@ -127,6 +140,48 @@ class DefaultExtractionService(ExtractionService):
         self.deduplication_service = deduplication_service
         self.embedding_service = embedding_service
         self.logger = get_logger(v, name=self.__class__.__name__)
+        # Completion-token budget for the fact-decomposition LLM call
+        # (env-tunable; reasoning models need headroom on large inputs).
+        self.fact_decomposition_max_tokens = (
+            v.get(
+                MEMORYLAYER_FACT_DECOMPOSITION_MAX_TOKENS,
+                DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_MAX_TOKENS,
+            )
+            if v is not None
+            else DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_MAX_TOKENS
+        )
+        # Reasoning effort for the same call. Off by default: thinking tokens
+        # come out of the budget above rather than adding to it, so they buy
+        # deliberation at the cost of the fact array itself.
+        self.fact_decomposition_reasoning_effort = (
+            v.get(
+                MEMORYLAYER_FACT_DECOMPOSITION_REASONING_EFFORT,
+                DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_REASONING_EFFORT,
+            )
+            if v is not None
+            else DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_REASONING_EFFORT
+        )
+        # Completion-token budget for the 6-category memory extraction
+        # (extract_from_session); env-tunable, generative output.
+        self.memory_extraction_max_tokens = (
+            v.get(
+                MEMORYLAYER_MEMORY_EXTRACTION_MAX_TOKENS,
+                DEFAULT_MEMORYLAYER_MEMORY_EXTRACTION_MAX_TOKENS,
+            )
+            if v is not None
+            else DEFAULT_MEMORYLAYER_MEMORY_EXTRACTION_MAX_TOKENS
+        )
+        # Completion caps for the small internal steps (env-tunable).
+        self.classify_max_tokens = (
+            v.get(MEMORYLAYER_MEMORY_CLASSIFY_MAX_TOKENS,
+                  DEFAULT_MEMORYLAYER_MEMORY_CLASSIFY_MAX_TOKENS)
+            if v is not None else DEFAULT_MEMORYLAYER_MEMORY_CLASSIFY_MAX_TOKENS
+        )
+        self.cue_anchor_max_tokens = (
+            v.get(MEMORYLAYER_CUE_ANCHOR_MAX_TOKENS,
+                  DEFAULT_MEMORYLAYER_CUE_ANCHOR_MAX_TOKENS)
+            if v is not None else DEFAULT_MEMORYLAYER_CUE_ANCHOR_MAX_TOKENS
+        )
         self.logger.info("Initialized DefaultExtractionService")
 
     async def extract_from_session(
@@ -215,7 +270,12 @@ class DefaultExtractionService(ExtractionService):
             extraction_time_ms=elapsed_ms,
         )
 
-    async def decompose_to_facts(self, content: str) -> list[dict]:
+    async def decompose_to_facts(
+        self,
+        content: str,
+        reference_time: datetime | None = None,
+        images: list[str] | None = None,
+    ) -> list[dict]:
         """Decompose composite content into atomic facts using LLM.
 
         Falls back to returning the original content as a single fact
@@ -223,24 +283,63 @@ class DefaultExtractionService(ExtractionService):
 
         Args:
             content: Composite memory content to decompose
+            reference_time: Optional reference timestamp for the source content.
+                When provided, the model is instructed to resolve relative
+                temporal references (e.g. "last Tuesday", "yesterday") to
+                absolute calendar dates against this anchor, and may surface an
+                ``event_time`` for each fact (write-time temporal normalization).
+            images: Optional list of page images (base64 PNG or ``data:`` URIs)
+                for the OCR-free (visual) decomposition path. When provided, the
+                image(s) are attached to the user message so the facts are read
+                directly FROM the page by the (multimodal) extraction model —
+                used for scanned document-page memories that carry only a visual
+                placeholder as ``content``. The SAME ``extraction`` profile is
+                used as the text path (prod uses a vision-capable model, e.g.
+                Fireworks Qwen, for fact extraction). When None the text-only
+                path runs unchanged.
 
         Returns:
-            List of dicts with keys: 'content', 'type' (optional), 'subtype' (optional)
+            List of dicts with keys: 'content', 'type' (optional), 'subtype'
+            (optional). When ``reference_time`` is provided, each dict may also
+            carry an 'event_time' key: a parsed ``datetime`` (or None) giving the
+            absolute date the fact is about. The fallback single-fact return has
+            no 'event_time' key (callers must treat it as absent).
         """
         if not self.llm_service:
             self.logger.debug("No LLM provider available, returning content as single fact")
             return [{"content": content}]
 
+        # Base decomposition instructions. When reference_time is None the prompt
+        # is byte-identical to the historical prompt so existing behavior/tests
+        # are unaffected; the temporal-normalization block is only appended when
+        # a reference time is supplied.
+        temporal_instructions = ""
+        event_time_field = ""
+        if reference_time is not None:
+            temporal_instructions = (
+                f"The reference time for this content is {reference_time.isoformat()}. "
+                "Resolve any relative dates (e.g. 'last Tuesday', 'yesterday') to "
+                "absolute calendar dates.\n\n"
+            )
+            event_time_field = (
+                '- "event_time": (optional) the absolute date/time (ISO-8601, e.g. '
+                '"2026-01-15" or "2026-01-15T14:00:00Z") that this fact is ABOUT, if '
+                "the fact references a specific time; otherwise omit or null.\n"
+            )
+
         system_prompt = (
             "You are a fact decomposition assistant. Break the following composite text "
             "into individual atomic facts. Each fact should be a single, standalone piece "
             "of information that makes sense on its own.\n\n"
+            f"{temporal_instructions}"
             "## Output Format\n\n"
             "Return a JSON array of objects. Each object must have:\n"
             '- "content": The atomic fact (clear, standalone, concise)\n'
             '- "type": (optional) One of: episodic, semantic, procedural, working\n'
             '- "subtype": (optional) One of: solution, problem, code_pattern, fix, error, '
-            "workflow, preference, decision, profile, entity, event, directive\n\n"
+            "workflow, preference, decision, profile, entity, event, directive\n"
+            f"{event_time_field}"
+            "\n"
             "## Guidelines\n\n"
             "1. Each fact should express exactly ONE piece of information\n"
             "2. Facts must be STANDALONE - understandable without the original context\n"
@@ -250,21 +349,42 @@ class DefaultExtractionService(ExtractionService):
             "Return ONLY the JSON array, no additional text."
         )
 
-        user_prompt = f"Decompose this content into atomic facts:\n\n---\n{content}\n---"
+        # Visual (OCR-free) path: read the facts directly from the page image.
+        # The ``content`` here is only a provenance placeholder (e.g. "[Visual
+        # page 3 of scan.pdf]"), so instruct the model to decompose the IMAGE
+        # rather than that text; the image(s) are attached to the user message
+        # below. The standard ``extraction`` profile is a multimodal model (prod
+        # uses Fireworks Qwen for extraction), so no separate vision profile or
+        # endpoint is needed.
+        if images:
+            user_prompt = "Decompose the content of the attached page image into atomic facts."
+        else:
+            user_prompt = f"Decompose this content into atomic facts:\n\n---\n{content}\n---"
 
         try:
             messages = [
                 LLMMessage(role=LLMRole.SYSTEM, content=system_prompt),
-                LLMMessage(role=LLMRole.USER, content=user_prompt),
+                LLMMessage(
+                    role=LLMRole.USER,
+                    content=user_prompt,
+                    images=images or None,
+                ),
             ]
 
             request = LLMRequest(
                 messages=messages,
-                max_tokens=6000,
+                max_tokens=self.fact_decomposition_max_tokens,
                 temperature_factor=0.3,
+                reasoning_effort=self.fact_decomposition_reasoning_effort,
             )
 
-            response = await self.llm_service.complete(request, profile="extraction")
+            # Text and image decomposition share the standard ``extraction``
+            # profile so both run on the same prod-faithful model.
+            response = await self.llm_service.complete(
+                request,
+                profile="extraction",
+                activity=GenerationActivity.FACT_DECOMPOSITION,
+            )
             raw = response.content.strip()
 
             # Strip markdown code block wrapper if present
@@ -276,10 +396,22 @@ class DefaultExtractionService(ExtractionService):
                     lines = lines[:-1]
                 raw = "\n".join(lines)
 
-            # Extract JSON array from response (handle surrounding text)
-            array_start = raw.find("[")
-            if array_start > 0:
-                raw = raw[array_start:]
+            # Extract the JSON array from the response, tolerating surrounding
+            # prose. Reasoning-capable models (e.g. Fireworks Qwen) sometimes
+            # emit analysis text — which can itself contain stray "[" — before
+            # or after the JSON, so anchor on the first array-of-objects
+            # (``[ { ... } ]``) rather than the first bare "[". Fall back to the
+            # widest ``[`` .. ``]`` span, then to the raw text.
+            array_match = re.search(r"\[\s*\{.*\}\s*\]", raw, re.DOTALL)
+            if array_match:
+                raw = array_match.group(0)
+            else:
+                first_bracket = raw.find("[")
+                last_bracket = raw.rfind("]")
+                if first_bracket != -1 and last_bracket > first_bracket:
+                    raw = raw[first_bracket:last_bracket + 1]
+                elif first_bracket > 0:
+                    raw = raw[first_bracket:]
 
             try:
                 facts = json.loads(raw)
@@ -298,6 +430,7 @@ class DefaultExtractionService(ExtractionService):
                             "content": item["content"].strip(),
                             "type": item.get("type"),
                             "subtype": item.get("subtype"),
+                            "event_time": self._parse_event_time(item.get("event_time")),
                         }
                     )
 
@@ -329,6 +462,12 @@ class DefaultExtractionService(ExtractionService):
         """
         # Remove trailing commas before } or ]
         cleaned = re.sub(r",\s*([}\]])", r"\1", raw)
+        # Repair invalid backslash escapes: vision/OCR models often transcribe
+        # math/medical notation as LaTeX (e.g. "kg/m$^2$", "$\beta$", "\," thin
+        # spaces), and a lone backslash that does not begin a valid JSON escape
+        # (``" \ / b f n r t u``) makes json.loads raise "Invalid \escape".
+        # Double any such backslash so it survives as a literal character.
+        cleaned = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", cleaned)
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
@@ -353,6 +492,32 @@ class DefaultExtractionService(ExtractionService):
                     pass
 
         raise json.JSONDecodeError("Could not recover facts from malformed JSON", raw, 0)
+
+    def _parse_event_time(self, value) -> datetime | None:
+        """Parse an LLM-supplied ``event_time`` value into a datetime.
+
+        Accepts an ISO-8601 string (a trailing "Z" is normalized to "+00:00")
+        and returns the parsed ``datetime``. Returns None for missing/None/blank
+        values or on any parse failure — never raises, so a malformed model
+        response degrades gracefully to "no event time".
+
+        Args:
+            value: The raw ``event_time`` value from the decomposed fact dict.
+
+        Returns:
+            Parsed ``datetime`` or None.
+        """
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError as e:
+            self.logger.debug("Unparseable event_time %r: %s", value, e)
+            return None
 
     async def classify_content(self, content: str) -> tuple[MemoryType, "MemorySubtype | None"]:
         """Classify a single memory's content into a type and subtype.
@@ -384,10 +549,14 @@ class DefaultExtractionService(ExtractionService):
             ]
             request = LLMRequest(
                 messages=messages,
-                max_tokens=20,
+                max_tokens=self.classify_max_tokens,
                 temperature=0.0,
             )
-            response = await self.llm_service.complete(request, profile="extraction")
+            response = await self.llm_service.complete(
+                request,
+                profile="extraction",
+                activity=GenerationActivity.MEMORY_CLASSIFICATION,
+            )
             category_str = response.content.strip().lower()
 
             try:
@@ -398,9 +567,122 @@ class DefaultExtractionService(ExtractionService):
 
             return CATEGORY_MAPPING.get(category, (MemoryType.SEMANTIC, None))
 
+        except LLMNotConfiguredError as e:
+            # Expected on a server with no LLM configured; announced once at startup.
+            self.logger.debug("Skipping content classification: %s", e)
+            return (MemoryType.SEMANTIC, None)
         except Exception as e:
             self.logger.warning("Content classification failed: %s", e)
             return (MemoryType.SEMANTIC, None)
+
+    async def generate_cue_anchors(self, content: str) -> list[dict]:
+        """Generate 1-3 structured ``[entity] + [aspect]`` cue anchors for a memory.
+
+        Prompts the LLM to emit a JSON array of 1-3 objects, each naming the
+        ``"entity"`` (main entity) and ``"aspect"`` (key facet) of the memory
+        (e.g. ``{"entity": "Jane", "aspect": "hiking trip"}``). Cue anchors are
+        atomic, distinct facets, specific, and non-overlapping. Adopted from
+        Microsoft Memora's cue prompt.
+
+        Returns a list of ``{"cue": str, "entity": str, "aspect": str}`` dicts
+        where ``cue`` is the reconstructed ``"[entity] [aspect]"`` string.
+        Exposing the parsed ``entity`` lets ingest link the cue to a canonical
+        Entity (shared entity vocabulary across the cue and entity arms).
+
+        Parses defensively (markdown-strip + ``json.loads`` + partial-parse
+        recovery, mirroring ``decompose_to_facts``). Returns ``[]`` when no LLM is
+        available or on any failure, and caps the result at 3.
+        """
+        if not self.llm_service:
+            self.logger.debug("No LLM provider available, cannot generate cue anchors")
+            return []
+
+        system_prompt = (
+            "You are a cue-anchor generation assistant. A cue anchor is a short "
+            "semantic key that names the MAIN ENTITY plus one KEY ASPECT of a "
+            "memory, used as a retrieval handle (e.g. Jane + hiking trip, "
+            "Project Orion + timeline).\n\n"
+            "## Output Format\n\n"
+            "Return a JSON array of 1-3 objects. Each object has two string "
+            'fields:\n'
+            '- "entity": the MAIN ENTITY (a concrete name/topic)\n'
+            '- "aspect": one KEY ASPECT of that entity in this memory\n\n'
+            "## Guidelines\n\n"
+            "1. Each cue must be ATOMIC — one entity, one aspect\n"
+            "2. Cues must cover DISTINCT facets — do not overlap or repeat\n"
+            "3. Be SPECIFIC — prefer concrete names/topics over generic words\n"
+            "4. Keep each field SHORT (a few words), no punctuation or quotes inside\n"
+            "5. Return AT MOST 3 cues; fewer is fine when the memory is narrow\n\n"
+            "Return ONLY the JSON array, no additional text."
+        )
+
+        user_prompt = f"Generate cue anchors for this memory:\n\n---\n{content}\n---"
+
+        try:
+            messages = [
+                LLMMessage(role=LLMRole.SYSTEM, content=system_prompt),
+                LLMMessage(role=LLMRole.USER, content=user_prompt),
+            ]
+
+            request = LLMRequest(
+                messages=messages,
+                max_tokens=self.cue_anchor_max_tokens,
+                temperature_factor=0.3,
+            )
+
+            response = await self.llm_service.complete(
+                request,
+                profile="extraction",
+                activity=GenerationActivity.FACT_DECOMPOSITION,
+            )
+            raw = response.content.strip()
+
+            # Strip markdown code block wrapper if present.
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                raw = "\n".join(lines)
+
+            # Extract JSON array from response (handle surrounding text).
+            array_start = raw.find("[")
+            if array_start > 0:
+                raw = raw[array_start:]
+
+            try:
+                cues = json.loads(raw)
+            except json.JSONDecodeError:
+                cues = self._parse_partial_json_array(raw)
+
+            if not isinstance(cues, list):
+                self.logger.warning("Cue-anchor response is not a JSON array, returning no cues")
+                return []
+
+            # Keep only well-formed objects, build cue = "entity aspect",
+            # de-dup while preserving order, cap at 3.
+            validated: list[dict] = []
+            seen: set[str] = set()
+            for item in cues:
+                if not isinstance(item, dict):
+                    continue
+                entity = str(item.get("entity", "")).strip()
+                aspect = str(item.get("aspect", "")).strip()
+                cue = " ".join(part for part in (entity, aspect) if part).strip()
+                if not cue or cue.lower() in seen:
+                    continue
+                seen.add(cue.lower())
+                validated.append({"cue": cue, "entity": entity, "aspect": aspect})
+                if len(validated) >= 3:
+                    break
+
+            self.logger.info("Generated %d cue anchor(s)", len(validated))
+            return validated
+
+        except Exception as e:
+            self.logger.warning("Cue-anchor generation failed: %s, returning no cues", e)
+            return []
 
     async def _llm_extraction(self, context: str, categories: list[ExtractionCategory]) -> list[ExtractedMemory]:
         """
@@ -425,12 +707,16 @@ class DefaultExtractionService(ExtractionService):
 
             request = LLMRequest(
                 messages=messages,
-                max_tokens=4000,  # Allow room for multiple memories
+                max_tokens=self.memory_extraction_max_tokens,  # room for multiple memories
                 temperature_factor=0.4,  # Lower temperature for more consistent extraction
             )
 
             self.logger.debug("Sending extraction request to LLM")
-            response = await self.llm_service.complete(request, profile="extraction")
+            response = await self.llm_service.complete(
+                request,
+                profile="extraction",
+                activity=GenerationActivity.SESSION_EXTRACTION,
+            )
 
             # Parse the JSON response
             extracted = self._parse_llm_response(response.content, categories)

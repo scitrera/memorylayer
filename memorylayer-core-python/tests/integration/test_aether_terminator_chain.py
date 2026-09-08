@@ -404,7 +404,7 @@ async def test_path_filtering_denies_unlisted_path():
 #    These tests run entirely in-process.  The manual verification sequence
 #    after a real dev compose stack is up:
 #
-#    cd /home/drew/scitrera-app-monorepo2/backend-future
+#    cd <your Aether platform checkout>
 #    ./dev-platform.sh   # bring up Aether gateway with sv::memorylayer::* certs + ACL
 #    ./dev.sh            # bring up MemoryLayer + deps
 #

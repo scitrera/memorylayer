@@ -73,6 +73,12 @@ class VLLMSubprocessRunner:
     extra_args
         Free-form passthrough appended after the standard flags. The
         operator owns ordering and correctness.
+    enable_prompt_embeds
+        When True and ``role == "llm"``, adds ``--enable-prompt-embeds`` so
+        chat/completions requests may carry precomputed input embeddings
+        (``{"type": "prompt_embeds", "data": <b64>}`` content blocks /
+        ``extra_body={"prompt_embeds": ...}``). Ignored for pooling/embedding
+        roles, which reject the flag.
     """
 
     def __init__(
@@ -90,6 +96,7 @@ class VLLMSubprocessRunner:
         served_model_names: Sequence[str] | None = None,
         extra_args: Sequence[str] | None = None,
         architectures: Sequence[str] | None = None,
+        enable_prompt_embeds: bool = False,
         cmd: str = "vllm",
         startup_timeout_sec: float = 600.0,
         max_concurrent: int | None = None,
@@ -110,6 +117,7 @@ class VLLMSubprocessRunner:
         self.served_model_names = list(served_model_names) if served_model_names else []
         self.extra_args = list(extra_args) if extra_args else []
         self.architectures = list(architectures) if architectures else []
+        self.enable_prompt_embeds = bool(enable_prompt_embeds)
         self.cmd = cmd
         self.startup_timeout_sec = float(startup_timeout_sec)
         # Concurrency limit applied by ``concurrency_slot()``. Resolved
@@ -184,6 +192,11 @@ class VLLMSubprocessRunner:
             # Do NOT add --convert embed here — that would mean-pool away
             # the multi-vector signal we want to preserve.
             argv.extend(["--runner", "pooling"])
+        if self.enable_prompt_embeds and self.role == _ROLE_LLM:
+            # Allow chat/completions requests to supply precomputed input
+            # embeddings (the visual-tokenizer prompt-embeds feature). Only
+            # meaningful for generation; pooling/embedding runners reject it.
+            argv.append("--enable-prompt-embeds")
         if self.architectures:
             import json as _json
 

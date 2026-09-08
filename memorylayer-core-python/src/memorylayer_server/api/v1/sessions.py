@@ -17,16 +17,33 @@ import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from scitrera_app_framework import Plugin, Variables
+from scitrera_app_framework import Plugin, Variables, get_extension
 
-from memorylayer_server.lifecycle.fastapi import get_logger
+from memorylayer_server.lifecycle.fastapi import get_logger, get_variables_dep
 
-from ...config import DEFAULT_CONTEXT_ID, DEFAULT_TENANT_ID
+from ...config import (
+    DEFAULT_CONTEXT_ID,
+    DEFAULT_MEMORYLAYER_CONTEXT_CURSOR_SECRET,
+    DEFAULT_MEMORYLAYER_CONTEXT_PACK_ENABLED,
+    DEFAULT_MEMORYLAYER_SESSION_CHECKPOINT_CAPTURE_ENABLED,
+    DEFAULT_MEMORYLAYER_SESSION_CHECKPOINT_MAX_BYTES,
+    DEFAULT_TENANT_ID,
+    MEMORYLAYER_CONTEXT_CURSOR_SECRET,
+    MEMORYLAYER_CONTEXT_PACK_ENABLED,
+    MEMORYLAYER_SESSION_CHECKPOINT_CAPTURE_ENABLED,
+    MEMORYLAYER_SESSION_CHECKPOINT_MAX_BYTES,
+)
+from ...models.context_pack import CursorExpiredError
+from ...models.generation import EnrichmentPolicy
 from ...services.audit import AuditEvent, AuditService
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
+from ...services.context_environment import EXT_CONTEXT_ENVIRONMENT_SERVICE
+from ...services.context_pack import ContextPackService, SessionCheckpointService
+from ...services.memory import MemoryService
 from ...services.metrics import MetricsService
 from ...services.session import SessionService
+from ...services.storage import StorageCapabilityError
 from ...services.workspace import WorkspaceService
 from .. import EXT_MULTI_API_ROUTERS
 from .deps import (
@@ -34,6 +51,7 @@ from .deps import (
     get_audit_service,
     get_auth_service,
     get_authz_service,
+    get_memory_service,
     get_metrics_service,
     get_session_service,
     get_workspace_service,
@@ -41,8 +59,14 @@ from .deps import (
 from .schemas import (
     CommitOptions,
     CommitResponse,
+    ContextDelta,
+    ContextDeltaInput,
+    ContextPack,
+    ContextPackInput,
     ErrorResponse,
     SessionBriefingResponse,
+    SessionCheckpoint,
+    SessionCheckpointInput,
     SessionCreateRequest,
     SessionListResponse,
     SessionResponse,
@@ -79,8 +103,12 @@ async def create_session(
     """
     Create a new working memory session.
 
-    Sessions provide TTL-based temporary context storage. Workspaces and contexts
-    are auto-created if they don't exist, enabling a "just works" experience.
+    Sessions provide TTL-based temporary context storage. Where implicit
+    workspace creation is enabled (``MEMORYLAYER_WORKSPACE_IMPLICIT_CREATE``,
+    the OSS default), the workspace and its ``_default`` context are created if
+    missing, giving a "just works" experience. Enterprise disables it, so a
+    request naming an unknown workspace is rejected during authentication and
+    never reaches here — the workspace must already exist.
 
     Args:
         http_request: FastAPI request (for headers)
@@ -739,6 +767,216 @@ async def touch_session(
     except Exception as e:
         logger.error("Failed to touch session %s: %s", session_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to touch session")
+
+
+def _context_service(memory_service: MemoryService, v: Variables) -> ContextPackService:
+    llm_service = getattr(memory_service, "llm_service", None)
+    policy = getattr(llm_service, "policy", EnrichmentPolicy.DETERMINISTIC)
+    try:
+        context_environment = get_extension(EXT_CONTEXT_ENVIRONMENT_SERVICE, v)
+    except Exception:
+        context_environment = None
+    return ContextPackService(
+        storage=memory_service.storage,
+        memory_service=memory_service,
+        cursor_secret=v.environ(
+            MEMORYLAYER_CONTEXT_CURSOR_SECRET,
+            default=DEFAULT_MEMORYLAYER_CONTEXT_CURSOR_SECRET,
+        ),
+        policy=policy,
+        context_environment=context_environment,
+    )
+
+
+async def _authorized_session(
+    http_request: Request,
+    session_id: str,
+    permission: str,
+    auth_service: AuthenticationService,
+    authz_service: AuthorizationService,
+    session_service: SessionService,
+):
+    ctx = await auth_service.build_context(http_request, None)
+    session = await session_service.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session not found: {session_id}")
+    await authz_service.require_authorization(
+        ctx,
+        "sessions",
+        permission,
+        resource_id=session_id,
+        workspace_id=session.workspace_id,
+    )
+    return ctx, session
+
+
+@router.post(
+    "/{session_id}/checkpoints",
+    response_model=SessionCheckpoint,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_checkpoint(
+    http_request: Request,
+    session_id: str,
+    request: SessionCheckpointInput,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    v: Variables = Depends(get_variables_dep),
+) -> SessionCheckpoint:
+    if not v.environ(
+        MEMORYLAYER_SESSION_CHECKPOINT_CAPTURE_ENABLED,
+        default=DEFAULT_MEMORYLAYER_SESSION_CHECKPOINT_CAPTURE_ENABLED,
+        type_fn=lambda value: str(value).lower() in {"1", "true", "yes", "on"},
+    ):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Session checkpoint capture is disabled")
+    _ctx, session = await _authorized_session(
+        http_request,
+        session_id,
+        "write",
+        auth_service,
+        authz_service,
+        session_service,
+    )
+    service = SessionCheckpointService(
+        memory_service.storage,
+        memory_service,
+        max_bytes=v.environ(
+            MEMORYLAYER_SESSION_CHECKPOINT_MAX_BYTES,
+            default=DEFAULT_MEMORYLAYER_SESSION_CHECKPOINT_MAX_BYTES,
+            type_fn=int,
+        ),
+    )
+    try:
+        return await service.capture(session.workspace_id, session_id, request)
+    except StorageCapabilityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"code": "storage_capability_missing", "capability": exc.capability},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{session_id}/checkpoints/{checkpoint_id}",
+    response_model=SessionCheckpoint,
+)
+async def get_checkpoint(
+    http_request: Request,
+    session_id: str,
+    checkpoint_id: str,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+) -> SessionCheckpoint:
+    _ctx, session = await _authorized_session(
+        http_request,
+        session_id,
+        "read",
+        auth_service,
+        authz_service,
+        session_service,
+    )
+    try:
+        checkpoint = await memory_service.storage.get_session_checkpoint(
+            session.workspace_id,
+            session_id,
+            checkpoint_id,
+        )
+    except StorageCapabilityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"code": "storage_capability_missing", "capability": exc.capability},
+        ) from exc
+    if checkpoint is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checkpoint not found")
+    return checkpoint
+
+
+@router.post("/{session_id}/context-pack", response_model=ContextPack)
+async def create_context_pack(
+    http_request: Request,
+    session_id: str,
+    request: ContextPackInput,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    v: Variables = Depends(get_variables_dep),
+) -> ContextPack:
+    if not v.environ(
+        MEMORYLAYER_CONTEXT_PACK_ENABLED,
+        default=DEFAULT_MEMORYLAYER_CONTEXT_PACK_ENABLED,
+        type_fn=lambda value: str(value).lower() in {"1", "true", "yes", "on"},
+    ):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Context packs are disabled")
+    _ctx, session = await _authorized_session(
+        http_request,
+        session_id,
+        "read",
+        auth_service,
+        authz_service,
+        session_service,
+    )
+    try:
+        return await _context_service(memory_service, v).build_pack(
+            session.workspace_id,
+            session_id,
+            request,
+        )
+    except StorageCapabilityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"code": "storage_capability_missing", "capability": exc.capability},
+        ) from exc
+
+
+@router.post("/{session_id}/context-delta", response_model=ContextDelta)
+async def create_context_delta(
+    http_request: Request,
+    session_id: str,
+    request: ContextDeltaInput,
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    session_service: SessionService = Depends(get_session_service),
+    memory_service: MemoryService = Depends(get_memory_service),
+    v: Variables = Depends(get_variables_dep),
+) -> ContextDelta:
+    if not v.environ(
+        MEMORYLAYER_CONTEXT_PACK_ENABLED,
+        default=DEFAULT_MEMORYLAYER_CONTEXT_PACK_ENABLED,
+        type_fn=lambda value: str(value).lower() in {"1", "true", "yes", "on"},
+    ):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Context packs are disabled")
+    _ctx, session = await _authorized_session(
+        http_request,
+        session_id,
+        "read",
+        auth_service,
+        authz_service,
+        session_service,
+    )
+    try:
+        return await _context_service(memory_service, v).build_delta(
+            session.workspace_id,
+            session_id,
+            request,
+        )
+    except CursorExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc), "recovery": "request_context_pack"},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except StorageCapabilityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"code": "storage_capability_missing", "capability": exc.capability},
+        ) from exc
 
 
 class SessionsAPIPlugin(Plugin):

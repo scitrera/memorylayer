@@ -423,6 +423,63 @@ class TestGraphTraversal:
         assert isinstance(result.paths, list)
         assert isinstance(result.unique_nodes, list)
 
+
+class TestUpdateAssociationWatermark:
+    """Tests that update_association bumps endpoint memory updated_at (watermark visibility).
+
+    After an association update, the source and target memories must have a
+    newer updated_at so that get_workspace_change_watermark advances and the
+    KB skip-generate / AGE materialize gates see the change.
+    """
+
+    @pytest.mark.asyncio
+    async def test_update_association_bumps_memory_updated_at(
+        self,
+        memory_service: MemoryService,
+        association_service: AssociationService,
+        storage_backend,
+        workspace_id: str,
+    ):
+        """After update_association, source and target memories' updated_at must advance."""
+        import asyncio
+
+        mem_src = await memory_service.remember(workspace_id, RememberInput(content="Watermark source memory"))
+        mem_tgt = await memory_service.remember(workspace_id, RememberInput(content="Watermark target memory"))
+
+        assoc = await association_service.associate(
+            workspace_id,
+            AssociateInput(source_id=mem_src.id, target_id=mem_tgt.id, relationship="related_to", strength=0.5),
+        )
+
+        # Capture updated_at before the edge update.
+        src_before = await storage_backend.get_memory(workspace_id, mem_src.id)
+        tgt_before = await storage_backend.get_memory(workspace_id, mem_tgt.id)
+        assert src_before is not None
+        assert tgt_before is not None
+
+        # Small sleep to ensure the clock advances (utc_now_iso has microsecond precision).
+        await asyncio.sleep(0.01)
+
+        updated = await storage_backend.update_association(
+            workspace_id=workspace_id,
+            association_id=assoc.id,
+            strength=0.9,
+        )
+        assert updated is True
+
+        src_after = await storage_backend.get_memory(workspace_id, mem_src.id)
+        tgt_after = await storage_backend.get_memory(workspace_id, mem_tgt.id)
+        assert src_after is not None
+        assert tgt_after is not None
+
+        # Both memory rows must have a strictly later updated_at.
+        assert src_after.updated_at > src_before.updated_at, (
+            "Source memory updated_at did not advance after update_association"
+        )
+        assert tgt_after.updated_at > tgt_before.updated_at, (
+            "Target memory updated_at did not advance after update_association"
+        )
+
     @pytest.mark.asyncio
     async def test_max_depth_limits(
         self,
@@ -753,10 +810,14 @@ class TestEdgeCases:
         memory_service: MemoryService,
         workspace_id: str,
     ):
-        """Test creating duplicate association (same source/target/relationship).
+        """Creating a duplicate association (same source/target/relationship) is an
+        idempotent no-op.
 
-        Database has UNIQUE constraint on (source_id, target_id, relationship).
-        Attempting to create duplicate should fail with IntegrityError.
+        The UNIQUE constraint on (source_id, target_id, relationship) is honored via
+        ``ON CONFLICT ... DO NOTHING``, so a duplicate does NOT raise (which on
+        Postgres/asyncpg would abort the surrounding transaction and take the rest
+        of an auto_enrich batch down). It returns the pre-existing edge instead, so
+        a reprocess/re-enrich or a race between concurrent tasks is harmless.
         """
         mem_a = await memory_service.remember(workspace_id, RememberInput(content="Memory A"))
         mem_b = await memory_service.remember(workspace_id, RememberInput(content="Memory B"))
@@ -766,14 +827,12 @@ class TestEdgeCases:
             workspace_id, AssociateInput(source_id=mem_a.id, target_id=mem_b.id, relationship="related_to", strength=0.8)
         )
 
-        # Attempt to create duplicate - should fail due to unique constraint
-        with pytest.raises(Exception):  # IntegrityError or similar
-            await association_service.associate(
-                workspace_id, AssociateInput(source_id=mem_a.id, target_id=mem_b.id, relationship="related_to", strength=0.9)
-            )
-
-        # First association should still exist
+        # Duplicate: no exception; returns the existing edge (same id), not a new one.
+        assoc2 = await association_service.associate(
+            workspace_id, AssociateInput(source_id=mem_a.id, target_id=mem_b.id, relationship="related_to", strength=0.9)
+        )
         assert assoc1.id is not None
+        assert assoc2.id == assoc1.id
 
     @pytest.mark.asyncio
     async def test_empty_graph_traversal(

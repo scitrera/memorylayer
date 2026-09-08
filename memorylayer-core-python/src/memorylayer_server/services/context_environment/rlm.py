@@ -12,11 +12,15 @@ from typing import TYPE_CHECKING, Any
 
 from scitrera_app_framework import Variables, get_logger
 
+from ...models.generation import GenerationActivity
+
 from ...config import (
     DEFAULT_MEMORYLAYER_CONTEXT_RLM_MAX_EXEC_SECONDS,
     DEFAULT_MEMORYLAYER_CONTEXT_RLM_MAX_ITERATIONS,
+    DEFAULT_MEMORYLAYER_RLM_EVAL_MAX_TOKENS,
     MEMORYLAYER_CONTEXT_RLM_MAX_EXEC_SECONDS,
     MEMORYLAYER_CONTEXT_RLM_MAX_ITERATIONS,
+    MEMORYLAYER_RLM_EVAL_MAX_TOKENS,
 )
 
 if TYPE_CHECKING:
@@ -105,6 +109,9 @@ class RLMRunner:
                 MEMORYLAYER_CONTEXT_RLM_MAX_ITERATIONS,
                 DEFAULT_MEMORYLAYER_CONTEXT_RLM_MAX_ITERATIONS,
             )
+        )
+        self._eval_max_tokens = int(
+            v.get(MEMORYLAYER_RLM_EVAL_MAX_TOKENS, DEFAULT_MEMORYLAYER_RLM_EVAL_MAX_TOKENS)
         )
         self._max_exec_seconds = int(
             v.get(
@@ -240,7 +247,10 @@ class RLMRunner:
                     ],
                     temperature=0.2,
                 )
-                plan_response = await llm_service.complete(plan_request)
+                plan_response = await llm_service.complete(
+                    plan_request,
+                    activity=GenerationActivity.SYNTHESIS,
+                )
                 generated_code = plan_response.content.strip()
             except Exception as e:
                 iter_trace["error"] = f"LLM plan generation failed: {e}"
@@ -307,9 +317,12 @@ class RLMRunner:
                         LLMMessage(role=LLMRole.USER, content="Is the goal achieved?"),
                     ],
                     temperature=0.0,
-                    max_tokens=100,
+                    max_tokens=self._eval_max_tokens,
                 )
-                eval_response = await llm_service.complete(eval_request)
+                eval_response = await llm_service.complete(
+                    eval_request,
+                    activity=GenerationActivity.SYNTHESIS,
+                )
                 evaluation = eval_response.content.strip()
             except Exception as e:
                 iter_trace["eval_error"] = str(e)

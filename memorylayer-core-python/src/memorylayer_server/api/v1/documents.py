@@ -27,8 +27,9 @@ from ...models.document import Document, DocumentPage, IngestionJob
 from ...services.authentication import AuthenticationService
 from ...services.authorization import AuthorizationService
 from ...services.document import EXT_DOCUMENT_SERVICE, DocumentService
+from ...services.tasks import TaskService
 from .. import EXT_MULTI_API_ROUTERS
-from .deps import get_auth_service, get_authz_service
+from .deps import get_auth_service, get_authz_service, get_task_service
 from .schemas import ErrorResponse
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
@@ -59,6 +60,7 @@ class DocumentResponse(BaseModel):
     content_hash: str
     size_bytes: int
     mime_type: str | None = None
+    source_vfs_ref: str | None = None
     status: str
     target_context_id: str
     page_count: int
@@ -179,6 +181,7 @@ def _doc_to_response(doc: Document) -> DocumentResponse:
         content_hash=doc.content_hash,
         size_bytes=doc.size_bytes,
         mime_type=doc.mime_type,
+        source_vfs_ref=doc.source_vfs_ref,
         status=doc.status.value,
         target_context_id=doc.target_context_id,
         page_count=doc.page_count,
@@ -327,6 +330,7 @@ async def list_documents(
     http_request: Request,
     doc_status: str | None = Query(None, alias="status", description="Filter by document status"),
     document_type: str | None = Query(None, description="Filter by document type"),
+    workspace_id: str | None = Query(None, description="Workspace to list (defaults to the caller's context workspace)"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     auth_service: AuthenticationService = Depends(get_auth_service),
@@ -337,10 +341,11 @@ async def list_documents(
     """List documents in the workspace."""
     try:
         ctx = await auth_service.build_context(http_request, None)
-        await authz_service.require_authorization(ctx, "documents", "read", workspace_id=ctx.workspace_id)
+        ws = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(ctx, "documents", "read", workspace_id=ws)
 
         docs, total = await document_service.list_documents(
-            workspace_id=ctx.workspace_id,
+            workspace_id=ws,
             status=doc_status,
             document_type=document_type,
             limit=limit,
@@ -814,6 +819,60 @@ async def reprocess_document(
     except Exception as e:
         logger.error("Failed to reprocess document %s: %s", document_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reprocess document")
+
+
+@router.post(
+    "/{document_id}/verify",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        403: {"model": ErrorResponse, "description": "Authorization denied"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def reverify_document(
+    http_request: Request,
+    document_id: str,
+    workspace_id: str | None = Query(
+        None, description="Workspace of the document (defaults to the caller's context workspace)"
+    ),
+    auth_service: AuthenticationService = Depends(get_auth_service),
+    authz_service: AuthorizationService = Depends(get_authz_service),
+    task_service: TaskService = Depends(get_task_service),
+    logger: logging.Logger = Depends(get_logger),
+) -> dict:
+    """Re-verify / heal a SINGLE document — enqueues an on-demand ``doc_verify``
+    that bypasses the reconcile attempt cap.
+
+    This is the SELF-SERVICE, per-document action (a user re-driving their own
+    stuck document). WORKSPACE-wide and SYSTEM-wide reconcile sweeps are admin
+    operations — see ``POST /v1/admin/documents/verify``.
+
+    Authorization: ``documents:write`` on the document's workspace.
+    """
+    try:
+        ctx = await auth_service.build_context(http_request, None)
+        ws = workspace_id or ctx.workspace_id
+        await authz_service.require_authorization(ctx, "documents", "write", workspace_id=ws)
+
+        task_id = await task_service.schedule_task(
+            "doc_verify",
+            {"workspace_id": ws, "document_id": document_id},
+            metadata={"bg_kind": "doc_verify", "visibility": "workspace", "title": "Reprocessing document"},
+        )
+        logger.info(
+            "Enqueued doc_verify for document %s (workspace=%s task=%s)",
+            document_id, ws, task_id,
+        )
+        return {"task_id": task_id, "mode": "document", "scheduled": task_id is not None}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to enqueue doc_verify for %s: %s", document_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to enqueue doc_verify",
+        )
 
 
 @router.delete(
