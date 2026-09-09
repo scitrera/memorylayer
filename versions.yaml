@@ -38,7 +38,7 @@ preferred_versions:
     "scitrera-app-framework": "0.0.69"
     "scitrera-ext-cachetools": "0.0.1"
     "scitrera-rt-data[all]": "0.0.7"
-    "scitrera-aether-client": ">=0.2.2"
+    "scitrera-aether-client": ">=0.2.3"
     "aiosqlite": "0.22.1"
     "sqlite-vec": "0.1.9"
     "sqlalchemy[asyncio]": "2.0.46"
@@ -55,6 +55,7 @@ preferred_versions:
     # side effect of a CI change.
     # TODO: opentelemetry versions
   typescript:
+    "@scitrera/aether-client": "^0.2.3"
     "@modelcontextprotocol/sdk": "^1.26.0"
   # Container image tags. Not a package ecosystem — sync-versions has no rewriter
   # for this bucket — but it is the same "one place versions are pinned" contract,
@@ -69,14 +70,14 @@ preferred_versions:
     #
     # Pinned rather than `latest` so rebuilding a release tag reproduces the same
     # image. No leading "v" — that is how these are published, and PyPI agrees
-    # (image 0.2.2 / client 0.2.2 / go modules v0.2.2 are one release).
+    # (image 0.2.3 / client 0.2.3 / go modules v0.2.3 are one release).
     #
     # NOTE this is a BARE version, which is why it can be interpolated into the
     # Dockerfile's `scitrera-aether-client==${AETHER_CLIENT_VERSION}`.
-    # preferred_versions.python holds a SPEC (">=0.2.2") for the same package
+    # preferred_versions.python holds a SPEC (">=0.2.3") for the same package
     # because that is the right constraint for a library dependency; the two serve
     # different purposes and must stay compatible (this pin must satisfy that floor).
-    "ghcr.io/scitrera/aether": "0.2.2"
+    "ghcr.io/scitrera/aether": "0.2.3"
 
 sources:
   python:

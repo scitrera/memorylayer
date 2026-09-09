@@ -33,7 +33,7 @@ dependencies = [
 # (cowork, enterprise integrations) can route through proxy_http_async on
 # a shared Aether SDK connection. Default httpx transport stays dep-light.
 aether = [
-    "scitrera-aether-client>=0.2.2",
+    "scitrera-aether-client>=0.2.3",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -44,7 +44,7 @@ dev = [
     # Pulled into dev so ``tests/test_transport_aether.py`` can import
     # ``scitrera_aether_client.proxy``. Mirrors the optional ``aether`` extra
     # so the test environment matches a real Aether-enabled install.
-    "scitrera-aether-client>=0.2.2",
+    "scitrera-aether-client>=0.2.3",
 ]
 
 [project.urls]

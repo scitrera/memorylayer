@@ -1,7 +1,7 @@
 {
   "name": "@scitrera/memorylayer-openclaw-plugin",
   "version": "0.2.0",
-  "description": "OpenClaw plugin for MemoryLayer.ai \u2014 first-class memory capability, recall, and persistence",
+  "description": "OpenClaw plugin for MemoryLayer.ai — first-class memory capability, recall, and persistence",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -39,7 +39,7 @@
     }
   },
   "devDependencies": {
-    "@scitrera/aether-client": "^0.2.2",
+    "@scitrera/aether-client": "^0.2.3",
     "@scitrera/memorylayer-sdk": "file:../memorylayer-sdk-typescript",
     "@types/node": "^20.0.0",
     "esbuild": "^0.28.0",

@@ -225,8 +225,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=ghcr.io/scitrera/memorylayer-embed-server,push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            AETHER_CLIENT_VERSION=0.2.2
-            AETHER_VERSION=0.2.2
+            AETHER_CLIENT_VERSION=0.2.3
+            AETHER_VERSION=0.2.3
           cache-from: type=gha,scope=memorylayer-embed-server-linux-amd64
           cache-to: type=gha,mode=max,scope=memorylayer-embed-server-linux-amd64
   build-memorylayer-embed-server-linux-arm64:
@@ -289,8 +289,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=ghcr.io/scitrera/memorylayer-embed-server,push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            AETHER_CLIENT_VERSION=0.2.2
-            AETHER_VERSION=0.2.2
+            AETHER_CLIENT_VERSION=0.2.3
+            AETHER_VERSION=0.2.3
           cache-from: type=gha,scope=memorylayer-embed-server-linux-arm64
           cache-to: type=gha,mode=max,scope=memorylayer-embed-server-linux-arm64
   merge-memorylayer-embed-server:
@@ -414,8 +414,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=ghcr.io/scitrera/memorylayer-embed-server,push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            AETHER_CLIENT_VERSION=0.2.2
-            AETHER_VERSION=0.2.2
+            AETHER_CLIENT_VERSION=0.2.3
+            AETHER_VERSION=0.2.3
           cache-from: type=gha,scope=memorylayer-embed-server-cuda13-linux-amd64
           cache-to: type=gha,mode=max,scope=memorylayer-embed-server-cuda13-linux-amd64
   build-memorylayer-embed-server-cuda13-linux-arm64:
@@ -480,8 +480,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=ghcr.io/scitrera/memorylayer-embed-server,push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            AETHER_CLIENT_VERSION=0.2.2
-            AETHER_VERSION=0.2.2
+            AETHER_CLIENT_VERSION=0.2.3
+            AETHER_VERSION=0.2.3
           cache-from: type=gha,scope=memorylayer-embed-server-cuda13-linux-arm64
           cache-to: type=gha,mode=max,scope=memorylayer-embed-server-cuda13-linux-arm64
   merge-memorylayer-embed-server-cuda13:
