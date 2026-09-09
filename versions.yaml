@@ -5,7 +5,7 @@ memorylayer-core-python: 0.2.0
 memorylayer-server-rpg-python: 0.2.0
 memorylayer-embed-server: 0.2.0
 
-memorylayer-sdk-python: 0.2.0
+memorylayer-sdk-python: 0.2.1
 memorylayer-sdk-typescript: 0.2.0
 # Go module versions come from git tags (`memorylayer-sdk-go/vX.Y.Z`), not from a
 # manifest; the `go_version` rule below keeps the in-source `const Version` in
@@ -27,8 +27,8 @@ memorylayer-openclaw-plugin: 0.2.0
 # by Codex, so there is no publish job for it either way.
 memorylayer-codex-plugin: 0.2.0
 
-memorylayer-sdk-langchain-python: 0.2.0
-memorylayer-sdk-llamaindex-python: 0.2.0
+memorylayer-sdk-langchain-python: 0.2.1
+memorylayer-sdk-llamaindex-python: 0.2.1
 
 memorylayer-explorer: 0.0.6
 
@@ -143,6 +143,9 @@ ci:
     # Test each adapter against the SDK from this checkout.
     install_local_deps: true
     test_command: 'pytest tests/ -x'
+    extra_steps:
+      - name: Verify source distribution and wheel contents
+        run: python ../scripts/check-python-package.py
     # Disabled for now, and not for lack of generator support: ci.yml ran
     # `ruff check .` and `ruff format --check .`, and `lint: ruff` plus
     # `format_check: true` reproduces both exactly. The blocker is the current

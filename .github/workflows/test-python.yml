@@ -50,6 +50,11 @@ jobs:
         run: pytest tests/ -m "not slow and not integration and not llm and not llm_quality" -x
         working-directory: memorylayer-core-python
 
+      - name: Verify source distribution and wheel contents
+        run: |
+          python ../scripts/check-python-package.py
+        working-directory: memorylayer-core-python
+
       - name: Retrieval eval gate
         run: |
           memorylayer-eval gate
@@ -84,6 +89,11 @@ jobs:
         run: pytest tests/ -x
         working-directory: memorylayer-sdk-langchain-python
 
+      - name: Verify source distribution and wheel contents
+        run: |
+          python ../scripts/check-python-package.py
+        working-directory: memorylayer-sdk-langchain-python
+
   test-memorylayer-sdk-llamaindex-python:
     name: Test memorylayer-sdk-llamaindex-python (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -113,6 +123,11 @@ jobs:
         run: pytest tests/ -x
         working-directory: memorylayer-sdk-llamaindex-python
 
+      - name: Verify source distribution and wheel contents
+        run: |
+          python ../scripts/check-python-package.py
+        working-directory: memorylayer-sdk-llamaindex-python
+
   test-memorylayer-sdk-python:
     name: Test memorylayer-sdk-python (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -136,6 +151,11 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -x
+        working-directory: memorylayer-sdk-python
+
+      - name: Verify source distribution and wheel contents
+        run: |
+          python ../scripts/check-python-package.py
         working-directory: memorylayer-sdk-python
 
   test-memorylayer-server-rpg-python:
@@ -165,4 +185,9 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -x
+        working-directory: memorylayer-server-rpg-python
+
+      - name: Verify source distribution and wheel contents
+        run: |
+          python ../scripts/check-python-package.py
         working-directory: memorylayer-server-rpg-python
