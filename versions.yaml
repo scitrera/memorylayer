@@ -231,6 +231,8 @@ ci:
     # what ci.yml did by hand with upload/download-artifact.
     build: true
     cache: true
+    # Use npm trusted publishing; do not pass a legacy NPM_TOKEN to publish.
+    use_oidc: true
     use_provenance: true
     skip_if_published: true
     require_matching_tag: true

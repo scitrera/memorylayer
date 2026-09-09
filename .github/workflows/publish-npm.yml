@@ -90,8 +90,6 @@ jobs:
         if: steps.published.outputs.skip != 'true'
         run: npm publish --access public --provenance
         working-directory: memorylayer-sdk-typescript
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-memorylayer-mcp-typescript:
     name: Publish memorylayer-mcp-typescript to npm
@@ -175,8 +173,6 @@ jobs:
         if: steps.published.outputs.skip != 'true'
         run: npm publish --access public --provenance
         working-directory: memorylayer-mcp-typescript
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-memorylayer-cc-plugin:
     name: Publish memorylayer-cc-plugin to npm
@@ -274,8 +270,6 @@ jobs:
         if: steps.published.outputs.skip != 'true'
         run: npm publish --access public --provenance
         working-directory: memorylayer-cc-plugin
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-memorylayer-opencode-plugin:
     name: Publish memorylayer-opencode-plugin to npm
@@ -373,5 +367,3 @@ jobs:
         if: steps.published.outputs.skip != 'true'
         run: npm publish --access public --provenance
         working-directory: memorylayer-opencode-plugin
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
