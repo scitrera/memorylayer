@@ -6,7 +6,7 @@ Packages in this repo share one version line (see `versions.yaml`), with two
 deliberate exceptions: `memorylayer-embed-server` (container image only) and
 `memorylayer-explorer` (a Next.js app, unpublished) are versioned independently.
 
-## [0.2.0] — unreleased
+## [0.2.0] — 2026-09-08
 
 The largest release so far: a new Go SDK, two new agent-host plugins, an entity
 and perspective layer under recall, and a retrieval-quality gate in CI.

@@ -42,7 +42,7 @@ func main() {
 	if err := agent.Connect(ctx); err != nil {
 		log.Fatalf("aether connect: %v", err)
 	}
-	defer agent.Close()
+	defer func() { _ = agent.Close() }()
 
 	// 2. Route the MemoryLayer SDK through the Aether connection.
 	transport := mlaether.NewTransport(agent, mlaether.WithTarget(*target))
@@ -54,7 +54,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("new memorylayer client: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// 3. Use the SDK exactly as with the HTTP transport.
 	mem, err := client.Remember(ctx, "Routed through Aether.", memorylayer.RememberOptions{

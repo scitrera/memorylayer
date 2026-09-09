@@ -1,11 +1,10 @@
 # v0.2.0 release review — 2026-09-08
 
-Status: MemoryLayer is prepared for owner review. No MemoryLayer source, tag,
-or package has been pushed or published. Repo-tools v0.1.30 has been released
-with owner approval, and its published wheel passes MemoryLayer's version and
-generated-workflow checks.
-The remaining upstream NLTK advisory and validation limits below require an
-explicit MemoryLayer release decision.
+Status: the owner approved pushing and tagging MemoryLayer v0.2.0 on 2026-09-08,
+after reviewing the disclosed NLTK advisory and validation limits below.
+This document records the release review; GitHub Actions and the release page
+report publication status. Repo-tools v0.1.30 is published, and its wheel passes
+MemoryLayer's version and generated-workflow checks.
 
 ## Release source and coordinated artifacts
 
@@ -46,8 +45,8 @@ not published to npm. Explorer remains an unpublished application.
 ### First RPG publication setup
 
 The public PyPI JSON API returned 404 for `memorylayer-server-rpg` during this
-review. Before the approved release, confirm that the owning PyPI account has
-a pending trusted publisher with these values:
+review. The owner confirmed that the pending trusted publisher is configured
+with these values:
 
 | Setting | Value |
 | --- | --- |
@@ -57,8 +56,8 @@ a pending trusted publisher with these values:
 | Workflow filename | `publish-python.yml` |
 | GitHub environment | `pypi` |
 
-The workflow uses PyPI trusted publishing. Pending-publisher registration is an
-account-side prerequisite and has not been verified or changed in this session.
+The workflow uses PyPI trusted publishing. Pending-publisher registration was
+confirmed by the owner; this session did not change the PyPI account settings.
 It allows the first approved upload to create the project; it does not publish
 the package by itself. See [PyPI's pending-publisher instructions](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/).
 
@@ -154,10 +153,7 @@ The upstream prerequisite is complete:
 
 ## Approval boundary
 
-Repo-tools v0.1.30 is published and verified. Review the sanitized MemoryLayer
-snapshot and remaining risks before approving any MemoryLayer push. After that
-separate approval, publish the reviewed source, confirm hosted CI and the RPG
-pending trusted publisher described above, and publish
-`v0.2.0`; the generated Go workflow creates both module tags at that same commit.
-Never replace an existing release tag. No MemoryLayer remote action is
-authorized by this report or by approval of the repo-tools release.
+The owner explicitly approved pushing and tagging v0.2.0 and confirmed the RPG
+pending trusted publisher. Publish from the reviewed sanitized snapshot and
+require hosted CI to pass before tagging. The generated Go workflow creates
+both module tags at that same commit. Never replace an existing release tag.

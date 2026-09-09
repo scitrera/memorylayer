@@ -185,7 +185,7 @@ func (t *Transport) RoundTrip(ctx context.Context, req *memorylayer.Request) (*m
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
