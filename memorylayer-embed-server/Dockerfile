@@ -1,20 +1,9 @@
 # MemoryLayer Embed Server — GPU image
 # Build context: ``oss/`` (the OSS repo root, or the monorepo's ``oss/`` subdir).
 #
-# !! PLATFORM LOCK: build with --platform linux/amd64 ONLY !!
-# This image depends on nvidia/cuda (CUDA toolkit + vLLM/triton/flashinfer),
-# which has no arm64 variant that supports GPU-accelerated inference. It is
-# intentionally excluded from the multi-arch build loop in
-# saas/scripts/build-and-push-images.sh (see IMAGE_MAP comment "Deliberately
-# skipped") and must be built and pushed separately:
-#
-#   CI / ML-repo build script:
-#     docker buildx build --platform linux/amd64 \
-#       -f memorylayer-embed-server/Dockerfile .    # from oss/
-#
-#   Local dev:
-#     docker buildx build --platform linux/amd64 \
-#       -f oss/memorylayer-embed-server/Dockerfile oss/
+# CI builds linux/amd64 and linux/arm64 on native runners, then combines
+# their digests into one multiarch image. The CUDA and Aether base images
+# provide both architectures; native Python extensions build for the runner.
 #
 #   CI:    docker build -f memorylayer-embed-server/Dockerfile .       # from oss/
 #   Dev:   docker build -f oss/memorylayer-embed-server/Dockerfile oss/
@@ -66,7 +55,8 @@ RUN python3 -m venv /opt/memorylayer-embed
 COPY memorylayer-core-python /src/memorylayer-core-python
 COPY memorylayer-embed-server /src/memorylayer-embed-server
 
-# Install everything into the venv with correct CUDA torch wheels.
+# Install CUDA 13 wheels explicitly: CI runners have no GPU driver, so
+# --torch-backend=auto would silently select CPU-only PyTorch.
 # scitrera-aether-client comes from PyPI: empty AETHER_CLIENT_VERSION
 # → latest; otherwise pinned to the supplied version.
 RUN set -eu; \
@@ -75,10 +65,14 @@ RUN set -eu; \
     else \
         AETHER_PKG="scitrera-aether-client"; \
     fi; \
-    uv pip install --python /opt/memorylayer-embed/bin/python --torch-backend=auto \
+    uv pip install --python /opt/memorylayer-embed/bin/python --torch-backend=cu130 \
         "${AETHER_PKG}" \
         "/src/memorylayer-core-python[all]" \
         "/src/memorylayer-embed-server[all]"
+
+# Verify the wheel variant without requiring a GPU on the build runner.
+RUN /opt/memorylayer-embed/bin/python -c \
+    "import torch; assert torch.version.cuda and torch.version.cuda.startswith('13.'), f'Expected CUDA 13 PyTorch, got {torch.version.cuda!r}'; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
 
 # ── Stage 2: CUDA devel runtime ──────────────────────────────────────
 # Uses the -devel (not -runtime) base because vLLM's triton/flashinfer

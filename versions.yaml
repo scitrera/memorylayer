@@ -406,8 +406,6 @@ docker:
     memorylayer-embed-server-cuda13:
       context: .
       dockerfile: memorylayer-embed-server/Dockerfile
-      # The CUDA/vLLM Dockerfile explicitly supports linux/amd64 only.
-      platforms: [ linux/amd64 ]
       image_name: memorylayer-embed-server
       tag_suffix: -cuda13
       build_args:
