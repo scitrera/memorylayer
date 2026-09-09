@@ -6,6 +6,13 @@ This document records the release review; GitHub Actions and the release page
 report publication status. Repo-tools v0.1.30 is published, and its wheel passes
 MemoryLayer's version and generated-workflow checks.
 
+Publication follow-up: v0.2.0 is published. Final artifact checks caught three
+empty Python SDK/adapter wheels; corrected 0.2.1 packages are published, and the
+three defective 0.2.0 releases are yanked. Native AMD64/ARM64 container builds,
+Go module publication, and npm OIDC publication passed. See
+[the final publication status](RELEASE_STATUS_v0.2.0.md) and
+[Python packaging correction](RELEASE_PATCH_REVIEW_python_v0.2.1.md).
+
 ## Release source and coordinated artifacts
 
 The reviewed source includes 217 local commits beyond the public branch plus
@@ -138,9 +145,10 @@ The upstream prerequisite is complete:
   using other NLTK/LlamaIndex features. Treat it as a disclosed dependency risk,
   avoid untrusted model artifacts, and update when a fix is published.
   [Advisory GHSA-8mgp-746c-j5xp](https://github.com/advisories/GHSA-8mgp-746c-j5xp).
-- GPU/live-provider tests, real OpenClaw/Aether service end-to-end tests, and
-  multi-architecture Docker builds were not run. Mock/offline suites and source
-  packaging do not establish those deployment properties.
+- GPU/live-provider tests and real OpenClaw/Aether service end-to-end tests
+  were not run. Subsequent native AMD64/ARM64 Docker builds and multiarch
+  manifest checks passed for all three images; an offline server-container
+  smoke test passed. These checks do not establish live GPU/service behavior.
 - Existing Python style/import lint debt and deprecation/mock warnings remain;
   Python lint is still disabled in generated CI. Changed adapter/authorization
   files pass their targeted Ruff check.
