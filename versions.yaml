@@ -362,10 +362,8 @@ dependency_mappings:
   # Docker build lane. Native per-architecture runners rather than QEMU, matching
   # the hand-written release-embed-server.yml — QEMU arm64 builds of a Python image
 
-# Container images. Only the main server image is generated here; the embed-server
-# image stays on the hand-written release-embed-server.yml (see only_workflows) —
-# it pulls the Aether proxy-sidecar binary from a separate registry image, which is
-# not something the generated lane models.
+# Container images. The generated lane builds the main server and both embed
+# variants, including their pinned Aether sidecar build arguments.
 #
 # NOTE the Dockerfile builds from the SOURCE TREE (COPY memorylayer-core-python),
 # not from PyPI. It previously did `pip install memorylayer-server[all]`, so the
@@ -408,6 +406,8 @@ docker:
     memorylayer-embed-server-cuda13:
       context: .
       dockerfile: memorylayer-embed-server/Dockerfile
+      # The CUDA/vLLM Dockerfile explicitly supports linux/amd64 only.
+      platforms: [ linux/amd64 ]
       image_name: memorylayer-embed-server
       tag_suffix: -cuda13
       build_args:
