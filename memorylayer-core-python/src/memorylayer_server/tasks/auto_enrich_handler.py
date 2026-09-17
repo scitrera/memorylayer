@@ -6,8 +6,12 @@ relationship classification).  Type classification uses ExtractionService.
 
 from logging import Logger
 
-from scitrera_app_framework import Variables, get_logger
+from scitrera_app_framework import Variables, ext_parse_bool, get_logger
 
+from ..config import (
+    DEFAULT_MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+    MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+)
 from ..services.association import EXT_ASSOCIATION_SERVICE
 from ..services.embedding import EXT_EMBEDDING_SERVICE, EmbeddingService
 from ..services.extraction import EXT_EXTRACTION_SERVICE
@@ -43,6 +47,14 @@ class AutoEnrichTaskHandler(TaskHandlerPlugin):
 
     async def handle(self, v: Variables, payload: dict) -> None:
         logger: Logger = get_logger(v, name=self.get_task_type())
+
+        # Also honor the switch for tasks queued before it was turned off.
+        if not v.environ(
+            MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+            default=DEFAULT_MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+            type_fn=ext_parse_bool,
+        ):
+            return
 
         memory_id = payload.get("memory_id")
         workspace_id = payload.get("workspace_id")

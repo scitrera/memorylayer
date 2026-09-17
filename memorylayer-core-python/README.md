@@ -129,6 +129,20 @@ async with MemoryLayerClient(base_url="http://localhost:61001") as client:
 | `MEMORYLAYER_EMBED_SERVER_URL` | `http://localhost:61051` | Base URL for `memorylayer-embed-server` (used by `embed_server` provider) |
 | `MEMORYLAYER_EMBED_TRANSPORT` | `http` | `http` for direct calls or `aether` for cross-DC mTLS via Aether |
 
+### Raw ingestion without automatic enrichment
+
+Set `MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED=false` for deployments that consume
+raw memories or document pages without derived facts and relationship graphs.
+The default is `true`, preserving existing behavior. When disabled, the post-store
+lifecycle skips fact decomposition, tier generation, contradiction checks and
+association/type enrichment. Raw content, embeddings, provenance and cache
+invalidation remain active. Previously queued `auto_enrich` tasks also exit
+without loading services or calling models; work already running is not cancelled.
+Existing derived records are not deleted, and explicit retrieval or LLM operations
+remain available. This switch does not change OCR, embedding providers or storage
+dimensions. Recreate/restart the affected server and worker processes after changing
+it. Previously queued decomposition/tier jobs should be drained before rollout.
+
 ### Deterministic memory and generation policy
 
 `MEMORYLAYER_ENRICHMENT_POLICY` controls generative model use at the central LLM
