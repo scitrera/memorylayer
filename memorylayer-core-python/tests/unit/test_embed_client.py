@@ -208,3 +208,23 @@ async def test_text_batching_bounds_bytes_and_restores_output_order():
     assert [c.args[2]["input"] for c in client.request_json.call_args_list] == [["aaa"], ["bbb", "c"]]
     with pytest.raises(ValueError, match="split the text"):
         await client.embed_texts_multivector(["123456"])
+
+
+async def test_page_fanout_bounded_and_out_of_order_replies_keep_indexes():
+    import asyncio
+    client = EmbedServerClient("http://embed", logger=MagicMock(), image_batch_size=1, image_concurrency=2)
+    active = peak = 0
+    async def send(method, path, payload):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        value = int(payload["images"][0])
+        await asyncio.sleep(.02 if value == 0 else .001)
+        active -= 1
+        return {"results": [{"page_index": 0, "content": str(value), "success": value != 2}], "stats": {"total_pages": 1}}
+    client.request_json = send
+    result = await client.transcribe_pages([str(i) for i in range(10)])
+    assert peak == 2
+    assert [r["page_index"] for r in result["results"]] == list(range(10))
+    assert [r["content"] for r in result["results"]] == [str(i) for i in range(10)]
+    assert not result["results"][2]["success"] and result["stats"]["total_pages"] == 10

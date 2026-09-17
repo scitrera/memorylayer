@@ -30,6 +30,7 @@ def stub_client() -> MagicMock:
     client.embed_texts = AsyncMock()
     client.embed_texts_multivector = AsyncMock()
     client.embed_images_multivector = AsyncMock()
+    client.embed_images = AsyncMock()
     return client
 
 
@@ -131,17 +132,18 @@ async def test_embed_image_multivector_sends_base64(stub_client):
 
 
 # ---------------------------------------------------------------------------
-# Single-vector image (averaged from multivector)
+# Single-vector image uses the same vector space as single-vector text
 # ---------------------------------------------------------------------------
 
 
-async def test_embed_image_returns_average(stub_client):
-    stub_client.embed_images_multivector.return_value = [{"vectors": [[1.0, 0.0], [0.0, 1.0]], "num_vectors": 2}]
-    provider = _provider_with_client(stub_client)
-
-    avg = await provider.embed_image(b"png-bytes")
-
-    assert avg == pytest.approx([0.5, 0.5])
+async def test_embed_image_routes_to_single_vector_without_normalization(stub_client):
+    vector = [float(i) / 1920 for i in range(1920)]
+    stub_client.embed_images.return_value = [vector]
+    provider = _provider_with_client(stub_client, request_dimensions=1920)
+    result = await provider.embed_image(b"png-bytes")
+    assert result == vector
+    stub_client.embed_images.assert_awaited_once_with(["cG5nLWJ5dGVz"], dimensions=1920)
+    stub_client.embed_images_multivector.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

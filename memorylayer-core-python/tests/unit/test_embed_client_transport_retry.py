@@ -54,7 +54,7 @@ class _Sender:
 async def test_transport_faults_are_retried_and_recover(exc):
     send = _Sender(exc, fail_times=1)
 
-    resp = await _client()._send_with_transport_retry(send, "POST", "/embed")
+    resp = await _client()._send_with_transport_retry(send, "GET", "/health")
 
     assert resp.status_code == 200
     assert send.calls == 2  # failed once, succeeded on a fresh connection
@@ -68,7 +68,7 @@ async def test_a_read_timeout_is_not_retried():
     send = _Sender(httpx.ReadTimeout("too slow"), fail_times=99)
 
     with pytest.raises(httpx.ReadTimeout):
-        await _client()._send_with_transport_retry(send, "POST", "/embed")
+        await _client()._send_with_transport_retry(send, "GET", "/health")
 
     assert send.calls == 1
 
@@ -87,7 +87,7 @@ async def test_persistent_failure_still_raises_after_the_attempt_budget():
     send = _Sender(httpx.ReadError("gone"), fail_times=99)
 
     with pytest.raises(httpx.ReadError):
-        await _client()._send_with_transport_retry(send, "POST", "/embed")
+        await _client()._send_with_transport_retry(send, "GET", "/health")
 
     assert send.calls == _TRANSPORT_RETRY_ATTEMPTS
 
@@ -99,3 +99,12 @@ async def test_a_healthy_request_is_sent_exactly_once():
     await _client()._send_with_transport_retry(send, "GET", "/health")
 
     assert send.calls == 1
+
+
+@pytest.mark.parametrize("fault", [httpx.ReadError("lost"), httpx.WriteError("lost"), httpx.RemoteProtocolError("lost")])
+async def test_inference_post_does_not_replay_after_ambiguous_acceptance(fault):
+    from unittest.mock import AsyncMock
+    send = AsyncMock(side_effect=fault)
+    with pytest.raises(type(fault)):
+        await _client()._send_with_transport_retry(send, "POST", "/v1/transcribe")
+    assert send.await_count == 1

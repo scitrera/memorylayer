@@ -93,6 +93,10 @@ class EmbedServerClient:
         *,
         transport: str = TRANSPORT_HTTP,
         image_batch_size: int = 0,
+        image_concurrency: int = 1,
+        text_concurrency: int = 1,
+        transcription_concurrency: int | None = None,
+        transcription_providers: list[str] | None = None,
         text_batch_size: int = 0,
         text_batch_bytes: int = 0,
         aether_connection: Any | None = None,
@@ -118,6 +122,24 @@ class EmbedServerClient:
         if image_batch_size < 0:
             raise ValueError("image_batch_size must be nonnegative")
         self._image_batch_size = image_batch_size
+        if not 1 <= image_concurrency <= 32:
+            raise ValueError("image_concurrency must be between 1 and 32")
+        self._image_concurrency = image_concurrency
+        transcription_concurrency = image_concurrency if transcription_concurrency is None else transcription_concurrency
+        for name, value in (("text_concurrency", text_concurrency), ("transcription_concurrency", transcription_concurrency)):
+            if type(value) is not int or not 1 <= value <= 32:
+                raise ValueError(f"{name} must be between 1 and 32")
+        if transcription_providers is not None and (
+                not isinstance(transcription_providers, list) or not transcription_providers or
+                any(not isinstance(p, str) or not p.strip() for p in transcription_providers) or
+                len(set(transcription_providers)) != len(transcription_providers)):
+            raise ValueError("transcription_providers must be a nonempty list of unique provider names")
+        self._transcription_providers = list(transcription_providers) if transcription_providers else None
+        self._text_concurrency = text_concurrency
+        self._transcription_concurrency = transcription_concurrency
+        # A client is process-wide: concurrent documents share these role limits.
+        self._embedding_slots = asyncio.Semaphore(max(image_concurrency, text_concurrency))
+        self._transcription_slots = asyncio.Semaphore(transcription_concurrency)
         if text_batch_size < 0 or text_batch_bytes < 0:
             raise ValueError("text batch limits must be nonnegative")
         self._text_batch_size = text_batch_size
@@ -175,23 +197,19 @@ class EmbedServerClient:
     # ------------------------------------------------------------------
 
     async def _send_with_transport_retry(self, send, method: str, path: str):
-        """Re-issue a request whose CONNECTION failed, not whose content did.
+        """Retry pre-send connection failures; never replay ambiguously accepted POSTs.
 
-        Only transport faults are retried, never statuses: an embed rejection
-        (e.g. "input length exceeds max_model_len") is deterministic, and
-        retrying it would triple the load and still fail.
-
-        The case this exists for is a pooled keep-alive connection the far end
-        has already closed. The failure surfaces on the NEXT request, before a
-        single response byte arrives, so it never reached the server -- which is
-        why the server logs show clean 200s while the caller sees an error.
-        Re-sending picks up a fresh connection.
+        A read error or closed keepalive connection does not prove the server
+        failed to accept the request. GET diagnostics may be retried; billed
+        inference POSTs only retry ConnectError/ConnectTimeout.
         """
         last: Exception | None = None
         for attempt_number in range(1, _TRANSPORT_RETRY_ATTEMPTS + 1):
             try:
                 return await send()
             except _RETRYABLE_TRANSPORT as exc:
+                if method.upper() != "GET" and not isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                    raise
                 last = exc
                 if attempt_number == _TRANSPORT_RETRY_ATTEMPTS:
                     break
@@ -385,17 +403,36 @@ class EmbedServerClient:
         """Split bounded serving requests while preserving batch-relative indexes."""
         images = payload["images"]
         limit = self._image_batch_size
+        transcription = path == "/v1/transcribe"
+        concurrency = self._transcription_concurrency if transcription else self._image_concurrency
+        slots = self._transcription_slots if transcription else self._embedding_slots
         if not limit or len(images) <= limit:
-            return await self.request_json("POST", path, payload)
+            async with slots:
+                return await self._request_image_batch(path, payload)
         key, index_key = ("results", "page_index") if path == "/v1/transcribe" else ("data", "index")
         merged: dict = {key: []}
         stats: dict = {}
-        for offset in range(0, len(images), limit):
-            part = await self.request_json("POST", path, {**payload, "images": images[offset:offset + limit]})
+        offsets = iter(range(0, len(images), limit))
+        parts = {}
+
+        async def worker():
+            for offset in offsets:
+                async with slots:
+                    parts[offset] = await self._request_image_batch(path, {**payload, "images": images[offset:offset + limit]})
+
+        if concurrency == 1:
+            await worker()
+        else:
+            async with asyncio.TaskGroup() as group:
+                for _ in range(min(concurrency, math.ceil(len(images) / limit))):
+                    group.create_task(worker())
+        for offset, part in sorted(parts.items()):
+            seen = set()
             for entry in part[key]:
                 index = entry[index_key]
-                if type(index) is not int or not 0 <= index < min(limit, len(images) - offset):
+                if type(index) is not int or not 0 <= index < min(limit, len(images) - offset) or index in seen:
                     raise ValueError("Invalid image index from embed server")
+                seen.add(index)
                 merged[key].append({**entry, index_key: index + offset})
             for name, value in part.get("stats", {}).items():
                 if isinstance(value, (float, int)):
@@ -403,6 +440,40 @@ class EmbedServerClient:
         if stats:
             merged["stats"] = stats
         return merged
+
+    async def _request_image_batch(self, path: str, payload: dict) -> dict:
+        if path != "/v1/transcribe" or not self._transcription_providers:
+            return await self.request_json("POST", path, payload)
+        # Explicit provider selection disables the remote default cascade. Only
+        # confirmed failed pages advance; transport/protocol failures propagate.
+        images = payload["images"]
+        pending = list(range(len(images)))
+        results = {}
+        totals = {"total_tokens_in": 0, "total_tokens_out": 0, "total_latency_ms": 0}
+        for provider in self._transcription_providers:
+            response = await self.request_json("POST", path,
+                {**payload, "images": [images[i] for i in pending], "provider": provider})
+            entries = response["results"]
+            indexes = [entry.get("page_index") for entry in entries]
+            if (any(type(i) is not int for i in indexes) or sorted(indexes) != list(range(len(pending)))
+                    or any(type(entry.get("success")) is not bool for entry in entries)):
+                raise ValueError("Invalid transcription page indexes or success flags")
+            remaining = []
+            for entry in entries:
+                index = pending[entry["page_index"]]
+                attempts = results.get(index, {}).get("attempts", []) + entry.get("attempts", [])
+                results[index] = {**entry, "page_index": index, "attempts": attempts}
+                if not entry["success"]:
+                    remaining.append(index)
+            for name in totals:
+                totals[name] += response.get("stats", {}).get(name, 0)
+            pending = sorted(remaining)
+            if not pending:
+                break
+        ordered = [results[i] for i in range(len(images))]
+        successful = sum(entry["success"] for entry in ordered)
+        return {"results": ordered, "stats": {**totals, "total_pages": len(images),
+                "successful_pages": successful, "failed_pages": len(images) - successful}}
 
     async def transcribe_pages(
         self,
@@ -423,7 +494,8 @@ class EmbedServerClient:
     async def _request_texts(self, path: str, payload: dict) -> dict:
         texts = payload["input"]
         if not self._text_batch_size and not self._text_batch_bytes:
-            return await self.request_json("POST", path, payload)
+            async with self._embedding_slots:
+                return await self.request_json("POST", path, payload)
         batches: list[list[str]] = []
         batch: list[str] = []
         total_bytes = 0
@@ -439,15 +511,33 @@ class EmbedServerClient:
             total_bytes += size
         if batch:
             batches.append(batch)
+        parts = {}
+        pending = iter(enumerate(batches))
+
+        async def worker():
+            for number, batch in pending:
+                async with self._embedding_slots:
+                    parts[number] = await self.request_json("POST", path, {**payload, "input": batch})
+
+        if self._text_concurrency == 1:
+            await worker()
+        else:
+            async with asyncio.TaskGroup() as group:
+                for _ in range(min(self._text_concurrency, len(batches))):
+                    group.create_task(worker())
         merged: dict = {"data": []}
         offset = 0
-        for batch in batches:
-            part = await self.request_json("POST", path, {**payload, "input": batch})
+        for number, batch in enumerate(batches):
+            part = parts[number]
+            seen = set()
             for entry in part["data"]:
                 index = entry["index"]
-                if type(index) is not int or not 0 <= index < len(batch):
+                if type(index) is not int or not 0 <= index < len(batch) or index in seen:
                     raise ValueError("Invalid text index from embed server")
+                seen.add(index)
                 merged["data"].append({**entry, "index": index + offset})
+            if len(seen) != len(batch):
+                raise ValueError("Missing text index from embed server")
             offset += len(batch)
         return merged
 
@@ -669,6 +759,12 @@ class EmbedServerClientPlugin(EmbedServerClientPluginBase):
         )
         return EmbedServerClient(
             image_batch_size=int(v.environ("MEMORYLAYER_EMBED_IMAGE_BATCH_SIZE", default=0)),
+            image_concurrency=int(v.environ("MEMORYLAYER_EMBED_IMAGE_CONCURRENCY", default=1)),
+            text_concurrency=int(v.environ("MEMORYLAYER_EMBED_TEXT_CONCURRENCY", default=1)),
+            transcription_concurrency=int(v.environ("MEMORYLAYER_EMBED_TRANSCRIPTION_CONCURRENCY",
+                default=v.environ("MEMORYLAYER_EMBED_IMAGE_CONCURRENCY", default=1))),
+            transcription_providers=(str(v.environ("MEMORYLAYER_EMBED_TRANSCRIPTION_PROVIDERS", default="")).split(",")
+                if v.environ("MEMORYLAYER_EMBED_TRANSCRIPTION_PROVIDERS", default="") else None),
             text_batch_size=int(v.environ("MEMORYLAYER_EMBED_TEXT_BATCH_SIZE", default=0)),
             text_batch_bytes=int(v.environ("MEMORYLAYER_EMBED_TEXT_BATCH_BYTES", default=0)),
             base_url=base_url,

@@ -185,13 +185,10 @@ class EmbedServerEmbeddingProvider(MultimodalEmbeddingProvider):
     # ------------------------------------------------------------------
 
     async def embed_image(self, image: str | bytes | Path) -> list[float]:
-        """Single-vector embedding for an image (averaged from multi-vector)."""
-        import numpy as np
-
-        multi = await self.embed_image_multivector(image)
-        if not multi.vectors:
-            return []
-        return np.mean(np.array(multi.vectors), axis=0).tolist()
+        """Use the server's single-vector vision model, in the text vector space."""
+        client = await self._ensure_connected()
+        result = await client.embed_images([_to_base64(image)], dimensions=self._request_dimensions)
+        return result[0]
 
     async def embed_multimodal(
         self,
@@ -217,7 +214,7 @@ def _to_base64(image: str | bytes | Path) -> str:
             with urllib.request.urlopen(image) as response:  # noqa: S310 - operator-controlled URL
                 return base64.b64encode(response.read()).decode("ascii")
         path_obj = Path(image)
-        if len(image) <= 500 or path_obj.exists():
+        if len(image) <= 500:
             try:
                 return base64.b64encode(path_obj.read_bytes()).decode("ascii")
             except (OSError, ValueError):
