@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json as _json
+import math
 from logging import Logger
 from typing import Any
 
@@ -91,6 +92,9 @@ class EmbedServerClient:
         logger: Logger = None,
         *,
         transport: str = TRANSPORT_HTTP,
+        image_batch_size: int = 0,
+        text_batch_size: int = 0,
+        text_batch_bytes: int = 0,
         aether_connection: Any | None = None,
         aether_target: str = DEFAULT_MEMORYLAYER_EMBED_AETHER_TARGET,
         aether_stream_idle_timeout_ms: int = DEFAULT_MEMORYLAYER_EMBED_AETHER_STREAM_IDLE_TIMEOUT_MS,
@@ -111,6 +115,13 @@ class EmbedServerClient:
         """
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        if image_batch_size < 0:
+            raise ValueError("image_batch_size must be nonnegative")
+        self._image_batch_size = image_batch_size
+        if text_batch_size < 0 or text_batch_bytes < 0:
+            raise ValueError("text batch limits must be nonnegative")
+        self._text_batch_size = text_batch_size
+        self._text_batch_bytes = text_batch_bytes
         self._client: httpx.AsyncClient | None = None
         self.logger = logger
         self._transport = transport
@@ -370,6 +381,29 @@ class EmbedServerClient:
             return await self.request_stream("POST", "/v1/completions", request_payload)
         return await self.request_json("POST", "/v1/completions", payload)
 
+    async def _request_images(self, path: str, payload: dict) -> dict:
+        """Split bounded serving requests while preserving batch-relative indexes."""
+        images = payload["images"]
+        limit = self._image_batch_size
+        if not limit or len(images) <= limit:
+            return await self.request_json("POST", path, payload)
+        key, index_key = ("results", "page_index") if path == "/v1/transcribe" else ("data", "index")
+        merged: dict = {key: []}
+        stats: dict = {}
+        for offset in range(0, len(images), limit):
+            part = await self.request_json("POST", path, {**payload, "images": images[offset:offset + limit]})
+            for entry in part[key]:
+                index = entry[index_key]
+                if type(index) is not int or not 0 <= index < min(limit, len(images) - offset):
+                    raise ValueError("Invalid image index from embed server")
+                merged[key].append({**entry, index_key: index + offset})
+            for name, value in part.get("stats", {}).items():
+                if isinstance(value, (float, int)):
+                    stats[name] = stats.get(name, 0) + value
+        if stats:
+            merged["stats"] = stats
+        return merged
+
     async def transcribe_pages(
         self,
         images_b64: list[str],
@@ -384,7 +418,38 @@ class EmbedServerClient:
             payload["max_tokens"] = max_tokens
 
         self.logger.debug("Transcribing %d page images", len(images_b64))
-        return await self.request_json("POST", "/v1/transcribe", payload)
+        return await self._request_images("/v1/transcribe", payload)
+
+    async def _request_texts(self, path: str, payload: dict) -> dict:
+        texts = payload["input"]
+        if not self._text_batch_size and not self._text_batch_bytes:
+            return await self.request_json("POST", path, payload)
+        batches: list[list[str]] = []
+        batch: list[str] = []
+        total_bytes = 0
+        for text in texts:
+            size = len(text.encode("utf-8"))
+            if self._text_batch_bytes and size > self._text_batch_bytes:
+                raise ValueError("Text exceeds embed-server byte budget; split the text before embedding")
+            if batch and ((self._text_batch_size and len(batch) >= self._text_batch_size)
+                          or (self._text_batch_bytes and total_bytes + size > self._text_batch_bytes)):
+                batches.append(batch)
+                batch, total_bytes = [], 0
+            batch.append(text)
+            total_bytes += size
+        if batch:
+            batches.append(batch)
+        merged: dict = {"data": []}
+        offset = 0
+        for batch in batches:
+            part = await self.request_json("POST", path, {**payload, "input": batch})
+            for entry in part["data"]:
+                index = entry["index"]
+                if type(index) is not int or not 0 <= index < len(batch):
+                    raise ValueError("Invalid text index from embed server")
+                merged["data"].append({**entry, "index": index + offset})
+            offset += len(batch)
+        return merged
 
     async def embed_texts(self, texts: list[str], *, dimensions: int | None = None) -> list[list[float]]:
         """Get single-vector embeddings for texts.
@@ -393,15 +458,53 @@ class EmbedServerClient:
         Matryoshka-capable server truncates each vector to the requested size
         (mirrors the enterprise tokenary client). Omitted by default so servers
         that do not support the field are unaffected.
+
+        With ``text_batch_bytes`` configured, oversized inputs are split without
+        dropping characters. Chunk vectors are weighted by UTF-8 byte length,
+        summed and L2-normalized into one page vector. Short inputs retain their
+        original server vector. This is an approximate page representation; the
+        source transcript is never changed. Keep the byte budget stable for an
+        existing index, or explicitly re-embed when changing this policy.
         """
-        payload: dict = {"input": texts}
+        # Page transcripts can exceed the request budget. Embed every UTF-8-safe
+        # chunk and pool back to one vector per original input; never truncate
+        # the source or silently shift vectors onto the wrong page.
+        chunks, groups = [], []
+        for text in texts:
+            pieces = _split_embedding_text(text, self._text_batch_bytes)
+            groups.append((len(chunks), len(pieces)))
+            chunks.extend(pieces)
+        if not chunks:
+            return []
+        payload: dict = {"input": chunks}
         if dimensions is not None:
             payload["dimensions"] = dimensions
 
-        self.logger.debug("Embedding %d texts (single-vector, dimensions=%s)", len(texts), dimensions)
-        data = await self.request_json("POST", "/v1/embeddings", payload)
-        sorted_data = sorted(data["data"], key=lambda x: x["index"])
-        return [item["embedding"] for item in sorted_data]
+        self.logger.debug("Embedding %d texts in %d chunks (dimensions=%s)", len(texts), len(chunks), dimensions)
+        data = await self._request_texts("/v1/embeddings", payload)
+        entries = data["data"]
+        indices = [entry["index"] for entry in entries]
+        if (any(type(i) is not int for i in indices)
+                or sorted(indices) != list(range(len(chunks)))):
+            raise ValueError("Embed server must return exactly one vector per text chunk")
+        vectors = [item["embedding"] for item in sorted(entries, key=lambda x: x["index"])]
+        result = []
+        for start, count in groups:
+            if count == 1:
+                result.append(vectors[start])  # Preserve existing short-input vectors.
+                continue
+            group = vectors[start:start + count]
+            width = len(group[0])
+            if not width or any(len(vector) != width for vector in group):
+                raise ValueError("Inconsistent embedding dimensions across text chunks")
+            weights = [len(chunk.encode("utf-8")) for chunk in chunks[start:start + count]]
+            pooled = [math.fsum(vector[i] * weight for vector, weight in zip(group, weights))
+                      for i in range(width)]
+            norm = math.hypot(*pooled)
+            if not math.isfinite(norm) or norm == 0:
+                raise ValueError("Invalid pooled text embedding")
+            result.append([value / norm for value in pooled])
+        return result
 
     async def embed_texts_multivector(
         self,
@@ -412,16 +515,24 @@ class EmbedServerClient:
         payload = {"input": texts, "input_type": input_type}
 
         self.logger.debug("Embedding %d texts (multi-vector, type=%s)", len(texts), input_type)
-        data = await self.request_json("POST", "/v1/embeddings/multi", payload)
+        data = await self._request_texts("/v1/embeddings/multi", payload)
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
         return [{"vectors": item["vectors"], "num_vectors": item["num_vectors"]} for item in sorted_data]
+
+    async def embed_images(self, images_b64: list[str], *, dimensions: int | None = None) -> list[list[float]]:
+        """Get image vectors from the server's single-vector vision model."""
+        payload: dict = {"images": images_b64, "mode": "single"}
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        data = await self._request_images("/v1/embeddings/images", payload)
+        return [item["embedding"] for item in sorted(data["data"], key=lambda item: item["index"])]
 
     async def embed_images_multivector(self, images_b64: list[str]) -> list[dict]:
         """Get multi-vector embeddings from images via ColPali."""
         payload = {"images": images_b64, "mode": "multi"}
 
         self.logger.debug("Embedding %d images (multi-vector)", len(images_b64))
-        data = await self.request_json("POST", "/v1/embeddings/images", payload)
+        data = await self._request_images("/v1/embeddings/images", payload)
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
         return [{"vectors": item["vectors"], "num_vectors": item["num_vectors"]} for item in sorted_data]
 
@@ -443,6 +554,31 @@ class EmbedServerClient:
         )
         data = await self.request_json("POST", "/v1/score", payload)
         return data["scores"]
+
+
+def _split_embedding_text(text: str, byte_limit: int) -> list[str]:
+    """Losslessly split at UTF-8 boundaries, preferring nearby whitespace.
+
+    Long inputs use byte-weighted, L2-normalized pooling in ``embed_texts``.
+    The byte limit still applies to the entire outgoing batch in _request_texts.
+    """
+    encoded = text.encode("utf-8")
+    if not byte_limit or len(encoded) <= byte_limit:
+        return [text]
+    chunks = []
+    start = 0
+    while start < len(encoded):
+        chunk = encoded[start:start + byte_limit].decode("utf-8", errors="ignore")
+        if not chunk:
+            raise ValueError("Text byte budget cannot hold one UTF-8 character")
+        if start + len(chunk.encode("utf-8")) < len(encoded):
+            boundary = next((i + 1 for i in range(len(chunk) - 1, len(chunk) // 2, -1)
+                             if chunk[i].isspace()), None)
+            if boundary:
+                chunk = chunk[:boundary]
+        chunks.append(chunk)
+        start += len(chunk.encode("utf-8"))
+    return chunks
 
 
 class EmbedServerHTTPError(Exception):
@@ -532,6 +668,9 @@ class EmbedServerClientPlugin(EmbedServerClientPluginBase):
             timeout,
         )
         return EmbedServerClient(
+            image_batch_size=int(v.environ("MEMORYLAYER_EMBED_IMAGE_BATCH_SIZE", default=0)),
+            text_batch_size=int(v.environ("MEMORYLAYER_EMBED_TEXT_BATCH_SIZE", default=0)),
+            text_batch_bytes=int(v.environ("MEMORYLAYER_EMBED_TEXT_BATCH_BYTES", default=0)),
             base_url=base_url,
             timeout=timeout,
             logger=logger,

@@ -145,7 +145,7 @@ async def test_embed_client_aether_transport_honours_custom_target(monkeypatch):
         aether_connection=fake_aether_conn,
         aether_target="sv::memorylayer-embed::pod-7",
     )
-    await client.embed_texts([])
+    await client.embed_texts(["hi"])
 
     assert fake_proxy.await_args.kwargs["target_topic"] == "sv::memorylayer-embed::pod-7"
 
@@ -174,3 +174,37 @@ def test_embed_client_aether_transport_requires_connection():
             transport=TRANSPORT_AETHER,
             aether_connection=None,
         )
+
+
+async def test_image_batches_preserve_page_indexes_and_failed_pages():
+    client = EmbedServerClient("http://embed", logger=MagicMock(), image_batch_size=1)
+    client.request_json = AsyncMock(side_effect=[
+        {"results": [{"page_index": 0, "success": True, "raw_content": "figure", "output_contract": "unlimited_ocr"}],
+         "stats": {"total_pages": 1, "successful_pages": 1}},
+        {"results": [{"page_index": 0, "success": False}], "stats": {"total_pages": 1, "successful_pages": 0}},
+        {"results": [{"page_index": 0, "success": True}], "stats": {"total_pages": 1, "successful_pages": 1}},
+    ])
+    result = await client.transcribe_pages(["a", "b", "c"])
+    assert [p["page_index"] for p in result["results"]] == [0, 1, 2]
+    assert result["results"][0]["raw_content"] == "figure"
+    assert result["stats"] == {"total_pages": 3, "successful_pages": 2}
+    assert client.request_json.call_count == 3
+
+
+async def test_single_image_client_preserves_order_and_mode():
+    client = EmbedServerClient("http://embed", logger=MagicMock())
+    client.request_json = AsyncMock(return_value={"data": [{"index": 1, "embedding": [2.]}, {"index": 0, "embedding": [3.]}]})
+    assert await client.embed_images(["a", "b"], dimensions=1920) == [[3.], [2.]]
+    client.request_json.assert_awaited_once_with("POST", "/v1/embeddings/images", {"images": ["a", "b"], "mode": "single", "dimensions": 1920})
+
+
+async def test_text_batching_bounds_bytes_and_restores_output_order():
+    client = EmbedServerClient("http://embed", logger=MagicMock(), text_batch_size=2, text_batch_bytes=5)
+    client.request_json = AsyncMock(side_effect=[
+        {"data": [{"index": 0, "embedding": [1.]}]},
+        {"data": [{"index": 1, "embedding": [3.]}, {"index": 0, "embedding": [2.]}]},
+    ])
+    assert await client.embed_texts(["aaa", "bbb", "c"]) == [[1.], [2.], [3.]]
+    assert [c.args[2]["input"] for c in client.request_json.call_args_list] == [["aaa"], ["bbb", "c"]]
+    with pytest.raises(ValueError, match="split the text"):
+        await client.embed_texts_multivector(["123456"])
