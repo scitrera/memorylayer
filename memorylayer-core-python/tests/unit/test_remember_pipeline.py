@@ -894,8 +894,8 @@ class TestDecomposeCompleteEmission:
     @pytest.mark.asyncio
     async def test_emit_noop_without_aether_connection(self):
         """In OSS-standalone (no Aether send_event) the real emit_event no-ops, no raise."""
-        from memorylayer_server.services.events import emit_event
         from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
+        from memorylayer_server.services.events import emit_event
 
         # Aether service resolves but its client has no send_event.
         agent_svc = MagicMock()
@@ -920,8 +920,8 @@ class TestDecomposeCompleteEmission:
     @pytest.mark.asyncio
     async def test_emit_sends_event_when_aether_present(self):
         """When send_event exists, emit_event ships the JSON EventPayload envelope."""
-        from memorylayer_server.services.events import emit_event
         from memorylayer_server.services._constants import EXT_AETHER_SERVICE_CONNECTION
+        from memorylayer_server.services.events import emit_event
 
         client = AsyncMock()
         client.send_event = AsyncMock()
@@ -1096,3 +1096,49 @@ class TestClassifyTypeFlag:
             inline=True,
             classify_type=True,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inline", [False, True])
+async def test_post_store_opt_out_keeps_raw_memory_and_embedding(
+    mock_v, mock_storage, mock_embedding, mock_dedup, mock_task_service,
+    mock_tier_gen, mock_contradiction, mock_association, inline,
+):
+    from memorylayer_server.config import MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED
+
+    mock_v.set(MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED, "false")
+    content = "The proposal includes catering. It also includes cafe operations."
+    stored = _make_memory(content=content)
+    mock_storage.create_memory.return_value = stored
+    cache = AsyncMock()
+    service = MemoryService(
+        storage=mock_storage, embedding_service=mock_embedding,
+        deduplication_service=mock_dedup, association_service=mock_association,
+        cache=cache, v=mock_v, tier_generation_service=mock_tier_gen,
+        contradiction_service=mock_contradiction, task_service=mock_task_service,
+    )
+    assert service.post_store_enrichment_enabled is False
+    result = await service.remember("ws_test", RememberInput(content=content), inline=inline)
+    assert result.content == content
+    assert result.embedding == [0.1] * 384
+    mock_embedding.embed.assert_awaited_once()
+    mock_storage.create_memory.assert_awaited_once()
+    mock_task_service.schedule_task.assert_not_awaited()
+    mock_tier_gen.request_tier_generation.assert_not_awaited()
+    mock_tier_gen.generate_tiers.assert_not_awaited()
+    mock_contradiction.check_new_memory.assert_not_awaited()
+    mock_association.auto_associate.assert_not_awaited()
+    cache.clear_prefix.assert_any_await("recall:ws_test:")
+    cache.clear_prefix.assert_any_await("assoc:ws_test:")
+
+
+@pytest.mark.asyncio
+async def test_queued_auto_enrichment_honors_opt_out_without_resolving_services(mock_v):
+    from memorylayer_server.config import MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED
+    from memorylayer_server.tasks.auto_enrich_handler import AutoEnrichTaskHandler
+
+    mock_v.set(MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED, False)
+    handler = AutoEnrichTaskHandler()
+    with patch.object(handler, "get_extension", side_effect=AssertionError("derived work was requested")):
+        await handler.handle(mock_v, {"memory_id": "mem_queued", "workspace_id": "ws_test",
+                                      "content": "Previously queued page", "classify_type": True})

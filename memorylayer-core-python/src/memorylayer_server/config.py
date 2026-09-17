@@ -566,6 +566,11 @@ DEFAULT_MEMORYLAYER_RECALL_SUPERSESSION_PENALTY = 0.5
 # ============================================
 # Fact Decomposition
 # ============================================
+# Skip automatic post-store facts, associations, contradiction checks, and tiers.
+# Raw memory/page storage, embeddings, and cache invalidation remain active.
+MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED = "MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED"
+DEFAULT_MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED = True
+
 MEMORYLAYER_FACT_DECOMPOSITION_ENABLED = "MEMORYLAYER_FACT_DECOMPOSITION_ENABLED"
 DEFAULT_MEMORYLAYER_FACT_DECOMPOSITION_ENABLED = True
 

@@ -21,6 +21,10 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 from scitrera_app_framework import Variables, ext_parse_bool, get_extension, get_logger
 
+from ...config import (
+    DEFAULT_MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+    MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+)
 from ...models import (
     DetailLevel,
     Memory,
@@ -357,6 +361,12 @@ class MemoryService:
         # Get auto-association threshold from config
         self.auto_association_threshold = v.get(
             MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD, DEFAULT_MEMORYLAYER_ASSOCIATION_SIMILARITY_THRESHOLD
+        )
+
+        self.post_store_enrichment_enabled = v.environ(
+            MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+            default=DEFAULT_MEMORYLAYER_POST_STORE_ENRICHMENT_ENABLED,
+            type_fn=ext_parse_bool,
         )
 
         # Fact decomposition config
@@ -1428,6 +1438,12 @@ class MemoryService:
             was scheduled, and also for the inline path, which has already
             finished decomposing by the time it returns.
         """
+        if not self.post_store_enrichment_enabled:
+            # The caller already stored the raw content and its embedding.
+            # Preserve cache invalidation without scheduling derived work.
+            await self._post_store_pipeline(workspace_id, memory, embedding, inline=inline)
+            return False
+
         # ``decompose`` is a TRI-STATE, not a boolean: None means "no opinion --
         # apply the usual heuristic", which is what every existing caller passes
         # implicitly. Only an explicit False suppresses, so an unset per-document
@@ -1654,6 +1670,9 @@ class MemoryService:
             except Exception as e:
                 self.logger.debug("Cache invalidation failed: %s", e)
                 self._record_post_store_failure("cache_invalidation", workspace_id)
+
+        if not self.post_store_enrichment_enabled:
+            return
 
         # Tier generation
         if self.tier_generation_service:
