@@ -40,7 +40,8 @@ vllm = ["vllm>=0.19.0", "instanttensor"]
 # Launch the vLLM lanes through sparkrun (recipes + local executor) instead of
 # our own subprocess runner. GPU-path only — deliberately NOT in `local`, so the
 # CPU image does not carry it.
-sparkrun = ["sparkrun>=0.3.2"]
+# Requires independent BuildOptions/plan_build/build and application context APIs.
+sparkrun = ["sparkrun>=0.4.0"]
 colpali = ["colpali-engine>=0.3.0", "torch>=2.11.0,<2.12.0"]
 google = ["google-genai>=2.3.0"]
 # Observability: Prometheus /metrics endpoint + OpenTelemetry SDK / OTLP

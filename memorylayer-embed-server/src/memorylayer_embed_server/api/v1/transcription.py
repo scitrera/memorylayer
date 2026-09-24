@@ -38,6 +38,9 @@ async def transcribe(
             detail="Transcription service not configured",
         )
 
+    if request.provider is not None and request.provider not in {p.PROVIDER_NAME for p in cascade.providers}:
+        raise HTTPException(status_code=422, detail="Requested transcription provider is not configured")
+
     # Decode base64 images
     image_bytes_list = []
     for idx, image_b64 in enumerate(request.images):
@@ -56,6 +59,7 @@ async def transcribe(
         images=image_bytes_list,
         system_prompt=request.system_prompt,
         max_tokens=request.max_tokens,
+        **({"provider_name": request.provider} if request.provider is not None else {}),
     )
 
     # Convert to response models
@@ -85,6 +89,8 @@ async def transcribe(
             TranscriptionResult(
                 page_index=page.page_index,
                 content=page.content,
+                raw_content=page.raw_content,
+                output_contract=page.output_contract,
                 success=page.success,
                 model_used=page.model_used,
                 provider_used=page.provider_used,

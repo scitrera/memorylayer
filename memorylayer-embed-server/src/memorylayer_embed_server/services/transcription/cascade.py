@@ -48,6 +48,7 @@ class CascadeTranscriber:
         page_index: int = 0,
         system_prompt: str = None,
         max_tokens: int = None,
+        provider_name: str | None = None,
     ) -> PageTranscription:
         """
         Transcribe a single page through the cascade.
@@ -58,7 +59,12 @@ class CascadeTranscriber:
         system_prompt = self.get_system_prompt(system_prompt)
         result = PageTranscription(page_index=page_index)
 
-        for provider in self.providers:
+        providers = self.providers
+        if provider_name is not None:
+            providers = [p for p in providers if p.PROVIDER_NAME == provider_name]
+            if not providers:
+                raise ValueError("Requested transcription provider is not configured")
+        for provider in providers:
             self.logger.debug("Trying provider %s for page %d", provider.PROVIDER_NAME, page_index)
 
             attempt = await provider.transcribe_page(
@@ -70,6 +76,8 @@ class CascadeTranscriber:
 
             if attempt.success:
                 result.content = attempt.content
+                result.raw_content = attempt.raw_content
+                result.output_contract = attempt.output_contract
                 result.success = True
                 result.model_used = attempt.model
                 result.provider_used = attempt.provider
@@ -91,6 +99,7 @@ class CascadeTranscriber:
         images: list[bytes],
         system_prompt: str = None,
         max_tokens: int = None,
+        provider_name: str | None = None,
     ) -> list[PageTranscription]:
         """
         Transcribe multiple pages sequentially through the cascade.
@@ -104,6 +113,7 @@ class CascadeTranscriber:
                 page_index=idx,
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
+                provider_name=provider_name,
             )
             results.append(result)
 

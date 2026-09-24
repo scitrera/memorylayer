@@ -16,6 +16,8 @@ class TranscriptionAttempt:
     provider: str
     success: bool = False
     content: str = ""
+    raw_content: str | None = None
+    output_contract: str | None = None
     tokens_in: int = 0
     tokens_out: int = 0
     latency_ms: float = 0.0
@@ -29,6 +31,8 @@ class PageTranscription:
 
     page_index: int
     content: str = ""
+    raw_content: str | None = None
+    output_contract: str | None = None
     success: bool = False
     model_used: str | None = None
     provider_used: str | None = None

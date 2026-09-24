@@ -266,6 +266,8 @@ class VLLMSubprocessRunner:
         last_err: BaseException | None = None
         async with httpx.AsyncClient(timeout=5.0) as client:
             while time.monotonic() < deadline:
+                if not self.is_running:
+                    raise RuntimeError(f"vllm serve (role={self.role}) is no longer running during startup")
                 if self._process is not None and self._process.returncode is not None:
                     raise RuntimeError(
                         f"vllm serve (role={self.role}) exited prematurely with code {self._process.returncode} during startup"
@@ -440,6 +442,14 @@ class VLLMSubprocessRunner:
                 limit,
             )
         return self._concurrency_sem
+
+    def get_load_snapshot(self):
+        limit = self.effective_max_concurrent
+        semaphore = self._concurrency_sem
+        active = limit - semaphore._value if semaphore is not None else 0
+        queued = len(semaphore._waiters or ()) if semaphore is not None else 0
+        return {"in_flight": active, "queued": queued, "max_concurrent": limit,
+                "utilization": active / limit}
 
 
 def find_free_port(

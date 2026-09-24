@@ -68,13 +68,21 @@ class FastApiPlugin(Plugin):
             # store variables in app state
             app.state.v = v
 
+            from ..services.required_models import preload_required_models
+
+            try:
+                required = await preload_required_models(v)
+            except BaseException:
+                await shutdown_services(v)
+                raise
+
             # preload models if configured
             preload = v.environ(
                 EMBED_SERVER_PRELOAD_MODELS,
                 default=DEFAULT_EMBED_SERVER_PRELOAD_MODELS,
                 type_fn=ext_parse_bool,
             )
-            if preload:
+            if preload and not required:
                 logger.info("Preloading models during startup")
                 try:
                     # Preload transcription providers
@@ -123,6 +131,10 @@ class FastApiPlugin(Plugin):
             version=__version__,
             lifespan=lifespan_context,
         )
+
+        from .limits import RequestLimitsMiddleware
+
+        app.add_middleware(RequestLimitsMiddleware)
 
         # Map the GPU queue-timeout exception from any ColPali code path
         # to a 503 with Retry-After so callers can shed load gracefully.

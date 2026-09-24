@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class TranscriptionRequest(BaseModel):
     """Request to transcribe page images to markdown."""
 
+    provider: str | None = Field(None, description="Optional exact provider name; disables fallback")
     images: list[str] = Field(..., description="List of base64-encoded page images")
     system_prompt: str | None = Field(None, description="Optional custom system prompt override")
     max_tokens: int | None = Field(None, description="Optional max tokens override")
@@ -29,6 +30,8 @@ class TranscriptionResult(BaseModel):
 
     page_index: int
     content: str
+    raw_content: str | None = None
+    output_contract: str | None = None
     success: bool = True
     model_used: str | None = None
     provider_used: str | None = None

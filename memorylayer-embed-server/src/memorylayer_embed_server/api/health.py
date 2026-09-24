@@ -48,7 +48,9 @@ async def readiness_check(
         }
     else:
         checks["services"]["embedding"] = {"status": "not_configured"}
-        checks["status"] = "not_ready"
+        from ..profiles import embeddings_enabled
+        if embeddings_enabled():
+            checks["status"] = "not_ready"
 
     # LLM routing service (optional; only present when
     # MEMORYLAYER_EMBED_LLM_ENABLED=true and profiles were configured).
@@ -69,6 +71,14 @@ async def readiness_check(
             callable_(checks)
         except Exception as e:  # noqa: BLE001 - non-fatal, log and continue
             logger.warning("Health check extension failed: %s", e)
+
+    from ..services.required_models import check_required_models
+
+    try:
+        await check_required_models(v)
+    except Exception:
+        checks["status"] = "not_ready"
+        checks["services"]["required_models"] = {"status": "unavailable"}
 
     status_code = status.HTTP_200_OK if checks["status"] == "ready" else status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -107,6 +117,18 @@ async def load_check(
         multi = getattr(dual_service, "_multi_vector", None)
         if multi is not None and hasattr(multi, "get_load_snapshot"):
             providers["colpali_multi_vector"] = multi.get_load_snapshot()
+
+    from ..services.required_models import required_providers
+    try:
+        active = required_providers(v)
+    except RuntimeError:
+        active = []
+    for provider in active:
+        runner = getattr(provider, "_runner", None)
+        snapshot = getattr(provider, "get_load_snapshot", None) or getattr(runner, "get_load_snapshot", None)
+        if snapshot:
+            name = getattr(provider, "PROVIDER_NAME", getattr(runner, "model_name", type(provider).__name__))
+            providers[name] = snapshot()
 
     # Merge LLM profile snapshots (one entry per profile, keyed ``llm_<name>``).
     llm_svc = v.get("llm_routing_service", default=None)

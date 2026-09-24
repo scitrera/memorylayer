@@ -63,6 +63,7 @@ def app_factory(dual_service):
         app.include_router(health_router)
 
         v = MagicMock(name="Variables")
+        v.environ.side_effect = lambda key, default=None, **kwargs: default
 
         def _v_get(key, default=None):
             if key == "dual_embedding_service":

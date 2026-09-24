@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
+import re
 import time
 from collections.abc import Callable
 from logging import Logger
@@ -131,6 +133,8 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         text_first: bool = False,
         extra_body: dict | None = None,
         postprocess: Callable[[str], str] | None = None,
+        output_contract: str | None = None,
+        runner: VLLMSubprocessRunner | None = None,
     ):
         super().__init__(v)
         # Make PROVIDER_NAME instance-level so cascade attribution lines up
@@ -144,9 +148,14 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
         self.text_first = text_first
         self.extra_body = dict(extra_body) if extra_body else None
         self.postprocess = postprocess
+        self.output_contract = output_contract
         self.logger = get_logger(v, name=f"{self.__class__.__name__}[{provider_name}]")
 
-        self._runner = VLLMSubprocessRunner(
+        from .._sparkrun_runner import configured_runner
+
+        specific_recipe = "MEMORYLAYER_EMBED_" + provider_name.upper().replace("-", "_") + "_SPARKRUN_RECIPE"
+        self._runner = runner or configured_runner(
+            recipe_env=specific_recipe if os.environ.get(specific_recipe) else "MEMORYLAYER_EMBED_OCR_SPARKRUN_RECIPE",
             role="llm",  # generative, chat-completions endpoint
             model_name=model_name,
             host=host,
@@ -193,9 +202,12 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
                 return self._client
             if not self._skip_subprocess:
                 await self._runner.start()
+            import httpx
             from openai import AsyncOpenAI
 
-            self._client = AsyncOpenAI(base_url=self._runner.base_url, api_key="x")
+            self._client = AsyncOpenAI(base_url=self._runner.base_url, api_key="x", max_retries=0,
+                http_client=httpx.AsyncClient(timeout=300, trust_env=False,
+                    limits=httpx.Limits(keepalive_expiry=4)))
             self._ready = True
             return self._client
 
@@ -204,6 +216,9 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
 
     async def shutdown(self) -> None:
         await self._runner.shutdown()
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
         self._ready = False
 
     # ------------------------------------------------------------------
@@ -278,6 +293,9 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
 
             choice = response.choices[0]
             raw_content = choice.message.content or ""
+            if self.output_contract:
+                attempt.raw_content = raw_content
+                attempt.output_contract = self.output_contract
             attempt.finish_reason = (choice.finish_reason or "unknown").lower()
 
             usage = getattr(response, "usage", None)
@@ -304,7 +322,13 @@ class VLLMTranscriptionProvider(TranscriptionProvider):
                 if self.postprocess is not None:
                     raw_content = self.postprocess(raw_content)
                 content = clean_transcription_output(raw_content)
-                if content:
+                # A figure-only layout is useful output; bare coordinate tokens
+                # without a region label remain an empty/failed transcription.
+                figure_only = self.output_contract == "unlimited_ocr" and re.search(
+                    r"<[|｜]det[|｜]>\s*image\s*\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]",
+                    attempt.raw_content or "",
+                )
+                if content or figure_only:
                     attempt.content = content
                     attempt.success = True
                 else:
@@ -423,9 +447,19 @@ def build_deepseek_ocr_vllm_provider(
         # memory is bounded by ``--mm-processor-cache-gb 0`` anyway.
         "--skip-mm-profiling",
     ]
+    if os.environ.get("MEMORYLAYER_EMBED_PROFILE") == "transcription":
+        # Preserve the known-working Thunder serving recipe on v2; v1 keeps
+        # its previous subprocess flags. Do not require instanttensor here.
+        extra_args = ["--logits_processors", "vllm.model_executor.models.deepseek_ocr:NGramPerReqLogitsProcessor",
+                      "--no-enable-prefix-caching", "--mm-encoder-tp-mode", "data", "--mm-processor-cache-gb", "0"]
     return VLLMTranscriptionProvider(
         v=v,
         provider_name="deepseek-ocr",
+        **({"prompt_override": "<image>\n<|grounding|>Convert the document to markdown.",
+            "text_first": True, "extra_body": {"skip_special_tokens": False,
+                "vllm_xargs": {"ngram_size": 30, "window_size": 1024, "whitelist_token_ids": [128821, 128822]}},
+            "postprocess": strip_grounding_tokens, "output_contract": "deepseek_ocr"}
+           if os.environ.get("MEMORYLAYER_EMBED_DEEPSEEK_OCR_GROUNDED", "false").lower() == "true" else {}),
         model_name=model_name,
         port=port,
         max_tokens=max_tokens,
@@ -502,6 +536,11 @@ def build_unlimited_ocr_vllm_provider(
         # GPU overshoots the utilization budget during engine init.
         "--skip-mm-profiling",
     ]
+    if os.environ.get("MEMORYLAYER_EMBED_PROFILE") == "transcription":
+        # Match Thunder's newest Unlimited recipe; explicit KV makes skipping
+        # multimodal memory profiling unnecessary on the new dedicated GPU.
+        extra_args = [arg for arg in extra_args if arg != "--skip-mm-profiling"]
+        extra_args += ["--mm-encoder-tp-mode", "data"]
     return VLLMTranscriptionProvider(
         v=v,
         provider_name="unlimited-ocr",
@@ -522,4 +561,5 @@ def build_unlimited_ocr_vllm_provider(
             "vllm_xargs": {"ngram_size": int(ngram_size), "window_size": int(window_size)},
         },
         postprocess=strip_grounding_tokens,
+        output_contract="unlimited_ocr",
     )

@@ -38,7 +38,7 @@ from memorylayer_server.services.embedding.base import (
     EmbeddingProviderPluginBase,
     MultimodalEmbeddingProvider,
 )
-from scitrera_app_framework import Variables, get_logger, ext_parse_bool
+from scitrera_app_framework import Variables, ext_parse_bool, get_logger
 
 from .._vllm_runner import VLLMSubprocessRunner
 
@@ -123,6 +123,7 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
         cmd: str = DEFAULT_MV_VLLM_CMD,
         max_concurrent: int | None = None,
         oversubscribe_factor: float = 1.0,
+        runner: VLLMSubprocessRunner | None = None,
     ):
         super().__init__(v, output_dimensions=output_dimensions)
         self.model_name = model_name
@@ -140,7 +141,10 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
 
         self.logger = get_logger(v, name=self.__class__.__name__)
 
-        self._runner = VLLMSubprocessRunner(
+        from .._sparkrun_runner import configured_runner
+
+        self._runner = runner or configured_runner(
+            recipe_env="MEMORYLAYER_EMBED_MV_SPARKRUN_RECIPE",
             role="multi_vector",
             model_name=model_name,
             host=host,
@@ -202,7 +206,7 @@ class VLLMMultiVectorProvider(MultimodalEmbeddingProvider):
             # that VLLMSubprocessRunner.base_url tacks on so client paths like
             # "/pooling" land at the right URL.
             root_url = self._runner.base_url.removesuffix("/v1")
-            self._http = httpx.AsyncClient(base_url=root_url, timeout=300.0)
+            self._http = httpx.AsyncClient(base_url=root_url, timeout=300.0, trust_env=False, limits=httpx.Limits(keepalive_expiry=4))
             self._ready = True
             return self._http
 

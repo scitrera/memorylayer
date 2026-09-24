@@ -26,6 +26,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shlex
+import time
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any
 
@@ -34,22 +39,68 @@ from ._vllm_runner import VLLMSubprocessRunner
 __all__ = ["SparkrunVLLMRunner", "SparkrunUnavailable"]
 
 
-class SparkrunUnavailable(RuntimeError):
+class SparkrunUnavailableError(RuntimeError):
     """Raised when the sparkrun extra is not installed."""
+
+
+SparkrunUnavailable = SparkrunUnavailableError  # compatibility alias
 
 
 def _require_sparkrun():
     try:
         from sparkrun import api
+        from sparkrun.application import initialize  # noqa: F401 - alpha API capability check
         from sparkrun.core.recipe import Recipe
+
+        if not all(hasattr(api, name) for name in ("BuildOptions", "plan_build", "build")):
+            raise ImportError("sparkrun independent build API is missing")
     except ImportError as exc:  # pragma: no cover - exercised via the plugin path
         raise SparkrunUnavailable(
-            "The 'vllm_sparkrun' provider requires the sparkrun extra: "
+            "The 'vllm_sparkrun' provider requires the API-capable sparkrun 0.4 alpha or later: "
             'pip install "memorylayer-embed-server[sparkrun]". '
             "Alternatively use MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=vllm_subprocess, "
             "which spawns vllm directly and has no extra dependency."
         ) from exc
     return api, Recipe
+
+
+@lru_cache(maxsize=1)
+def sparkrun_context():
+    from sparkrun.application import initialize
+
+    return initialize(config_path=os.environ.get("MEMORYLAYER_EMBED_SPARKRUN_CONFIG"))
+
+
+
+@lru_cache(maxsize=1)
+def _controller_executor():
+    # Sparkrun contexts and builder activation files are shared. Serialize API
+    # operations, not the detached engines or their asynchronous health waits.
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="sparkrun-controller")
+
+
+async def _controller_call(fn, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(
+        _controller_executor(), partial(fn, *args, **kwargs)
+    )
+
+
+async def _finish_cleanup(task):
+    """Finish owned cleanup even if its caller receives another cancellation."""
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    return task.result()
+
+
+def configured_runner(*, recipe_env: str, **kwargs):
+    """Select recipe lifecycle without duplicating a provider's HTTP client."""
+    recipe = os.environ.get(recipe_env)
+    if recipe:
+        return SparkrunVLLMRunner(recipe_path=recipe, reuse_existing=False, **kwargs)
+    return VLLMSubprocessRunner(**kwargs)
 
 
 class SparkrunVLLMRunner(VLLMSubprocessRunner):
@@ -74,6 +125,11 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
         self._cluster_id: str | None = None
         self._log_task: asyncio.Task | None = None
         self._serve_command: str = ""
+        self._owns_job = False
+        self._sctx = None
+        self._alive = False
+        self._launch_task: asyncio.Task | None = None
+        self.startup_metrics: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # State — the parent tracks an owned asyncio subprocess; we do not have one
@@ -81,7 +137,7 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
 
     @property
     def is_running(self) -> bool:
-        return self._cluster_id is not None
+        return self._cluster_id is not None and self._alive
 
     @property
     def pid(self) -> int | None:
@@ -94,7 +150,7 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
         Empty until :meth:`start` has resolved the recipe — the command is produced
         by sparkrun's runtime, not composed here.
         """
-        return self._serve_command.split() if self._serve_command else []
+        return shlex.split(self._serve_command) if self._serve_command else []
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -102,8 +158,29 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
 
     def _run_options(self, api):
         """Recipe overrides carrying our config onto sparkrun's launch."""
-        _, Recipe = _require_sparkrun()
-        recipe = Recipe.load(self.recipe_path)
+        _, recipe_type = _require_sparkrun()
+        recipe = recipe_type.load(self.recipe_path)
+        if recipe.model != self.model_name:
+            raise ValueError(f"Recipe model {recipe.model!r} does not match provider model {self.model_name!r}")
+        # A recipe owns its full serving command, including model revision and
+        # architecture. Carry eager mode and additional provider flags if absent.
+        if recipe.command:
+            flags = shlex.split(recipe.command.replace("\\\n", " "))
+            extras = list(self.extra_args)
+            if self.enforce_eager:
+                extras.append("--enforce-eager")
+            if self.architectures and "--hf-overrides" not in flags:
+                import json
+                extras += ["--hf-overrides", json.dumps({"architectures": self.architectures})]
+            additions = []
+            include = True
+            for arg in extras:
+                if arg.startswith("--"):
+                    include = arg not in flags
+                if include:
+                    additions.append(arg)
+            recipe.command += " " + shlex.join(additions)
+
         overrides: dict[str, Any] = {
             # The embed server assigns a loopback port per lane; the recipe's port
             # is a default, not the truth.
@@ -117,7 +194,7 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
             overrides["max_model_len"] = self.max_model_len
         if self.dtype and self.dtype != "auto":
             overrides["dtype"] = self.dtype
-        if self.tensor_parallel_size and self.tensor_parallel_size != 1:
+        if self.tensor_parallel_size:
             overrides["tensor_parallel"] = self.tensor_parallel_size
 
         return api.RunOptions(
@@ -135,36 +212,59 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
             # stacking vLLM instances on one GPU.
             ensure=self.reuse_existing,
             owner=self.owner,
+            sync_tuning=False,
+            cache_dir=os.environ.get("HF_HOME"),
+            local_cache_dir=os.environ.get("HF_HOME"),
+            transfer_mode="local",
         )
 
     async def start(self) -> None:
         if self.is_running:
             return
         api, _ = _require_sparkrun()
+        started = time.monotonic()
+        # Initialize once on the event-loop thread, before submitting workers.
+        self._sctx = sparkrun_context()
+        self.startup_metrics = {}
+        # Shield the entire launch AND ownership handoff, not just api.run.
+        # Cancelling a thread await does not stop a detached native launch.
+        self._launch_task = asyncio.create_task(self._launch(api))
+        try:
+            await asyncio.shield(self._launch_task)
+            self.startup_metrics["launch_elapsed_seconds"] = time.monotonic() - started
+            self._log_task = asyncio.create_task(self._pump_logs())
+            await self.wait_for_health()
+            self.startup_metrics["ready_elapsed_seconds"] = time.monotonic() - started
+        except BaseException:
+            cleanup = asyncio.create_task(self.shutdown())
+            try:
+                await _finish_cleanup(cleanup)
+            except Exception:
+                self.logger.exception("Failed to clean up model startup: %s", self.model_name)
+            raise
 
-        # sparkrun's API is synchronous; keep it off the event loop.
-        result = await asyncio.to_thread(api.run, self._run_options(api))
+    async def _launch(self, api) -> None:
+        options = self._run_options(api)
 
+        def launch():
+            started = time.monotonic()
+            result = api.run(options, sctx=self._sctx)
+            return result, time.monotonic() - started
+
+        result, elapsed = await _controller_call(launch)
+        self.startup_metrics["controller_seconds"] = elapsed
+        if result.rc != 0 or result.dry_run or not result.cluster_id:
+            raise RuntimeError(f"sparkrun failed to launch {self.model_name}: rc={result.rc}")
+        self._owns_job = not result.already_running
         self._cluster_id = result.cluster_id
+        self._alive = True
         self._serve_command = result.serve_command or ""
         if result.serve_port:
             self.port = int(result.serve_port)
-
         self.logger.info(
             "sparkrun launched vllm (cluster_id=%s executor=%s runtime=%s port=%s)",
-            result.cluster_id,
-            result.executor,
-            result.runtime,
-            self.port,
+            result.cluster_id, result.executor, result.runtime, self.port,
         )
-
-        self._log_task = asyncio.create_task(self._pump_logs())
-        try:
-            await self.wait_for_health()
-        except Exception:
-            # A failed startup must not leave a detached vLLM holding VRAM.
-            await self.shutdown()
-            raise
 
     async def _pump_logs(self) -> None:
         """Feed sparkrun's logfile into the inherited concurrency parser.
@@ -175,25 +275,52 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
         iterated inline.
         """
         api, _ = _require_sparkrun()
-        loop = asyncio.get_running_loop()
         cluster_id = self._cluster_id
 
-        def _consume() -> None:
-            for line in api.logs(cluster_id=cluster_id, follow=True, tail=200):
-                text = getattr(line, "text", "") or ""
-                loop.call_soon_threadsafe(self._maybe_capture_max_concurrency, text)
+        def snapshot():
+            return list(api.logs(cluster_id=cluster_id, follow=False, tail=200, sctx=self._sctx))
 
+        previous: set[str] = set()
         try:
-            await asyncio.to_thread(_consume)
+            while self._cluster_id:
+                # Finite reads: cancelling the task never leaves an infinite
+                # follow=True iterator alive in an executor thread.
+                lines = [getattr(line, "text", "") or "" for line in await _controller_call(snapshot)]
+                for text in lines:
+                    if text and text not in previous:
+                        self._maybe_capture_max_concurrency(text)
+                        self.logger.info("[vllm:%s] %s", self.role, text)
+                previous = set(lines)
+                observed = await _controller_call(api.status, hosts=["localhost"], executor="local", sctx=self._sctx)
+                if observed.for_host("localhost") is not None and not observed.observation_errors:
+                    self._alive = cluster_id in observed.running_cluster_ids()
+                    if not self._alive:
+                        self.logger.error("vLLM engine exited: %s", cluster_id)
+                        return
+                await asyncio.sleep(5)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001
-            # Losing the log tail costs the vLLM-reported concurrency value, which
-            # falls back to the configured/default one. Not worth failing a healthy
-            # server over.
-            self.logger.warning("sparkrun log tail stopped (%s); using fallback concurrency", exc)
+        except Exception as exc:
+            self.logger.warning("sparkrun log polling stopped: %s", exc)
+            # A terminated workload may make logs() raise before status() runs.
+            # Confirm the process is gone instead of treating loss of its log
+            # stream as merely a missing concurrency hint.
+            try:
+                observed = await _controller_call(api.status, hosts=["localhost"], executor="local", sctx=self._sctx)
+                if observed.for_host("localhost") is not None and not observed.observation_errors:
+                    self._alive = cluster_id in observed.running_cluster_ids()
+            except Exception:
+                pass
 
     async def shutdown(self) -> None:
+        # A sibling may have failed while this launch was queued/running. Await
+        # ownership registration before deciding whether there is a job to stop.
+        if self._launch_task is not None:
+            try:
+                await asyncio.shield(self._launch_task)
+            except Exception:
+                pass  # start() propagates the launch error; no successful handoff.
+            self._launch_task = None
         if self._log_task is not None:
             self._log_task.cancel()
             try:
@@ -205,9 +332,17 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
         if self._cluster_id is None:
             return
         api, _ = _require_sparkrun()
-        cluster_id, self._cluster_id = self._cluster_id, None
+        cluster_id = self._cluster_id
+        self._alive = False
+        if not self._owns_job:
+            self._cluster_id = None
+            return
         try:
-            await asyncio.to_thread(api.stop, cluster_id=cluster_id)
+            result = await _controller_call(api.stop, cluster_id=cluster_id, sctx=self._sctx)
+            if not result.success:
+                raise RuntimeError(f"stop failed: {result.errors}")
+            self._cluster_id = None
+            self._owns_job = False
             self.logger.info("sparkrun stopped vllm (cluster_id=%s)", cluster_id)
         except Exception as exc:  # noqa: BLE001
             # The workload is setsid-detached, so a failed stop leaks a process
@@ -219,6 +354,7 @@ class SparkrunVLLMRunner(VLLMSubprocessRunner):
                 exc,
                 cluster_id,
             )
+            raise
 
 
 def default_recipe_path(name: str) -> Path:

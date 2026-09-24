@@ -36,7 +36,7 @@ from memorylayer_server.services.embedding.base import (
     EmbeddingProviderPluginBase,
     MultimodalEmbeddingProvider,
 )
-from scitrera_app_framework import Variables, get_logger, ext_parse_bool
+from scitrera_app_framework import Variables, ext_parse_bool, get_logger
 
 from .._vllm_runner import VLLMSubprocessRunner
 
@@ -100,7 +100,7 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
         cmd: str = DEFAULT_VLLM_SUBPROCESS_CMD,
         max_concurrent: int | None = None,
         oversubscribe_factor: float = 1.0,
-        runner: "VLLMSubprocessRunner | None" = None,
+        runner: VLLMSubprocessRunner | None = None,
     ):
         """
         Args:
@@ -193,9 +193,12 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
 
             # Build the OpenAI-compat client. API key is required by the
             # SDK but vllm serve doesn't enforce it.
+            import httpx
             from openai import AsyncOpenAI
 
-            self._client = AsyncOpenAI(base_url=self._runner.base_url, api_key="x")
+            self._client = AsyncOpenAI(base_url=self._runner.base_url, api_key="x", max_retries=0,
+                http_client=httpx.AsyncClient(timeout=300, trust_env=False,
+                    limits=httpx.Limits(keepalive_expiry=4)))
             self._ready = True
             return self._client
 
@@ -206,6 +209,9 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
     async def shutdown(self) -> None:
         """Terminate the child process tree. Safe to call multiple times."""
         await self._runner.shutdown()
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
         if self._mm_http is not None:
             try:
                 await self._mm_http.aclose()
@@ -250,7 +256,7 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
         if self._mm_http is None:
             self._mm_http = httpx.AsyncClient(
                 base_url=self._runner.base_url,
-                timeout=300.0,
+                timeout=300.0, trust_env=False, limits=httpx.Limits(keepalive_expiry=4),
             )
         await self._ensure_started()
         async with self._runner.concurrency_slot():
@@ -286,7 +292,7 @@ class VLLMSubprocessEmbeddingProvider(MultimodalEmbeddingProvider):
             if image.startswith(("http://", "https://")):
                 return image
             p = Path(image)
-            if len(image) <= 500 or p.exists():
+            if len(image) <= 500:
                 try:
                     raw = p.read_bytes()
                     b64 = base64.b64encode(raw).decode("ascii")

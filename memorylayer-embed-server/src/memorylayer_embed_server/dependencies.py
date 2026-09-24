@@ -197,13 +197,16 @@ async def initialize_services(v: Variables = None) -> Variables:
         type_fn=ext_parse_bool,
     )
 
-    if transcription_enabled:
+    from .profiles import embeddings_enabled, transcription_enabled as profile_transcription_enabled
+
+    if transcription_enabled and profile_transcription_enabled():
         logger.info("Setting up transcription cascade")
         _setup_transcription_cascade(v, logger)
 
     # Wire up dual embedding service
-    logger.info("Setting up dual embedding service")
-    _setup_dual_embedding_service(v, logger)
+    if embeddings_enabled():
+        logger.info("Setting up dual embedding service")
+        _setup_dual_embedding_service(v, logger)
 
     # Visual tokenizer is registered from the optional enterprise overlay
     # (memorylayer-embed-server-enterprise) via the standard plugin scanner;
@@ -283,6 +286,13 @@ def _setup_transcription_cascade(v: Variables, logger: Logger):
     else:
         logger.info("Gemini provider disabled by MEMORYLAYER_EMBED_GEMINI_ENABLED=false")
 
+    order = v.environ("MEMORYLAYER_EMBED_OCR_PROVIDER_ORDER", default="").strip()
+    if order:
+        names = [name.strip() for name in order.split(",")]
+        by_name = {provider.PROVIDER_NAME: provider for provider in providers}
+        if len(names) != len(set(names)) or set(names) != set(by_name):
+            raise ValueError("OCR provider order must name every enabled provider exactly once")
+        providers = [by_name[name] for name in names]
     cascade = CascadeTranscriber(v=v, providers=providers)
     v.set("cascade_transcriber", cascade)
     logger.info("Transcription cascade configured with %d providers", len(providers))
@@ -875,17 +885,23 @@ async def shutdown_services(v: Variables = None) -> None:
         except Exception as e:  # noqa: BLE001 - best-effort cleanup
             logger.warning("LLM routing service shutdown failed: %s", e)
 
-    # If a vLLM subprocess was started by the embed-server, stop it before
-    # the framework tears the rest of the plugins down so we don't leak
-    # GPU memory or orphan a child process.
+    # Manually constructed embedding/OCR providers are not all registered
+    # framework plugins. Tear down every provider, including detached sparkrun
+    # jobs whose lifecycle is not represented by a provider._process handle.
     dual_service = v.get("dual_embedding_service", default=None)
-    if dual_service is not None:
-        single = getattr(dual_service, "_single_vector", None)
-        if single is not None and hasattr(single, "shutdown") and getattr(single, "_process", None) is not None:
-            try:
-                await single.shutdown()
-            except Exception as e:  # noqa: BLE001 - best-effort cleanup
-                logger.warning("vllm subprocess shutdown failed: %s", e)
+    cascade = v.get("cascade_transcriber", default=None)
+    providers = [getattr(dual_service, "_single_vector", None), getattr(dual_service, "_multi_vector", None)]
+    providers += list(getattr(cascade, "providers", []))
+    stopped = set()
+    for provider in providers:
+        shutdown = getattr(provider, "shutdown", None)
+        if shutdown is None or id(provider) in stopped:
+            continue
+        stopped.add(id(provider))
+        try:
+            await shutdown()
+        except Exception as e:  # noqa: BLE001 - attempt remaining providers too
+            logger.warning("Model provider shutdown failed: %s", e)
 
     await async_plugins_stopping(v)
 
