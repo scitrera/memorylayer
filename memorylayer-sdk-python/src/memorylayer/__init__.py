@@ -137,7 +137,7 @@ __all__ = [
     "ChatThread",
     "ChatThreadWithMessages",
     "DecompositionResult",
-    # Document models (Enterprise)
+    # Document models
     "DocumentInfo",
     "DocumentPage",
     "JobInfo",

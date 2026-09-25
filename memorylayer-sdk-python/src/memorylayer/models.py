@@ -408,12 +408,12 @@ class DecompositionResult(BaseModel):
 
 
 # ------------------------------------------------------------------ #
-# Document models (Enterprise)
+# Document models
 # ------------------------------------------------------------------ #
 
 
 class DocumentPage(BaseModel):
-    """A page from an ingested document (Enterprise)."""
+    """A page from an ingested document."""
 
     id: str
     document_id: str
@@ -428,7 +428,7 @@ class DocumentPage(BaseModel):
 
 
 class DocumentInfo(BaseModel):
-    """Document metadata returned from the API (Enterprise)."""
+    """Document metadata returned from the API."""
 
     id: str
     workspace_id: str
@@ -451,7 +451,7 @@ class DocumentInfo(BaseModel):
 
 
 class JobInfo(BaseModel):
-    """Ingestion job status (Enterprise)."""
+    """Ingestion job status."""
 
     id: str
     workspace_id: str
@@ -467,7 +467,7 @@ class JobInfo(BaseModel):
 
 
 class PageSearchResult(BaseModel):
-    """Result from a document page search (Enterprise)."""
+    """Result from a document page search."""
 
     pages: list[DocumentPage]
     total_count: int

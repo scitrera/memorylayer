@@ -161,9 +161,10 @@ print(trace["chain"])
 ```python
 # Perform multiple operations in one request
 results = await client.batch_memories([
-    {"type": "create", "data": {"content": "Memory 1", "importance": 0.7}},
-    {"type": "create", "data": {"content": "Memory 2", "importance": 0.8}},
-    {"type": "delete", "data": {"memory_id": "mem_old", "hard": False}}
+    {"op": "create", "content": "Memory 1", "importance": 0.7},
+    {"op": "create", "content": "Memory 2", "importance": 0.8},
+    {"op": "update", "memory_id": "mem_123", "tags": ["reviewed"]},
+    {"op": "delete", "memory_id": "mem_old", "hard": False},
 ])
 print(f"Successful: {results['successful']}, Failed: {results['failed']}")
 ```

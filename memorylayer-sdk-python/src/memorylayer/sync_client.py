@@ -1150,22 +1150,32 @@ class SyncMemoryLayerClient:
         """
         Perform multiple memory operations in a single request.
 
-        Supported operation types:
-        - create: {"type": "create", "data": {"content": "...", ...}}
-        - update: {"type": "update", "data": {"memory_id": "...", "content": "..."}}
-        - delete: {"type": "delete", "data": {"memory_id": "...", "hard": False}}
+        Each operation is a flat object discriminated by ``op``:
+        - create: {"op": "create", "content": "...", "type": ..., "subtype": ...,
+          "importance": 0.5, "tags": [...], "metadata": {...},
+          "observer_id": ..., "subject_id": ...}
+        - update: {"op": "update", "memory_id": "...", "content": ..., "type": ...,
+          "subtype": ..., "importance": ..., "tags": [...], "metadata": {...},
+          "pinned": ...}
+        - delete: {"op": "delete", "memory_id": "...", "hard": False}
+
+        Only ``op`` and ``content`` (create) or ``memory_id`` (update/delete) are
+        required. An operation without an ``op`` field fails request validation.
 
         Args:
             operations: List of operations to perform
 
         Returns:
-            Results for each operation with success/error status
+            Dict with ``total_operations``, ``successful``, ``failed`` and a
+            per-operation ``results`` list (``index``, ``type``, ``status``,
+            ``memory_id``, ``error``).
 
         Example:
             results = client.batch_memories([
-                {"type": "create", "data": {"content": "Memory 1"}},
-                {"type": "create", "data": {"content": "Memory 2"}},
-                {"type": "delete", "data": {"memory_id": "mem_old"}}
+                {"op": "create", "content": "Memory 1"},
+                {"op": "create", "content": "Memory 2", "importance": 0.8},
+                {"op": "update", "memory_id": "mem_123", "tags": ["reviewed"]},
+                {"op": "delete", "memory_id": "mem_old"},
             ])
         """
         payload = {"operations": operations}
@@ -2125,7 +2135,7 @@ class SyncMemoryLayerClient:
         return DecompositionResult(**data)
 
     # ------------------------------------------------------------------ #
-    # Document operations (Enterprise)
+    # Document operations
     # ------------------------------------------------------------------ #
 
     def upload_document(
@@ -2140,7 +2150,7 @@ class SyncMemoryLayerClient:
         importance: float = 0.5,
         retain_original: bool = True,
     ) -> tuple[DocumentInfo, JobInfo]:
-        """Upload a document for ingestion (Enterprise)."""
+        """Upload a document for background ingestion (supported by the core server)."""
         client = self._ensure_client()
 
         try:
@@ -2225,7 +2235,7 @@ class SyncMemoryLayerClient:
         limit: int = 10,
         doc_ids: list[str] | None = None,
     ) -> PageSearchResult:
-        """Search document pages using ColPali MaxSim (Enterprise)."""
+        """Search document pages using ColPali MaxSim (needs a ColPali embed-server peer)."""
         payload: dict[str, Any] = {"query": query, "limit": limit}
         if doc_ids:
             payload["doc_ids"] = doc_ids
