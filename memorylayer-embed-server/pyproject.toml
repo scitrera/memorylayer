@@ -31,7 +31,8 @@ dependencies = [
 [project.optional-dependencies]
 # Local/CPU single-vector embeddings (sentence-transformers, all-MiniLM-L6-v2).
 # This backs the DEFAULT single-vector provider, so it is what a local install
-# needs: pip install "memorylayer-embed-server[local]". Kept an extra rather than
+# needs: pip install "./memorylayer-embed-server[local]" from a repository
+# checkout (the package is not on PyPI). Kept an extra rather than
 # a base dependency because it pulls torch, and deployments that only use the
 # openai/google passthrough should not pay for that.
 local = ["sentence-transformers>=3.0.0", "torch>=2.11.0,<2.12.0"]
@@ -57,8 +58,8 @@ observability = [
 ]
 gpu = ["memorylayer-embed-server[ocr,vllm,colpali]"]
 all = ["memorylayer-embed-server[local,gpu,google,observability]"]
-# Visual-tokenizer (Qwen3.5) lives in the proprietary
-# memorylayer-embed-server-enterprise package; install that separately.
+# Visual-tokenizer (Qwen3.5) lives in the AGPL-3.0 memorylayer-embed-server-enterprise
+# plugin (scitrera/memorylayer-enterprise); install that separately.
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",

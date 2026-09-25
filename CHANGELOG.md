@@ -133,7 +133,8 @@ and perspective layer under recall, and a retrieval-quality gate in CI.
     `sentence_transformers`** (`all-MiniLM-L6-v2`, 384-d, CPU) instead of
     `vllm_subprocess` (`Qwen3-VL-Embedding-2B`, 2048-d, GPU). Running the embed server
     no longer requires a GPU, a CUDA toolchain, or a 2B-parameter download. Install with
-    the new `local` extra: `pip install "memorylayer-embed-server[local]"`. **GPU
+    the new `local` extra: `pip install "./memorylayer-embed-server[local]"` from a
+    repository checkout (the embed server is not published to PyPI). **GPU
     deployments must now set `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER=vllm_subprocess`
     explicitly** — and note this changes the vector dimension, which is a property of
     stored data (see below).

@@ -48,7 +48,7 @@ with sync_client() as memory:
 |------------------------------------------------------------------------------|---------|---------------------------------------------------------|
 | **[memorylayer-core-python](./memorylayer-core-python)**                     | `pip install memorylayer-server` | FastAPI server with SQLite + sqlite-vec storage; optional Turso/libSQL backend |
 | **[memorylayer-server-rpg-python](./memorylayer-server-rpg-python)**         | `pip install memorylayer-server-rpg` | Repository Planning Graph plugin: sync, traversal, overlays, conflicts, maintenance, and enrichment |
-| **[memorylayer-embed-server](./memorylayer-embed-server)**                   | `pip install "memorylayer-embed-server[local]"` | Stateless embedding peer. `[local]` = CPU (sentence-transformers + ColPali); `[gpu]` adds vLLM, OCR, transcription |
+| **[memorylayer-embed-server](./memorylayer-embed-server)**                   | Container image, or `pip install "./memorylayer-embed-server[local]"` from a checkout (not on PyPI) | Stateless embedding peer. `[local]` = CPU (sentence-transformers + ColPali); `[gpu]` adds vLLM, OCR, transcription |
 | **[memorylayer-sdk-python](./memorylayer-sdk-python)**                       | `pip install memorylayer-client` | Python client SDK (async/sync, optional Aether transport) |
 | **[memorylayer-sdk-typescript](./memorylayer-sdk-typescript)**               | `npm i @scitrera/memorylayer-sdk` | TypeScript/JavaScript client SDK                        |
 | **[memorylayer-mcp-typescript](./memorylayer-mcp-typescript)**               | `npm i @scitrera/memorylayer-mcp-server` | MCP server -- 28 tools (default), up to 40 in `full`    |
@@ -83,8 +83,9 @@ matches on shared words, which is enough to try the API but not for real retriev
 quality. The server says so in its startup log. When you want real embeddings:
 
 ```bash
-# Self-hosted on CPU — no GPU, no API key
-pip install "memorylayer-embed-server[local]" && memorylayer-embed serve --port 61051 &
+# Self-hosted on CPU — no GPU, no API key (embed-server is not on PyPI:
+# install it from a checkout of this repo, or run ghcr.io/scitrera/memorylayer-embed-server)
+pip install "./memorylayer-embed-server[local]" && memorylayer-embed serve --port 61051 &
 export MEMORYLAYER_EMBEDDING_PROVIDER=embed_server
 export MEMORYLAYER_EMBED_SERVER_URL=http://localhost:61051
 export MEMORYLAYER_EMBEDDING_DIMENSIONS=384      # must match the embed model
@@ -96,8 +97,8 @@ export MEMORYLAYER_EMBEDDING_PROVIDER=openai    # or google
 export MEMORYLAYER_EMBEDDING_OPENAI_API_KEY=sk-...
 memorylayer serve
 
-# Self-hosted on GPU — adds vLLM, OCR, transcription
-pip install "memorylayer-embed-server[gpu]" && memorylayer-embed serve --port 61051 &
+# Self-hosted on GPU — adds vLLM, OCR, transcription (or the latest-cuda13 image)
+pip install "./memorylayer-embed-server[gpu]" && memorylayer-embed serve --port 61051 &
 ```
 
 The CPU option downloads `all-MiniLM-L6-v2` (~90 MB, 384-d) on first use and runs

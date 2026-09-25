@@ -134,7 +134,7 @@ export MEMORYLAYER_EMBED_USE_MOCK_PROVIDERS=true
 * Model load is lazy, guarded by a lock (concurrent first requests load
   once, not N times), and hoisted to startup by
   `MEMORYLAYER_EMBED_PRELOAD_MODELS=true` (the default).
-* Requires the `[local]` extra (`pip install "memorylayer-embed-server[local]"`).
+* Requires the `[local]` extra (`pip install "./memorylayer-embed-server[local]"`).
   Because this is the *default* provider, a bare install with no extra is
   the most likely first-run failure — the log names the exact install
   command rather than raising a bare `ImportError` traceback.
@@ -172,7 +172,7 @@ Swapping the model changes the vector width (e.g. `all-mpnet-base-v2` is
 * Multimodal: supports image embedding via the
   `{"prompt": "...", "multi_modal_data": {"image": <PIL.Image>}}`
   prompt shape, so models like `Qwen/Qwen3-VL-Embedding-2B` are first-class.
-* Requires the `[vllm]` extra (`pip install memorylayer-embed-server[vllm]`)
+* Requires the `[vllm]` extra (`pip install "./memorylayer-embed-server[vllm]"`)
   and a CUDA-capable host. `Dockerfile.real-test-full` installs this.
 
 **Env knobs**:
@@ -346,7 +346,7 @@ Requires installing the OSS server with the `google` extra
   (`qwen2.5` → ColQwen2.5, `qwen2` → ColQwen2, `modernvbert` →
   ColModernVBert, `colpali` → original ColPali). Defaults to
   ColModernVBert (MIT-licensed, smallest).
-* Requires the `[colpali]` extra (`pip install memorylayer-embed-server[colpali]`)
+* Requires the `[colpali]` extra (`pip install "./memorylayer-embed-server[colpali]"`)
   which pulls in `colpali-engine` + `torch`. GPU strongly recommended.
 
 **Env knobs**:
@@ -471,7 +471,7 @@ multi-vector endpoints will 503.
 
 ### Observability
 
-Install with `pip install memorylayer-embed-server[observability]`
+Install with `pip install "./memorylayer-embed-server[observability]"`
 (or `[all]`). The embed-server reuses the OSS server's pluggable
 `MetricsService` and `OTelInitPlugin`.
 
@@ -568,7 +568,7 @@ config keys are documented separately.
 ### Local / CPU quick start (no GPU, real embeddings)
 
 ```bash
-pip install "memorylayer-embed-server[local]"
+pip install "./memorylayer-embed-server[local]"
 memorylayer-embed serve
 ```
 
@@ -592,7 +592,7 @@ a GPU.
 ### Fully GPU-free, single **and** multi vector
 
 ```bash
-pip install "memorylayer-embed-server[local,colpali]"
+pip install "./memorylayer-embed-server[local,colpali]"
 ```
 
 ```
