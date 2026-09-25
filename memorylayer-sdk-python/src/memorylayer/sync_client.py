@@ -661,7 +661,7 @@ class SyncMemoryLayerClient:
             payload["metadata"] = metadata
 
         data = self._request("POST", f"/memories/{source_id}/associate", json=payload)
-        return Association(**data)
+        return Association(**data.get("association", data))
 
     def get_associations(
         self,
@@ -1198,7 +1198,7 @@ class SyncMemoryLayerClient:
         """
         payload = {"ttl_seconds": ttl_seconds}
         data = self._request("POST", "/sessions", json=payload)
-        return Session(**data)
+        return Session(**data.get("session", data))
 
     def list_sessions(
         self,
@@ -1242,7 +1242,7 @@ class SyncMemoryLayerClient:
             Session object
         """
         data = self._request("GET", f"/sessions/{session_id}")
-        return Session(**data)
+        return Session(**data.get("session", data))
 
     def create_checkpoint(
         self,
@@ -1402,7 +1402,7 @@ class SyncMemoryLayerClient:
             "include_contradictions": str(include_contradictions).lower(),
         }
         data = self._request("GET", "/sessions/briefing", params=params)
-        return SessionBriefing(**data)
+        return SessionBriefing(**data.get("briefing", data))
 
     def touch_session(self, session_id: str) -> dict[str, Any]:
         """
@@ -1494,7 +1494,7 @@ class SyncMemoryLayerClient:
         if tags is not None:
             payload["tags"] = tags
         data = self._request("POST", "/workspaces", json=payload)
-        return Workspace(**data)
+        return Workspace(**data.get("workspace", data))
 
     def list_workspaces(
         self,
@@ -1540,7 +1540,7 @@ class SyncMemoryLayerClient:
             raise ValueError("workspace_id must be provided or set on client")
 
         data = self._request("GET", f"/workspaces/{ws_id}")
-        return Workspace(**data)
+        return Workspace(**data.get("workspace", data))
 
     def update_workspace(
         self,
@@ -1860,7 +1860,7 @@ class SyncMemoryLayerClient:
         payload["ownership"] = ownership
 
         data = self._request("POST", "/threads", json=payload)
-        return ChatThread(**data)
+        return ChatThread(**data.get("thread", data))
 
     def list_threads(
         self,
@@ -1967,7 +1967,7 @@ class SyncMemoryLayerClient:
             params["workspace_id"] = ws_id
 
         data = self._request("GET", f"/threads/{thread_id}", params=params or None)
-        return ChatThread(**data)
+        return ChatThread(**data.get("thread", data))
 
     def get_thread_full(
         self,
@@ -2203,7 +2203,7 @@ class SyncMemoryLayerClient:
             enterprise_feature="Document management",
         )
         docs = [DocumentInfo(**d) for d in data.get("documents", [])]
-        return docs, data.get("total_count", len(docs))
+        return docs, data.get("total_count", data.get("total", len(docs)))
 
     def get_document(self, document_id: str) -> DocumentInfo:
         """Get document metadata and processing status."""
@@ -2346,7 +2346,7 @@ class SyncMemoryLayerClient:
             json=payload if payload else None,
             enterprise_feature="Document reprocessing",
         )
-        return JobInfo(**data)
+        return JobInfo(**data.get("job", data))
 
     # ------------------------------------------------------------------ #
     # Dataset operations (Enterprise)
