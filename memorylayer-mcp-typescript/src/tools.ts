@@ -1140,11 +1140,14 @@ export const TOOL_PROFILES: Record<ToolProfile, string[]> = {
   /**
    * Claude Code profile (DEFAULT)
    *
-   * 17 tools optimized for the Claude Code use case:
+   * 28 tools optimized for the Claude Code use case:
    * - Core: remember, recall, reflect, forget
-   * - Session: session_start, session_end, session_commit, session_status
+   * - Session: session_start, session_end, session_commit, session_status,
+   *   session_checkpoint, context_pack, context_delta
    * - Utility: briefing
    * - Context Environment: exec, inspect, load, inject, query, rlm, status, checkpoint
+   * - Chat history: thread create, append, get, list
+   * - Skills (read): list, get, get_file, search
    *
    * Excluded (available in "full" profile):
    * - associate: Graph building is advanced, rarely used without guidance
