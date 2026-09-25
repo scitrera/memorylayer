@@ -1379,7 +1379,7 @@ class MemoryLayerClient:
             Session object
         """
         data = await self._request("GET", f"/sessions/{session_id}")
-        return Session(**data)
+        return Session(**data.get("session", data))
 
     async def create_checkpoint(
         self,
@@ -2451,7 +2451,7 @@ class MemoryLayerClient:
         payload["ownership"] = ownership
 
         data = await self._request("POST", "/threads", json=payload)
-        return ChatThread(**data)
+        return ChatThread(**data.get("thread", data))
 
     async def list_threads(
         self,
@@ -2561,7 +2561,7 @@ class MemoryLayerClient:
             params["workspace_id"] = ws_id
 
         data = await self._request("GET", f"/threads/{thread_id}", params=params or None)
-        return ChatThread(**data)
+        return ChatThread(**data.get("thread", data))
 
     async def get_thread_full(
         self,
@@ -2628,7 +2628,7 @@ class MemoryLayerClient:
             payload["metadata"] = metadata
 
         data = await self._request("PUT", f"/threads/{thread_id}", params=params or None, json=payload)
-        return ChatThread(**data)
+        return ChatThread(**data.get("thread", data))
 
     async def delete_thread(
         self,

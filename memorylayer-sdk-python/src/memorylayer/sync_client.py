@@ -1188,7 +1188,7 @@ class SyncMemoryLayerClient:
         """
         payload = {"ttl_seconds": ttl_seconds}
         data = self._request("POST", "/sessions", json=payload)
-        return Session(**data)
+        return Session(**data.get("session", data))
 
     def list_sessions(
         self,
@@ -1232,7 +1232,7 @@ class SyncMemoryLayerClient:
             Session object
         """
         data = self._request("GET", f"/sessions/{session_id}")
-        return Session(**data)
+        return Session(**data.get("session", data))
 
     def create_checkpoint(
         self,
@@ -1850,7 +1850,7 @@ class SyncMemoryLayerClient:
         payload["ownership"] = ownership
 
         data = self._request("POST", "/threads", json=payload)
-        return ChatThread(**data)
+        return ChatThread(**data.get("thread", data))
 
     def list_threads(
         self,
@@ -1957,7 +1957,7 @@ class SyncMemoryLayerClient:
             params["workspace_id"] = ws_id
 
         data = self._request("GET", f"/threads/{thread_id}", params=params or None)
-        return ChatThread(**data)
+        return ChatThread(**data.get("thread", data))
 
     def get_thread_full(
         self,
