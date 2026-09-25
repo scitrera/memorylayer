@@ -22,8 +22,9 @@ import type {
   AssociationUpdateOptions,
   ThreadUpdateOptions, UserThreadListOptions,
   SessionCheckpoint, ContextPack, ContextDelta, ContextPackOptions,
+  SessionTouchResult,
 } from "./types.js";
-import { RelationshipType } from "./types.js";
+import { RelationshipType, USER_CHAT_HOME_WORKSPACE } from "./types.js";
 import { MemoryLayerError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError, EnterpriseRequiredError, RateLimitError } from "./errors.js";
 import { sleep } from "./utils.js";
 import { SkillsNamespace } from "./skills.js";
@@ -644,13 +645,18 @@ export class MemoryLayerClient {
     );
   }
 
-  async touchSession(sessionId: string, ttlSeconds?: number): Promise<Session> {
-    const response = await this.request<{ session: Session }>(
+  /**
+   * Extend a session's expiration. The server resets `expires_at` to now plus
+   * `extendSeconds` (or its default TTL when omitted) and returns the new value.
+   */
+  async touchSession(sessionId: string, extendSeconds?: number): Promise<SessionTouchResult> {
+    const query = extendSeconds !== undefined
+      ? `?${new URLSearchParams({ extend_seconds: String(extendSeconds) }).toString()}`
+      : "";
+    return this.request<SessionTouchResult>(
       "POST",
-      `/v1/sessions/${sessionId}/touch`,
-      ttlSeconds ? { ttl_seconds: ttlSeconds } : {}
+      `/v1/sessions/${sessionId}/touch${query}`,
     );
-    return response.session;
   }
 
   async getBriefing(
@@ -897,15 +903,15 @@ export class MemoryLayerClient {
   }
 
   // Graph traversal - uses nested endpoint under memories
+  // Sends only the fields the traverse endpoint accepts; unset values fall back
+  // to the server defaults (max_depth 2, direction "both", min_strength 0).
   async traverseGraph(startMemoryId: string, options: GraphTraverseOptions = {}): Promise<GraphQueryResult> {
     const body = {
+      workspace_id: options.workspaceId ?? this.workspaceId,
       relationship_types: options.relationshipTypes,
-      relationship_categories: options.relationshipCategories,
-      max_depth: options.maxDepth ?? 3,
-      direction: options.direction ?? "both",
-      min_strength: options.minStrength ?? 0.0,
-      max_paths: options.maxPaths ?? 100,
-      max_nodes: options.maxNodes ?? 50,
+      max_depth: options.maxDepth,
+      direction: options.direction,
+      min_strength: options.minStrength,
     };
     return this.request<GraphQueryResult>("POST", `/v1/memories/${startMemoryId}/traverse`, body);
   }
@@ -1386,9 +1392,13 @@ export class MemoryLayerClient {
   // ------------------------------------------------------------------ //
 
   async createThread(options: ThreadCreateOptions = {}): Promise<ChatThread> {
+    // User-owned threads always live under the _user_chat home (as in the
+    // Python and Go SDKs); otherwise use the requested or client workspace.
+    const workspaceId = options.ownership === "user"
+      ? USER_CHAT_HOME_WORKSPACE
+      : options.workspaceId ?? this.workspaceId;
     const body = {
-      thread_id: options.threadId,
-      workspace_id: options.workspaceId ?? this.workspaceId,
+      workspace_id: workspaceId,
       user_id: options.userId,
       context_id: options.contextId,
       observer_id: options.observerId,
@@ -1396,6 +1406,10 @@ export class MemoryLayerClient {
       title: options.title,
       metadata: options.metadata,
       expires_at: options.expiresAt,
+      scope: options.scope,
+      ownership: options.ownership,
+      parent_thread: options.parentThread,
+      idle_action: options.idleAction,
     };
     const response = await this.request<{ thread: ChatThread }>("POST", "/v1/threads", body);
     return response.thread;
@@ -1408,6 +1422,10 @@ export class MemoryLayerClient {
     if (options.userId) params.set("user_id", options.userId);
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     if (options.offset !== undefined) params.set("offset", String(options.offset));
+    if (options.scopeFilter) params.set("scope_filter", options.scopeFilter);
+    if (options.ownershipFilter) params.set("ownership_filter", options.ownershipFilter);
+    if (options.parentThread) params.set("parent_thread", options.parentThread);
+    if (options.includeHidden) params.set("include_hidden", "true");
     const query = params.toString();
     const response = await this.request<{ threads: ChatThread[]; total_count: number }>(
       "GET",

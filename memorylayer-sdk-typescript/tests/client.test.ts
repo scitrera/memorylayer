@@ -508,19 +508,50 @@ describe("MemoryLayerClient", () => {
           method: "POST",
         })
       );
+      const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+      expect(body).toEqual({ workspace_id: "ws-123", max_depth: 2 });
+    });
+
+    it("should send only fields the traverse endpoint accepts", async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ paths: [], total_paths: 0, unique_nodes: [], query_latency_ms: 1 }),
+      });
+
+      await client.traverseGraph("mem-1", {
+        relationshipTypes: ["causes"],
+        relationshipCategories: ["causal" as any],
+        maxDepth: 3,
+        direction: "outgoing",
+        minStrength: 0.4,
+        maxPaths: 10,
+        maxNodes: 20,
+        workspaceId: "ws-other",
+      });
+
+      const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+      expect(body).toEqual({
+        workspace_id: "ws-other",
+        relationship_types: ["causes"],
+        max_depth: 3,
+        direction: "outgoing",
+        min_strength: 0.4,
+      });
     });
   });
 
   describe("batch operations", () => {
     it("should batch memories", async () => {
       const mockResult = {
-        results: [
-          { index: 0, success: true, memory: { id: "mem-1" } },
-          { index: 1, success: true, memory: { id: "mem-2" } },
-        ],
-        total_processed: 2,
-        successful: 2,
+        total_operations: 3,
+        successful: 3,
         failed: 0,
+        results: [
+          { index: 0, type: "create", status: "success", memory_id: "mem-1", error: null },
+          { index: 1, type: "update", status: "success", memory_id: "mem-2", error: null },
+          { index: 2, type: "delete", status: "success", memory_id: "mem-3", error: null },
+        ],
       };
 
       (global.fetch as any).mockResolvedValueOnce({
@@ -529,10 +560,14 @@ describe("MemoryLayerClient", () => {
         json: async () => mockResult,
       });
 
-      const result = await client.batchMemories([
-        { action: "create", memory: { content: "Test 1" } },
-        { action: "create", memory: { content: "Test 2" } },
-      ]);
+      const operations = [
+        { op: "create" as const, content: "Test 1", importance: 0.7, tags: ["a"] },
+        { op: "update" as const, memory_id: "mem-2", tags: ["reviewed"], pinned: true },
+        { op: "delete" as const, memory_id: "mem-3", hard: false },
+      ];
+      const result = await client.batchMemories(operations);
+      const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+      expect(body).toEqual({ operations });
 
       expect(result).toEqual(mockResult);
       expect(global.fetch).toHaveBeenCalledWith(
@@ -541,6 +576,116 @@ describe("MemoryLayerClient", () => {
           method: "POST",
         })
       );
+    });
+  });
+  describe("touchSession", () => {
+    it("returns the new expiration and sends no body by default", async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ expires_at: "2026-01-01T01:00:00+00:00" }),
+      });
+
+      const result = await client.touchSession("sess-1");
+
+      expect(result).toEqual({ expires_at: "2026-01-01T01:00:00+00:00" });
+      const [url, init] = (global.fetch as any).mock.calls[0];
+      expect(url).toBe("http://localhost:61001/v1/sessions/sess-1/touch");
+      expect(init.method).toBe("POST");
+      expect(init.body).toBeUndefined();
+    });
+
+    it("passes extendSeconds as the extend_seconds query parameter", async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ expires_at: "2026-01-01T02:00:00+00:00" }),
+      });
+
+      await client.touchSession("sess-1", 7200);
+
+      const [url, init] = (global.fetch as any).mock.calls[0];
+      expect(url).toBe("http://localhost:61001/v1/sessions/sess-1/touch?extend_seconds=7200");
+      expect(init.body).toBeUndefined();
+    });
+  });
+
+  describe("chat threads", () => {
+    const thread = {
+      id: "thr-1",
+      workspace_id: "_user_chat",
+      tenant_id: "_default",
+      context_id: "_default",
+      metadata: {},
+      message_count: 0,
+      last_decomposed_index: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      ownership: "user",
+    };
+
+    it("createThread forwards ownership, scope, parent thread and idle action", async () => {
+      (global.fetch as any).mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ thread }) });
+
+      const result = await client.createThread({
+        workspaceId: "ws-app",
+        title: "Child",
+        scope: "office",
+        ownership: "user",
+        parentThread: "thr-parent",
+        idleAction: "hide",
+      });
+
+      expect(result.id).toBe("thr-1");
+      const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+      expect(body).toEqual({
+        workspace_id: "_user_chat",
+        title: "Child",
+        scope: "office",
+        ownership: "user",
+        parent_thread: "thr-parent",
+        idle_action: "hide",
+      });
+    });
+
+    it("createThread keeps the workspace for workspace-owned threads and by default", async () => {
+      (global.fetch as any).mockResolvedValue({ ok: true, status: 201, json: async () => ({ thread }) });
+
+      await client.createThread({ workspaceId: "ws-app", ownership: "workspace" });
+      await client.createThread();
+
+      const first = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+      const second = JSON.parse((global.fetch as any).mock.calls[1][1].body);
+      expect(first).toEqual({ workspace_id: "ws-app", ownership: "workspace" });
+      expect(second).toEqual({ workspace_id: "ws-123" });
+    });
+
+    it("listThreads sends scope, ownership, parent and hidden filters", async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ threads: [thread], total_count: 1 }),
+      });
+
+      const threads = await client.listThreads({
+        scopeFilter: "web",
+        ownershipFilter: "workspace",
+        parentThread: "thr-parent",
+        includeHidden: true,
+        limit: 10,
+      });
+
+      expect(threads).toHaveLength(1);
+      const url = new URL((global.fetch as any).mock.calls[0][0]);
+      expect(url.pathname).toBe("/v1/threads");
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        workspace_id: "ws-123",
+        limit: "10",
+        scope_filter: "web",
+        ownership_filter: "workspace",
+        parent_thread: "thr-parent",
+        include_hidden: "true",
+      });
     });
   });
 });

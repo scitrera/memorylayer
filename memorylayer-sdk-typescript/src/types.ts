@@ -199,6 +199,12 @@ export interface Association {
   created_at: string;
 }
 
+/** Response of `POST /v1/sessions/{id}/touch`. */
+export interface SessionTouchResult {
+  /** New expiration timestamp (ISO 8601). */
+  expires_at: string;
+}
+
 export interface Session {
   id: string;
   workspace_id: string;
@@ -481,13 +487,25 @@ export enum RelationshipCategory {
 }
 
 export interface GraphTraverseOptions {
+  /** Filter by relationship types (omit or empty = all). */
   relationshipTypes?: string[];
+  /**
+   * @deprecated Not accepted by `POST /v1/memories/{id}/traverse`; ignored and
+   * no longer sent. Filter with `relationshipTypes` instead.
+   */
   relationshipCategories?: RelationshipCategory[];
+  /** Maximum traversal depth, 1-5 (server default 2). */
   maxDepth?: number;
+  /** Traversal direction (server default "both"). */
   direction?: "outgoing" | "incoming" | "both";
+  /** Minimum edge strength, 0-1 (server default 0). */
   minStrength?: number;
+  /** @deprecated Not accepted by the traverse endpoint; ignored and no longer sent. */
   maxPaths?: number;
+  /** @deprecated Not accepted by the traverse endpoint; ignored and no longer sent. */
   maxNodes?: number;
+  /** Override workspace for this traversal (defaults to the client workspace). */
+  workspaceId?: string;
 }
 
 export interface GraphPath {
@@ -505,21 +523,57 @@ export interface GraphQueryResult {
 }
 
 // Batch operations
-export type BatchOperation =
-  | { op: "create"; memory: RememberOptions & { content: string } }
-  | { op: "update"; memory_id: string; updates: Partial<RememberOptions> & { content?: string } }
-  | { op: "delete"; memory_id: string; hard?: boolean };
+/** Create operation for `POST /v1/memories/batch` (flat, discriminated by `op`). */
+export interface BatchCreateOperation {
+  op: "create";
+  content: string;
+  type?: MemoryType | string;
+  subtype?: MemorySubtype | string;
+  importance?: number;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  observer_id?: string;
+  subject_id?: string;
+}
+
+/** Update operation for `POST /v1/memories/batch`; omitted fields are left unchanged. */
+export interface BatchUpdateOperation {
+  op: "update";
+  memory_id: string;
+  content?: string;
+  type?: MemoryType | string;
+  subtype?: MemorySubtype | string;
+  importance?: number;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  pinned?: boolean;
+}
+
+/** Delete operation for `POST /v1/memories/batch`. */
+export interface BatchDeleteOperation {
+  op: "delete";
+  memory_id: string;
+  hard?: boolean;
+}
+
+/** A single batch operation, sent to the server as-is. */
+export type BatchOperation = BatchCreateOperation | BatchUpdateOperation | BatchDeleteOperation;
+
+export interface BatchOperationResult {
+  index: number;
+  /** Operation type: "create" | "update" | "delete". */
+  type: string;
+  /** "success" or "error". */
+  status: string;
+  memory_id?: string | null;
+  error?: string | null;
+}
 
 export interface BatchResult {
-  results: Array<{
-    index: number;
-    success: boolean;
-    memory?: Memory;
-    error?: string;
-  }>;
-  total_processed: number;
+  total_operations: number;
   successful: number;
   failed: number;
+  results: BatchOperationResult[];
 }
 
 // Association creation
@@ -762,9 +816,21 @@ export interface ChatThread {
   expires_at?: string;
   created_at: string;
   updated_at: string;
+  /** Surface scope: "web" | "office" (null is equivalent to "web"). */
+  scope?: string | null;
+  /** "user" (stored under the `_user_chat` home) or "workspace". */
+  ownership?: string;
+  /** Parent thread id for sub-threads; null for top-level threads. */
+  parent_thread?: string | null;
+  /** Idle policy: null (never idles out) | "hide" | "delete". */
+  idle_action?: string | null;
 }
 
+/** Storage home of user-owned chat threads (mirrors the server constant). */
+export const USER_CHAT_HOME_WORKSPACE = "_user_chat";
+
 export interface ThreadCreateOptions {
+  /** @deprecated Thread ids are server-generated; this value is ignored by the server. */
   threadId?: string;
   workspaceId?: string;
   userId?: string;
@@ -774,6 +840,19 @@ export interface ThreadCreateOptions {
   title?: string;
   metadata?: Record<string, unknown>;
   expiresAt?: string;
+  /** Surface scope: "web" | "office" (omit for the server default). */
+  scope?: string;
+  /**
+   * Thread ownership. When omitted the server default applies. When set to
+   * "user", the thread is stored under {@link USER_CHAT_HOME_WORKSPACE}
+   * (matching the Python and Go SDKs); "workspace" keeps it in the resolved
+   * workspace.
+   */
+  ownership?: "user" | "workspace";
+  /** Create a sub-thread of this thread (inherits its workspace and ownership). */
+  parentThread?: string;
+  /** Idle policy: "hide" | "delete" (omit for never idling out). */
+  idleAction?: "hide" | "delete";
 }
 
 export interface ThreadListOptions {
@@ -781,6 +860,14 @@ export interface ThreadListOptions {
   userId?: string;
   limit?: number;
   offset?: number;
+  /** Scope filter: "web" | "office" (omit for all). */
+  scopeFilter?: "web" | "office";
+  /** Ownership filter: "user" | "workspace" (omit for all). */
+  ownershipFilter?: "user" | "workspace";
+  /** List the sub-threads of this thread; omit for top-level threads only. */
+  parentThread?: string;
+  /** Include archived/hidden threads. */
+  includeHidden?: boolean;
 }
 
 export interface MessageAppendInput {

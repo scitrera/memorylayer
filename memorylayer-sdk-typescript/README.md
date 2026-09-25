@@ -133,9 +133,10 @@ const trace = await client.traceMemory("mem-123");
 
 ```typescript
 const result = await client.batchMemories([
-  { action: "create", memory: { content: "Memory 1", importance: 0.7 } },
-  { action: "create", memory: { content: "Memory 2", importance: 0.8 } },
-  { action: "delete", memory_id: "mem-old", hard: false },
+  { op: "create", content: "Memory 1", importance: 0.7 },
+  { op: "create", content: "Memory 2", importance: 0.8, tags: ["project"] },
+  { op: "update", memory_id: "mem-123", tags: ["reviewed"] },
+  { op: "delete", memory_id: "mem-old", hard: false },
 ]);
 
 console.log(`Successful: ${result.successful}, Failed: ${result.failed}`);
@@ -223,8 +224,8 @@ await client.setWorkingMemory(session.id, "current_task", {
 // Retrieve working memory
 const memory = await client.getWorkingMemory(session.id, "current_task");
 
-// Extend session TTL
-const updated = await client.touchSession(session.id);
+// Extend session TTL (server default, or pass seconds to extend by)
+const { expires_at } = await client.touchSession(session.id, 7200);
 
 // Commit working memory to long-term storage
 const commitResult = await client.commitSession(session.id, {
