@@ -217,7 +217,7 @@ class SyncMemoryLayerClient:
             path: API path
             json: JSON body
             params: Query parameters
-            enterprise_feature: If set, a 404 raises EnterpriseRequiredError
+            enterprise_feature: If set, a 501 raises EnterpriseRequiredError
                 instead of NotFoundError.
 
         Returns:
@@ -225,7 +225,7 @@ class SyncMemoryLayerClient:
 
         Raises:
             AuthenticationError: Authentication failed (401)
-            EnterpriseRequiredError: Enterprise-only endpoint (404 + enterprise_feature)
+            EnterpriseRequiredError: Enterprise-only endpoint (501 + enterprise_feature)
             NotFoundError: Resource not found (404)
             ValidationError: Validation failed (422)
             RateLimitError: Rate limit exceeded (429)

@@ -174,6 +174,20 @@ func TestTypedErrorsUnwrapToAPIError(t *testing.T) {
 	}
 }
 
+func TestEnterpriseRequiredErrorMessage(t *testing.T) {
+	err := mapError(&Response{StatusCode: http.StatusNotImplemented, Body: []byte(`{"detail":"nope"}`)}, "Dataset management")
+	var e *EnterpriseRequiredError
+	if !errors.As(err, &e) {
+		t.Fatalf("expected EnterpriseRequiredError, got %v", err)
+	}
+	if e.StatusCode != http.StatusNotImplemented || e.Feature != "Dataset management" {
+		t.Errorf("status=%d feature=%q", e.StatusCode, e.Feature)
+	}
+	if !strings.Contains(e.Message, "github.com/scitrera/memorylayer-enterprise") || strings.Contains(e.Message, "upgrade") {
+		t.Errorf("unexpected message %q", e.Message)
+	}
+}
+
 func TestForgetSendsHardParam(t *testing.T) {
 	var hard string
 	var method string

@@ -41,9 +41,10 @@ export class RateLimitError extends MemoryLayerError {
 }
 
 /**
- * Raised when an enterprise-only endpoint returns 404.
- * Indicates the server is running MemoryLayer OSS which does not
- * include the requested feature (e.g. document ingestion, page search).
+ * Raised when an Enterprise-only endpoint returns 501 (Not Implemented).
+ * Indicates the server does not provide the requested feature (for example
+ * dataset management), typically because the MemoryLayer Enterprise
+ * extensions are not installed.
  */
 export class EnterpriseRequiredError extends MemoryLayerError {
   constructor(
@@ -52,8 +53,8 @@ export class EnterpriseRequiredError extends MemoryLayerError {
   ) {
     super(
       message ??
-        `${feature} requires MemoryLayer Enterprise. See https://memorylayer.ai for upgrade options.`,
-      404
+        `${feature} requires MemoryLayer Enterprise (open source, AGPL-3.0): https://github.com/scitrera/memorylayer-enterprise`,
+      501
     );
     this.name = "EnterpriseRequiredError";
   }

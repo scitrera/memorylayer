@@ -219,7 +219,11 @@ describe("Entity registry ops", () => {
 
   it("maps 501 to EnterpriseRequiredError when registry disabled", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockErr(501, { detail: "registry off" }));
-    await expect(client.listEntities()).rejects.toBeInstanceOf(EnterpriseRequiredError);
+    const err = await client.listEntities().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EnterpriseRequiredError);
+    expect((err as EnterpriseRequiredError).statusCode).toBe(501);
+    expect((err as EnterpriseRequiredError).message).toContain("github.com/scitrera/memorylayer-enterprise");
+    expect((err as EnterpriseRequiredError).message).not.toContain("upgrade");
   });
 });
 
