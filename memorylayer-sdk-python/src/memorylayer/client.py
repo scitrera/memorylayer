@@ -783,7 +783,7 @@ class MemoryLayerClient:
             payload["metadata"] = metadata
 
         data = await self._request("POST", f"/memories/{source_id}/associate", json=payload)
-        return Association(**data)
+        return Association(**data.get("association", data))
 
     async def get_associations(
         self,
@@ -1539,7 +1539,7 @@ class MemoryLayerClient:
             "include_contradictions": str(include_contradictions).lower(),
         }
         data = await self._request("GET", "/sessions/briefing", params=params)
-        return SessionBriefing(**data)
+        return SessionBriefing(**data.get("briefing", data))
 
     # Workspace methods
 
@@ -1561,7 +1561,7 @@ class MemoryLayerClient:
         if tags is not None:
             payload["tags"] = tags
         data = await self._request("POST", "/workspaces", json=payload)
-        return Workspace(**data)
+        return Workspace(**data.get("workspace", data))
 
     async def list_workspaces(
         self,
@@ -1607,7 +1607,7 @@ class MemoryLayerClient:
             raise ValueError("workspace_id must be provided or set on client")
 
         data = await self._request("GET", f"/workspaces/{ws_id}")
-        return Workspace(**data)
+        return Workspace(**data.get("workspace", data))
 
     async def update_workspace(
         self,
@@ -2916,7 +2916,7 @@ class MemoryLayerClient:
             enterprise_feature="Document management",
         )
         docs = [DocumentInfo(**d) for d in data.get("documents", [])]
-        return docs, data.get("total_count", len(docs))
+        return docs, data.get("total_count", data.get("total", len(docs)))
 
     async def get_document(self, document_id: str) -> DocumentInfo:
         """Get document metadata and processing status."""
@@ -3076,7 +3076,7 @@ class MemoryLayerClient:
             json=payload if payload else None,
             enterprise_feature="Document reprocessing",
         )
-        return JobInfo(**data)
+        return JobInfo(**data.get("job", data))
 
     # ------------------------------------------------------------------ #
     # Dataset operations (Enterprise)
