@@ -6,22 +6,31 @@ The main `memorylayer-server` core no longer ships any in-process embedding mode
 
 ## Installation
 
+`memorylayer-embed-server` is not published to PyPI. Run the container image, or
+install it from a checkout of this repository.
+
 ```bash
+# Container: CPU image (latest) or CUDA 13 image (latest-cuda13)
+docker run -p 61051:61051 ghcr.io/scitrera/memorylayer-embed-server:latest
+
+# From a repository checkout
+git clone https://github.com/scitrera/memorylayer.git && cd memorylayer
+
 # Local / CPU: sentence-transformers single-vector embeddings (the default provider)
-pip install "memorylayer-embed-server[local]"
+pip install "./memorylayer-embed-server[local]"
 
 # Core install (server skeleton only — no embedding backend)
-pip install memorylayer-embed-server
+pip install ./memorylayer-embed-server
 
 # GPU bundle: OCR + vLLM + ColPali
-pip install "memorylayer-embed-server[gpu]"
+pip install "./memorylayer-embed-server[gpu]"
 
 # Everything: local + GPU + Google embeddings + observability
-pip install "memorylayer-embed-server[all]"
+pip install "./memorylayer-embed-server[all]"
 ```
 
 The default single-vector provider is `sentence_transformers`, which needs the
-`local` extra. A bare `pip install memorylayer-embed-server` gives you the server
+`local` extra. A bare install without extras gives you the server
 skeleton with no embedding backend; it starts, but logs an error naming the extra
 to install. Pick a different backend with
 `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` (see [Configuration](#configuration)).
@@ -40,7 +49,7 @@ Optional extras:
 | `all` | `local + gpu + google + observability` |
 | `dev` | pytest + ruff |
 
-Visual-tokenizer (Qwen3.5) lives in the proprietary `memorylayer-embed-server-enterprise` package; install that separately if you need it.
+The Qwen3.5 visual tokenizer lives in the AGPL-3.0 `memorylayer-embed-server-enterprise` plugin in [scitrera/memorylayer-enterprise](https://github.com/scitrera/memorylayer-enterprise); install it alongside this package if you need it.
 
 ## Quick Start
 
@@ -91,7 +100,7 @@ Global flag `-v` / `--verbose` enables debug logging.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MEMORYLAYER_EMBED_SERVER_HOST` | `127.0.0.1` | Bind address |
+| `MEMORYLAYER_EMBED_SERVER_HOST` | `0.0.0.0` | Bind address (set `127.0.0.1` to accept local connections only) |
 | `MEMORYLAYER_EMBED_SERVER_PORT` | `61051` | Listening port |
 | `MEMORYLAYER_EMBED_SINGLE_VECTOR_PROVIDER` | `sentence_transformers` | `sentence_transformers` (local/CPU, 384-d), `vllm_subprocess` (GPU, 2048-d), `vllm` (in-process), `openai`, `google`, `colpali`, `mock`. **Changing this changes the vector dimension — see [Embedding dimensions](#embedding-dimensions).** |
 | `MEMORYLAYER_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Single-vector model for the active provider |
@@ -188,7 +197,7 @@ The Docker image's healthcheck targets `/health`.
 
 ## Versioning
 
-This package is released in lockstep with `memorylayer-server` (currently `0.1.22`). The version pin in `dependencies` keeps client and server protocol versions aligned.
+This package is versioned alongside `memorylayer-server`; the exact `memorylayer-server==<version>` pin in `dependencies` keeps client and server protocol versions aligned.
 
 ## License
 

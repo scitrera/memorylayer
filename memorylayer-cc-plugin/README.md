@@ -115,12 +115,14 @@ Working memory persists within a session and survives context compaction. At ses
 
 ### Slash Commands
 
+Claude Code namespaces plugin commands under the plugin name (`memorylayer`), so they run as `/memorylayer:<command>`:
+
 | Command | Description |
 |---------|-------------|
-| `/memorylayer-status` | Check connection and workspace info |
-| `/memorylayer-setup` | Guided setup and troubleshooting |
-| `/memorylayer-remember <content>` | Quick memory storage |
-| `/memorylayer-recall <query>` | Quick memory search |
+| `/memorylayer:status` | Check connection and workspace info |
+| `/memorylayer:setup` | Guided setup and troubleshooting |
+| `/memorylayer:remember <content>` | Quick memory storage |
+| `/memorylayer:recall <query>` | Quick memory search |
 
 ### Hooks
 

@@ -27,9 +27,10 @@ pip install memorylayer-server[openai]
 # With Google GenAI embeddings
 pip install memorylayer-server[google]
 
-# Self-hosted embeddings: install + run memorylayer-embed-server separately
-# (no extras here — the main server only speaks HTTP to embed-server)
-# pip install memorylayer-embed-server[gpu]
+# Self-hosted embeddings: run memorylayer-embed-server separately (container
+# image, or install from a repository checkout — it is not on PyPI; no extras
+# here — the main server only speaks HTTP to embed-server)
+# pip install "./memorylayer-embed-server[gpu]"
 
 # All cloud embedding providers + LLM + document parsers
 pip install memorylayer-server[all]
@@ -258,9 +259,10 @@ process or container; the main server only speaks HTTP to it. This is what the
 published Docker image is pinned to:
 
 ```bash
-# In a GPU-equipped peer:
-pip install memorylayer-embed-server[gpu]
-memorylayer-embed-server serve --port 61051
+# In a GPU-equipped peer (from a repository checkout; or run the
+# ghcr.io/scitrera/memorylayer-embed-server:latest-cuda13 image):
+pip install "./memorylayer-embed-server[gpu]"
+memorylayer-embed serve --port 61051
 
 # In the main server process:
 export MEMORYLAYER_EMBEDDING_PROVIDER=embed_server

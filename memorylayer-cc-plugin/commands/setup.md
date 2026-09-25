@@ -1,11 +1,11 @@
-# /memorylayer-setup
+# /memorylayer:setup
 
 Automated setup and verification for MemoryLayer.
 
 ## Usage
 
 ```
-/memorylayer-setup
+/memorylayer:setup
 ```
 
 ## Behavior

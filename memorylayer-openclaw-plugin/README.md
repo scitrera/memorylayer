@@ -44,29 +44,33 @@ The sandbox-provider sets these when launching the OpenClaw container:
 | `WORKCLAW_DEFAULT_WORKSPACE`   | no       | Default MemoryLayer workspace id                           |
 | `WORKCLAW_GRANT_ID`            | no       | Default Aether grant id (sets default OBO authority)       |
 | `MEMORYLAYER_SKILLS_SYNC`      | no       | `1`/`true` to materialize MemoryLayer skills into OpenClaw (default OFF) |
+| `MEMORYLAYER_SKILLS_DIR`       | no       | Absolute path of the managed skills dir (default: `<workspaceDir>/.memorylayer-skills`) |
 
 ## Skills sync (opt-in)
 
 When `MEMORYLAYER_SKILLS_SYNC=1`, on each agent bootstrap the plugin fetches the
 principal's **enabled** MemoryLayer skills and calls the SDK's
-`client.skills.materialize(...)` to write each `SKILL.md` + its files into the
-agent workspace skills directory (`<workspaceDir>/skills`). OpenClaw already
-scans **and** watches that directory, so the materialized skills are discovered
-and hot-reloaded natively — MemoryLayer is the source of truth, OpenClaw the
-local cache. The sync is best-effort: errors are logged and never block agent
-bootstrap.
+`client.skills.materialize(...)` to write each `SKILL.md` + its files into a
+dedicated, MemoryLayer-only skills directory: `<workspaceDir>/.memorylayer-skills`
+by default, or the absolute path in `MEMORYLAYER_SKILLS_DIR` when set.
+MemoryLayer is the source of truth and OpenClaw the local cache. The sync is a
+reconcile: after a successful listing, skills that were disabled, deleted or
+renamed in MemoryLayer are pruned from that directory (never after a failed
+listing). It is best-effort: errors are logged and never block agent bootstrap.
 
-Because `<workspaceDir>/skills` is a dir OpenClaw watches by default, **no
-`openclaw.json` change is required**. If a deployment ever materializes into a
-non-default directory instead, that directory must be declared so OpenClaw scans
-it, via one line in the rendered `openclaw.json`:
+The plugin deliberately does not write into the shared `<workspaceDir>/skills`
+directory, which also holds user-authored, plugin and bundled skills that a
+reconcile would clobber. Because the managed directory is not one OpenClaw scans
+by default, it **must be declared** in `skills.load.extraDirs` in the rendered
+`openclaw.json`, using the same path the plugin writes to:
 
 ```jsonc
-{ "skills": { "load": { "extraDirs": ["/abs/path/to/dir"] } } }
+{ "skills": { "load": { "extraDirs": ["/abs/path/to/workspace/.memorylayer-skills"] } } }
 ```
 
 (The sandbox-provider renders `openclaw.json` in
-`internal/openclaw/bootstrap.go`; this plugin does not edit it.)
+`internal/openclaw/bootstrap.go` and stamps the same path into both
+`MEMORYLAYER_SKILLS_DIR` and `extraDirs`; this plugin does not edit it.)
 
 ## OpenClaw integration
 

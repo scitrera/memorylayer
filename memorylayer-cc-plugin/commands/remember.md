@@ -1,19 +1,19 @@
-# /memorylayer-remember
+# /memorylayer:remember
 
 Quick command to store a memory.
 
 ## Usage
 
 ```
-/memorylayer-remember <content>
+/memorylayer:remember <content>
 ```
 
 ## Examples
 
 ```
-/memorylayer-remember We decided to use PostgreSQL for better JSON support
-/memorylayer-remember The auth bug was caused by missing token refresh
-/memorylayer-remember User prefers detailed commit messages
+/memorylayer:remember We decided to use PostgreSQL for better JSON support
+/memorylayer:remember The auth bug was caused by missing token refresh
+/memorylayer:remember User prefers detailed commit messages
 ```
 
 ## Behavior

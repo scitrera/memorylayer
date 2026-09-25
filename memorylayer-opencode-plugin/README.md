@@ -136,7 +136,7 @@ Override with the `MEMORYLAYER_WORKSPACE_ID` environment variable.
 ```
 OpenCode
 ├── MCP Server (@scitrera/memorylayer-mcp-server)
-│   └── 25 memory tools by default (38 in `full` profile)
+│   └── 28 memory tools by default (40 in `full` profile)
 │
 ├── Plugin Hooks (@scitrera/memorylayer-opencode-plugin)
 │   ├── system.transform  → session briefing injection

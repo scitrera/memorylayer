@@ -39,7 +39,7 @@ with sync_client() as memory:
 - **Document ingestion** -- upload PDFs / DOCX / images and turn them into memories; optional ColPali multi-vector page search via the embed-server peer
 - **Repository Planning Graph** -- sync code structure, traverse symbols and dependencies, maintain task overlays, and detect file/symbol conflicts
 - **Skills + MCP registries** -- workspace-scoped libraries of agent skills and MCP server entries with 4-tier scope precedence (user / workspace / tenant / global)
-- **MCP integration** -- first-class Model Context Protocol server (25 tools by default, 38 in the `full` profile) for Claude Code, Claude Desktop, OpenCode, Cursor, and other MCP-compatible tools
+- **MCP integration** -- first-class Model Context Protocol server (28 tools by default, 40 in the `full` profile) for Claude Code, Claude Desktop, OpenCode, Cursor, and other MCP-compatible tools
 - **Optional Aether transport** -- run behind an [Aether](https://aetherlayer.ai) mesh for mTLS, signed identity headers, on-behalf-of delegation, durable task scheduling, and cross-datacenter routing
 
 ## Packages
@@ -48,10 +48,10 @@ with sync_client() as memory:
 |------------------------------------------------------------------------------|---------|---------------------------------------------------------|
 | **[memorylayer-core-python](./memorylayer-core-python)**                     | `pip install memorylayer-server` | FastAPI server with SQLite + sqlite-vec storage; optional Turso/libSQL backend |
 | **[memorylayer-server-rpg-python](./memorylayer-server-rpg-python)**         | `pip install memorylayer-server-rpg` | Repository Planning Graph plugin: sync, traversal, overlays, conflicts, maintenance, and enrichment |
-| **[memorylayer-embed-server](./memorylayer-embed-server)**                   | `pip install "memorylayer-embed-server[local]"` | Stateless embedding peer. `[local]` = CPU (sentence-transformers + ColPali); `[gpu]` adds vLLM, OCR, transcription |
+| **[memorylayer-embed-server](./memorylayer-embed-server)**                   | Container image, or `pip install "./memorylayer-embed-server[local]"` from a checkout (not on PyPI) | Stateless embedding peer. `[local]` = CPU (sentence-transformers + ColPali); `[gpu]` adds vLLM, OCR, transcription |
 | **[memorylayer-sdk-python](./memorylayer-sdk-python)**                       | `pip install memorylayer-client` | Python client SDK (async/sync, optional Aether transport) |
 | **[memorylayer-sdk-typescript](./memorylayer-sdk-typescript)**               | `npm i @scitrera/memorylayer-sdk` | TypeScript/JavaScript client SDK                        |
-| **[memorylayer-mcp-typescript](./memorylayer-mcp-typescript)**               | `npm i @scitrera/memorylayer-mcp-server` | MCP server -- 25 tools (default), up to 38 in `full`    |
+| **[memorylayer-mcp-typescript](./memorylayer-mcp-typescript)**               | `npm i @scitrera/memorylayer-mcp-server` | MCP server -- 28 tools (default), up to 40 in `full`    |
 | **[memorylayer-sdk-langchain-python](./memorylayer-sdk-langchain-python)**   | `pip install memorylayer-langchain` | LangChain integration                                   |
 | **[memorylayer-sdk-llamaindex-python](./memorylayer-sdk-llamaindex-python)** | `pip install memorylayer-llamaindex` | LlamaIndex integration                                  |
 | **[memorylayer-cc-plugin](./memorylayer-cc-plugin)**                         | see README | Claude Code plugin -- captures memory before compaction |
@@ -83,8 +83,9 @@ matches on shared words, which is enough to try the API but not for real retriev
 quality. The server says so in its startup log. When you want real embeddings:
 
 ```bash
-# Self-hosted on CPU — no GPU, no API key
-pip install "memorylayer-embed-server[local]" && memorylayer-embed serve --port 61051 &
+# Self-hosted on CPU — no GPU, no API key (embed-server is not on PyPI:
+# install it from a checkout of this repo, or run ghcr.io/scitrera/memorylayer-embed-server)
+pip install "./memorylayer-embed-server[local]" && memorylayer-embed serve --port 61051 &
 export MEMORYLAYER_EMBEDDING_PROVIDER=embed_server
 export MEMORYLAYER_EMBED_SERVER_URL=http://localhost:61051
 export MEMORYLAYER_EMBEDDING_DIMENSIONS=384      # must match the embed model
@@ -96,8 +97,8 @@ export MEMORYLAYER_EMBEDDING_PROVIDER=openai    # or google
 export MEMORYLAYER_EMBEDDING_OPENAI_API_KEY=sk-...
 memorylayer serve
 
-# Self-hosted on GPU — adds vLLM, OCR, transcription
-pip install "memorylayer-embed-server[gpu]" && memorylayer-embed serve --port 61051 &
+# Self-hosted on GPU — adds vLLM, OCR, transcription (or the latest-cuda13 image)
+pip install "./memorylayer-embed-server[gpu]" && memorylayer-embed serve --port 61051 &
 ```
 
 The CPU option downloads `all-MiniLM-L6-v2` (~90 MB, 384-d) on first use and runs
@@ -201,7 +202,7 @@ Add `.mcp.json` to your project root:
 }
 ```
 
-The MCP server auto-detects your workspace from the git repo name. Claude gets 25 tools by default (38 in the `full` profile) -- remember, recall, reflect, sessions, context sandbox / RLM, chat threads, and skills/MCP-server registry helpers.
+The MCP server auto-detects your workspace from the git repo name. Claude gets 28 tools by default (40 in the `full` profile) -- remember, recall, reflect, sessions, checkpoints and context packs, context sandbox / RLM, chat threads, and skills/MCP-server registry helpers.
 
 For the full Claude Code experience, also install the **[MemoryLayer plugin](./memorylayer-cc-plugin)** which adds pre-compaction memory capture, session briefings, and automatic memory triggers:
 

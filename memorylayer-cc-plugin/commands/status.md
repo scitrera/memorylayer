@@ -1,11 +1,11 @@
-# /memorylayer-status
+# /memorylayer:status
 
 Check MemoryLayer connection status and workspace information.
 
 ## Usage
 
 ```
-/memorylayer-status
+/memorylayer:status
 ```
 
 ## Behavior
@@ -56,5 +56,5 @@ Server: NOT CONNECTED
 Troubleshooting:
 1. Start the server: memorylayer serve
 2. Check MEMORYLAYER_URL environment variable
-3. Run /memorylayer-setup for guided configuration
+3. Run /memorylayer:setup for guided configuration
 ```
