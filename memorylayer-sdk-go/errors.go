@@ -6,8 +6,8 @@ import (
 )
 
 // APIError is the base error type for all MemoryLayer API failures. Every typed
-// error below embeds an *APIError, so errors.As against *APIError matches any of
-// them and exposes the HTTP StatusCode.
+// error below embeds an *APIError and unwraps to it, so errors.As against
+// *APIError matches any of them and exposes the HTTP StatusCode.
 type APIError struct {
 	Message    string
 	StatusCode int
@@ -55,6 +55,45 @@ type RateLimitError struct{ *APIError }
 
 // ServerError is returned for HTTP 5xx responses.
 type ServerError struct{ *APIError }
+
+// unwrapAPIError returns the embedded *APIError as an error, or nil when it is
+// absent (avoids returning a non-nil interface holding a nil pointer).
+func unwrapAPIError(e *APIError) error {
+	if e == nil {
+		return nil
+	}
+	return e
+}
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *AuthenticationError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *AuthorizationError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *NotFoundError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *ConflictError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *PreconditionFailedError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *PreconditionRequiredError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *EnterpriseRequiredError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *ValidationError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *RateLimitError) Unwrap() error { return unwrapAPIError(e.APIError) }
+
+// Unwrap returns the embedded *APIError so errors.As(err, &apiErr) matches.
+func (e *ServerError) Unwrap() error { return unwrapAPIError(e.APIError) }
 
 func newError(message string, statusCode int) *APIError {
 	return &APIError{Message: message, StatusCode: statusCode}

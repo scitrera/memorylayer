@@ -94,7 +94,7 @@ client.Rpg.GetSubgraph(ctx, memorylayer.RpgSubgraphOptions{Path: "src/main.go"})
 
 ## Errors
 
-Failures return typed errors that embed `*APIError` (carrying `Message` and `StatusCode`). Match them with `errors.As`, or use the helpers:
+Failures return typed errors that embed and unwrap to `*APIError` (carrying `Message` and `StatusCode`). Match a specific type or `*APIError` itself with `errors.As`, or use the helpers:
 
 ```go
 results, err := client.Recall(ctx, "q", memorylayer.RecallOptions{})
@@ -113,7 +113,7 @@ if err != nil {
 }
 ```
 
-Error types: `AuthenticationError` (401), `AuthorizationError` (403), `NotFoundError` (404), `ValidationError` (422), `RateLimitError` (429), `ServerError` (5xx), `EnterpriseRequiredError` (501 on an Enterprise feature). Idempotent requests (GET/PUT/DELETE/PATCH) are retried with backoff on transient failures, honoring `Retry-After`; POST is never auto-retried.
+Error types: `AuthenticationError` (401), `AuthorizationError` (403), `NotFoundError` (404), `ConflictError` (409), `PreconditionFailedError` (412), `ValidationError` (422), `PreconditionRequiredError` (428), `RateLimitError` (429), `ServerError` (5xx), `EnterpriseRequiredError` (501 on an Enterprise feature). Idempotent requests (GET/PUT/DELETE/PATCH) are retried with backoff on transient failures, honoring `Retry-After`; POST is never auto-retried.
 
 ## On-behalf-of (OBO) authority
 

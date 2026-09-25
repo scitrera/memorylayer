@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,26 @@ func TestErrorMapping(t *testing.T) {
 		if err == nil || !tc.check(err) {
 			t.Errorf("status %d feature %q: unexpected error %v", tc.status, tc.feature, err)
 		}
+	}
+}
+
+func TestTypedErrorsUnwrapToAPIError(t *testing.T) {
+	for _, status := range []int{401, 403, 404, 409, 412, 422, 428, 429, 500, 501, 503} {
+		for _, feature := range []string{"", "Docs"} {
+			err := mapError(&Response{StatusCode: status, Body: []byte(`{"detail":"boom"}`)}, feature)
+			wrapped := fmt.Errorf("call failed: %w", err)
+			var apiErr *APIError
+			if !errors.As(wrapped, &apiErr) {
+				t.Errorf("status %d feature %q: errors.As(*APIError) failed for %T", status, feature, err)
+				continue
+			}
+			if apiErr.StatusCode != status {
+				t.Errorf("status %d feature %q: StatusCode = %d", status, feature, apiErr.StatusCode)
+			}
+		}
+	}
+	if (&NotFoundError{}).Unwrap() != nil {
+		t.Error("Unwrap of a typed error without an embedded *APIError should be nil")
 	}
 }
 
