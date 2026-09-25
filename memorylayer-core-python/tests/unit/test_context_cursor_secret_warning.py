@@ -38,6 +38,14 @@ def test_warns_when_secret_explicitly_set_to_default(monkeypatch: pytest.MonkeyP
     assert len(_warnings(caplog)) == 1
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_warns_when_secret_is_blank(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, blank: str) -> None:
+    monkeypatch.setenv(MEMORYLAYER_CONTEXT_CURSOR_SECRET, blank)
+    with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
+        assert warn_if_default_context_cursor_secret(Variables(), logging.getLogger(LOGGER_NAME)) is True
+    assert len(_warnings(caplog)) == 1
+
+
 def test_no_warning_with_private_secret(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     monkeypatch.setenv(MEMORYLAYER_CONTEXT_CURSOR_SECRET, "a-private-value")
     with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):

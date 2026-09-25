@@ -781,17 +781,19 @@ def warn_if_default_context_cursor_secret(v: Variables, logger: logging.Logger) 
     """Log a startup warning when context-pack cursors use the built-in HMAC key.
 
     The default key is public, so anyone can mint a cursor the server accepts.
-    Cursors are still bound to a workspace/session scope and every request is
-    authorized separately, so the impact is limited, but a deployment should set
-    a private value (shared by all replicas). Returns True when it warned.
+    A blank value is just as guessable (cursors are then signed with an empty
+    key), so it warns too. Cursors are still bound to a workspace/session scope
+    and every request is authorized separately, so the impact is limited, but a
+    deployment should set a private value (shared by all replicas). Returns True
+    when it warned.
     """
     if not _context_pack_enabled(v):
         return False
     secret = v.environ(MEMORYLAYER_CONTEXT_CURSOR_SECRET, default=DEFAULT_MEMORYLAYER_CONTEXT_CURSOR_SECRET)
-    if secret != DEFAULT_MEMORYLAYER_CONTEXT_CURSOR_SECRET:
+    if secret is not None and str(secret).strip() and secret != DEFAULT_MEMORYLAYER_CONTEXT_CURSOR_SECRET:
         return False
     logger.warning(
-        "%s is not set; context-pack cursors are signed with the public built-in default. "
+        "%s is unset, blank or the built-in default; context-pack cursors are signed with a guessable key. "
         "Set it to a private value shared by all server replicas.",
         MEMORYLAYER_CONTEXT_CURSOR_SECRET,
     )
