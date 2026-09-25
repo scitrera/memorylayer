@@ -221,8 +221,11 @@ async def test_entities_gated_501_raises_enterprise(client: MemoryLayerClient, b
         return_value=Response(501, json={"detail": "Entity registry is not enabled"})
     )
     async with client:
-        with pytest.raises(EnterpriseRequiredError):
+        with pytest.raises(EnterpriseRequiredError) as excinfo:
             await client.list_entities()
+    assert excinfo.value.status_code == 501
+    assert "github.com/scitrera/memorylayer-enterprise" in excinfo.value.message
+    assert "upgrade" not in excinfo.value.message
 
 
 @pytest.mark.asyncio

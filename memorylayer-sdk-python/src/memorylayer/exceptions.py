@@ -32,10 +32,11 @@ class NotFoundError(MemoryLayerError):
 
 
 class EnterpriseRequiredError(MemoryLayerError):
-    """Raised when an enterprise-only endpoint returns 404.
+    """Raised when an Enterprise-only endpoint returns 501 (Not Implemented).
 
-    This indicates the server is running MemoryLayer OSS which does not
-    include the requested feature (e.g. document ingestion, page search).
+    This indicates the server does not provide the requested feature (for
+    example dataset management), typically because the MemoryLayer Enterprise
+    extensions are not installed.
     """
 
     def __init__(
@@ -43,8 +44,8 @@ class EnterpriseRequiredError(MemoryLayerError):
         feature: str = "This feature",
         message: str | None = None,
     ) -> None:
-        msg = message or (f"{feature} requires MemoryLayer Enterprise. See https://memorylayer.ai for upgrade options.")
-        super().__init__(msg, status_code=404)
+        msg = message or (f"{feature} requires MemoryLayer Enterprise (open source, AGPL-3.0): https://github.com/scitrera/memorylayer-enterprise")
+        super().__init__(msg, status_code=501)
         self.feature = feature
 
 

@@ -385,7 +385,7 @@ class MemoryLayerClient:
 
         Raises:
             AuthenticationError: Authentication failed (401)
-            EnterpriseRequiredError: Enterprise-only endpoint (404 + enterprise_feature)
+            EnterpriseRequiredError: Enterprise-only endpoint (501 + enterprise_feature)
             NotFoundError: Resource not found (404)
             ValidationError: Validation failed (422)
             RateLimitError: Rate limit exceeded (429)

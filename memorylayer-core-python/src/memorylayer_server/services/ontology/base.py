@@ -4,11 +4,11 @@ from .._plugin_factory import make_service_plugin_base
 
 
 class FeatureRequiresUpgradeError(Exception):
-    """Raised when a feature requires enterprise upgrade."""
+    """Raised when a feature requires the MemoryLayer Enterprise extensions."""
 
     def __init__(self, feature: str):
         self.feature = feature
-        super().__init__(f"Feature '{feature}' requires MemoryLayer Enterprise. Visit https://memorylayer.ai/enterprise to upgrade.")
+        super().__init__(f"Feature '{feature}' requires MemoryLayer Enterprise (open source, AGPL-3.0): https://github.com/scitrera/memorylayer-enterprise")
 
 
 # Unified ontology.  The compact knowledge-work application profile below is

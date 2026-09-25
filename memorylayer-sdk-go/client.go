@@ -297,7 +297,7 @@ func mapError(resp *Response, enterpriseFeature string) error {
 		return &PreconditionRequiredError{newError(detail(resp.Body, "Precondition required"), sc)}
 	case http.StatusNotImplemented: // 501
 		if enterpriseFeature != "" {
-			msg := enterpriseFeature + " requires MemoryLayer Enterprise. See https://memorylayer.ai for upgrade options."
+			msg := enterpriseFeature + " requires MemoryLayer Enterprise (open source, AGPL-3.0): https://github.com/scitrera/memorylayer-enterprise"
 			return &EnterpriseRequiredError{APIError: newError(msg, sc), Feature: enterpriseFeature}
 		}
 		return &NotFoundError{newError(detail(resp.Body, "Not implemented"), sc)}
