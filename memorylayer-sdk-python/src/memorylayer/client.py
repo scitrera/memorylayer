@@ -1976,22 +1976,32 @@ class MemoryLayerClient:
         """
         Perform multiple memory operations in a single request.
 
-        Supported operation types:
-        - create: {"type": "create", "data": {"content": "...", ...}}
-        - update: {"type": "update", "data": {"memory_id": "...", "content": "..."}}
-        - delete: {"type": "delete", "data": {"memory_id": "...", "hard": False}}
+        Each operation is a flat object discriminated by ``op``:
+        - create: {"op": "create", "content": "...", "type": ..., "subtype": ...,
+          "importance": 0.5, "tags": [...], "metadata": {...},
+          "observer_id": ..., "subject_id": ...}
+        - update: {"op": "update", "memory_id": "...", "content": ..., "type": ...,
+          "subtype": ..., "importance": ..., "tags": [...], "metadata": {...},
+          "pinned": ...}
+        - delete: {"op": "delete", "memory_id": "...", "hard": False}
+
+        Only ``op`` and ``content`` (create) or ``memory_id`` (update/delete) are
+        required. An operation without an ``op`` field fails request validation.
 
         Args:
             operations: List of operations to perform
 
         Returns:
-            Results for each operation with success/error status
+            Dict with ``total_operations``, ``successful``, ``failed`` and a
+            per-operation ``results`` list (``index``, ``type``, ``status``,
+            ``memory_id``, ``error``).
 
         Example:
             results = await client.batch_memories([
-                {"type": "create", "data": {"content": "Memory 1"}},
-                {"type": "create", "data": {"content": "Memory 2"}},
-                {"type": "delete", "data": {"memory_id": "mem_old"}}
+                {"op": "create", "content": "Memory 1"},
+                {"op": "create", "content": "Memory 2", "importance": 0.8},
+                {"op": "update", "memory_id": "mem_123", "tags": ["reviewed"]},
+                {"op": "delete", "memory_id": "mem_old"},
             ])
         """
         payload = {"operations": operations}
@@ -2820,7 +2830,7 @@ class MemoryLayerClient:
         return DecompositionResult(**data)
 
     # ------------------------------------------------------------------ #
-    # Document operations (Enterprise)
+    # Document operations
     # ------------------------------------------------------------------ #
 
     async def upload_document(
@@ -2838,8 +2848,10 @@ class MemoryLayerClient:
         """
         Upload a document for ingestion.
 
-        Requires MemoryLayer Enterprise.  On OSS servers this raises
-        ``EnterpriseRequiredError``.
+        Supported by the core server. Ingestion runs as a background job; poll
+        ``get_job(job.id)`` or ``get_document(document.id)`` for progress.
+        ``chunking_strategy`` and ``chunk_overlap`` are sent for servers that
+        support them; the core server ignores them.
 
         Args:
             file_data: Raw file bytes.
@@ -2951,7 +2963,10 @@ class MemoryLayerClient:
         """
         Search document pages using ColPali MaxSim visual similarity.
 
-        Requires MemoryLayer Enterprise.
+        Requires an embed-server peer that serves ColPali multi-vector
+        embeddings and a storage backend that supports page search. When the
+        backend does not support it the server returns 501, raised here as
+        ``EnterpriseRequiredError``.
 
         Args:
             query: Natural language search query.
