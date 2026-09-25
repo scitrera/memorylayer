@@ -769,6 +769,35 @@ async def touch_session(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to touch session")
 
 
+def _context_pack_enabled(v: Variables) -> bool:
+    return v.environ(
+        MEMORYLAYER_CONTEXT_PACK_ENABLED,
+        default=DEFAULT_MEMORYLAYER_CONTEXT_PACK_ENABLED,
+        type_fn=lambda value: str(value).lower() in {"1", "true", "yes", "on"},
+    )
+
+
+def warn_if_default_context_cursor_secret(v: Variables, logger: logging.Logger) -> bool:
+    """Log a startup warning when context-pack cursors use the built-in HMAC key.
+
+    The default key is public, so anyone can mint a cursor the server accepts.
+    Cursors are still bound to a workspace/session scope and every request is
+    authorized separately, so the impact is limited, but a deployment should set
+    a private value (shared by all replicas). Returns True when it warned.
+    """
+    if not _context_pack_enabled(v):
+        return False
+    secret = v.environ(MEMORYLAYER_CONTEXT_CURSOR_SECRET, default=DEFAULT_MEMORYLAYER_CONTEXT_CURSOR_SECRET)
+    if secret != DEFAULT_MEMORYLAYER_CONTEXT_CURSOR_SECRET:
+        return False
+    logger.warning(
+        "%s is not set; context-pack cursors are signed with the public built-in default. "
+        "Set it to a private value shared by all server replicas.",
+        MEMORYLAYER_CONTEXT_CURSOR_SECRET,
+    )
+    return True
+
+
 def _context_service(memory_service: MemoryService, v: Variables) -> ContextPackService:
     llm_service = getattr(memory_service, "llm_service", None)
     policy = getattr(llm_service, "policy", EnrichmentPolicy.DETERMINISTIC)
@@ -907,11 +936,7 @@ async def create_context_pack(
     memory_service: MemoryService = Depends(get_memory_service),
     v: Variables = Depends(get_variables_dep),
 ) -> ContextPack:
-    if not v.environ(
-        MEMORYLAYER_CONTEXT_PACK_ENABLED,
-        default=DEFAULT_MEMORYLAYER_CONTEXT_PACK_ENABLED,
-        type_fn=lambda value: str(value).lower() in {"1", "true", "yes", "on"},
-    ):
+    if not _context_pack_enabled(v):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Context packs are disabled")
     _ctx, session = await _authorized_session(
         http_request,
@@ -945,11 +970,7 @@ async def create_context_delta(
     memory_service: MemoryService = Depends(get_memory_service),
     v: Variables = Depends(get_variables_dep),
 ) -> ContextDelta:
-    if not v.environ(
-        MEMORYLAYER_CONTEXT_PACK_ENABLED,
-        default=DEFAULT_MEMORYLAYER_CONTEXT_PACK_ENABLED,
-        type_fn=lambda value: str(value).lower() in {"1", "true", "yes", "on"},
-    ):
+    if not _context_pack_enabled(v):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Context packs are disabled")
     _ctx, session = await _authorized_session(
         http_request,
@@ -986,6 +1007,7 @@ class SessionsAPIPlugin(Plugin):
         return EXT_MULTI_API_ROUTERS
 
     def initialize(self, v: Variables, logger: logging.Logger) -> object | None:
+        warn_if_default_context_cursor_secret(v, logger)
         return router
 
     def is_enabled(self, v: Variables) -> bool:

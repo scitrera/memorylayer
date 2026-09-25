@@ -165,7 +165,7 @@ does not authorize their required activity.
 | `MEMORYLAYER_SESSION_CHECKPOINT_CAPTURE_ENABLED` | `true` | `false` disables the checkpoint endpoint without deleting captures |
 | `MEMORYLAYER_SESSION_CHECKPOINT_MAX_BYTES` | `1048576` | Maximum UTF-8 raw segment size |
 | `MEMORYLAYER_CONTEXT_PACK_ENABLED` | `true` | `false` disables pack/delta reads without deleting events |
-| `MEMORYLAYER_CONTEXT_CURSOR_SECRET` | built-in local default | Set a stable private value shared by all server replicas |
+| `MEMORYLAYER_CONTEXT_CURSOR_SECRET` | built-in local default | Set a stable private value shared by all server replicas (the server logs a startup warning while the public default is in use) |
 | `MEMORYLAYER_CONTEXT_EVENT_RETENTION_DAYS` | `30` | Retained delta window; expired cursors require a full pack |
 | `MEMORYLAYER_RELATIONAL_RECALL_ENABLED` | `true` | `false` leaves stored relation/evidence rows intact but disables the recall arm |
 | `MEMORYLAYER_RETRIEVAL_CONFIDENCE_ENABLED` | `true` | `false` returns compatibility confidence fields |
