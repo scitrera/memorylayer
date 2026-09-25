@@ -1,20 +1,20 @@
-# /memorylayer-recall
+# /memorylayer:recall
 
 Quick command to search memories.
 
 ## Usage
 
 ```
-/memorylayer-recall <query>
+/memorylayer:recall <query>
 ```
 
 ## Examples
 
 ```
-/memorylayer-recall database decisions
-/memorylayer-recall authentication bugs
-/memorylayer-recall user preferences
-/memorylayer-recall what do we know about the API
+/memorylayer:recall database decisions
+/memorylayer:recall authentication bugs
+/memorylayer:recall user preferences
+/memorylayer:recall what do we know about the API
 ```
 
 ## Behavior
@@ -50,6 +50,6 @@ No memories found matching "your query"
 
 Try:
 - Broader search terms
-- Check /memorylayer-status for connection issues
-- Use /memorylayer-remember to store new memories
+- Check /memorylayer:status for connection issues
+- Use /memorylayer:remember to store new memories
 ```
