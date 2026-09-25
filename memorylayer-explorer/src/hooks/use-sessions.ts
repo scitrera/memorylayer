@@ -77,8 +77,9 @@ export function useTouchSession() {
     }) => {
       return client.touchSession(sessionId, ttlSeconds);
     },
-    onSuccess: (data) => {
-      queryClient.setQueryData(['sessions', data.id], data);
+    onSuccess: (_data, { sessionId }) => {
+      // The touch endpoint returns only the new expires_at; refetch the session.
+      queryClient.invalidateQueries({ queryKey: ['sessions', sessionId] });
     },
   });
 }
